@@ -60,6 +60,7 @@ namespace BCLog {
         I2P         = (1 << 22),
         IPC         = (1 << 23),
         UDPNET      = (1 << 24),
+        FEC         = (1 << 25),
         ALL         = ~(uint32_t)0,
     };
 
