@@ -164,6 +164,7 @@ const CLogCategoryDesc LogCategories[] =
     {BCLog::LEVELDB, "leveldb"},
     {BCLog::VALIDATION, "validation"},
     {BCLog::UDPNET, "udpnet"},
+    {BCLog::FEC, "fec"},
     {BCLog::ALL, "1"},
     {BCLog::ALL, "all"},
 };
