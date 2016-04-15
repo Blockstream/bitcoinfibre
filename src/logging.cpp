@@ -183,6 +183,7 @@ const CLogCategoryDesc LogCategories[] =
     {BCLog::TXRECONCILIATION, "txreconciliation"},
     {BCLog::SCAN, "scan"},
     {BCLog::UDPNET, "udpnet"},
+    {BCLog::FEC, "fec"},
     {BCLog::ALL, "1"},
     {BCLog::ALL, "all"},
 };
@@ -289,6 +290,8 @@ std::string LogCategoryToStr(BCLog::LogFlags category)
         return "scan";
     case BCLog::LogFlags::UDPNET:
         return "udpnet";
+    case BCLog::LogFlags::FEC:
+        return "fec";
     case BCLog::LogFlags::ALL:
         return "all";
     }

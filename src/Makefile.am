@@ -154,6 +154,7 @@ BITCOIN_CORE_H = \
   deploymentinfo.h \
   deploymentstatus.h \
   external_signer.h \
+  fec.h \
   flatfile.h \
   headerssync.h \
   httprpc.h \
@@ -389,6 +390,7 @@ libbitcoin_node_a_SOURCES = \
   consensus/tx_verify.cpp \
   dbwrapper.cpp \
   deploymentstatus.cpp \
+  fec.cpp \
   flatfile.cpp \
   headerssync.cpp \
   httprpc.cpp \
