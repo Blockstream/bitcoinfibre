@@ -110,7 +110,7 @@ public:
     // Dummy for deserialization
     CBlockHeaderAndShortTxIDs() {}
 
-    CBlockHeaderAndShortTxIDs(const CBlock& block);
+    CBlockHeaderAndShortTxIDs(const CBlock& block, bool fDeterministic = false);
 
     uint64_t GetShortID(const uint256& txhash) const;
 
@@ -156,7 +156,7 @@ private:
     std::vector<uint32_t> txlens; // size by TransactionCompressor
     friend class PartiallyDownloadedChunkBlock;
 public:
-    CBlockHeaderAndLengthShortTxIDs(const CBlock& block);
+    CBlockHeaderAndLengthShortTxIDs(const CBlock& block, bool fDeterministic = false);
 
     // Dummy for deserialization
     CBlockHeaderAndLengthShortTxIDs() {}
