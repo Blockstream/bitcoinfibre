@@ -63,6 +63,7 @@ endif
 
 # test_bitcoin binary #
 BITCOIN_TESTS =\
+  test/data/block413567.hex.h \
   test/arith_uint256_tests.cpp \
   test/scriptnum10.h \
   test/addrman_tests.cpp \
