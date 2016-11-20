@@ -30,6 +30,7 @@ bench_bench_bitcoin_SOURCES = \
   bench/descriptors.cpp \
   bench/duplicate_inputs.cpp \
   bench/examples.cpp \
+  bench/fec.cpp \
   bench/gcs_filter.cpp \
   bench/hashpadding.cpp \
   bench/load_external.cpp \
