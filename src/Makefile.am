@@ -16,6 +16,7 @@ PTHREAD_FLAGS = $(PTHREAD_CFLAGS) $(PTHREAD_LIBS)
 EXTRA_LIBRARIES =
 
 BITCOIN_INCLUDES=-I$(builddir) -I$(srcdir)/$(MINISKETCH_INCLUDE_DIR_INT) -I$(srcdir)/secp256k1/include -I$(srcdir)/$(UNIVALUE_INCLUDE_DIR_INT) $(BDB_CPPFLAGS) $(BOOST_CPPFLAGS) $(LEVELDB_CPPFLAGS)
+BITCOIN_INCLUDES += -I$(srcdir)/wirehair/src
 
 LIBBITCOIN_NODE=libbitcoin_node.a
 LIBBITCOIN_COMMON=libbitcoin_common.a
@@ -310,6 +311,17 @@ BITCOIN_CORE_H = \
   zmq/zmqrpc.h \
   zmq/zmqutil.h
 
+FEC_H = \
+  wirehair/gf256.h \
+  wirehair/wirehair.h \
+  wirehair/WirehairCodec.h \
+  wirehair/WirehairTools.h
+
+FEC_CPP = \
+  wirehair/gf256.cpp \
+  wirehair/WirehairCodec.cpp \
+  wirehair/WirehairTools.cpp \
+  wirehair/wirehair.cpp
 
 obj/build.h: FORCE
 	@$(MKDIR_P) $(builddir)/obj
@@ -385,6 +397,8 @@ libbitcoin_node_a_SOURCES = \
   validation.cpp \
   validationinterface.cpp \
   versionbits.cpp \
+  $(FEC_CPP) \
+  $(FEC_H) \
   $(BITCOIN_CORE_H)
 
 if ENABLE_WALLET
