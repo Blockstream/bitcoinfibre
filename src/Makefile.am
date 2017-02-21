@@ -453,6 +453,7 @@ libbitcoin_node_a_SOURCES = \
   rpc/server_util.cpp \
   rpc/signmessage.cpp \
   rpc/txoutproof.cpp \
+  rpc/udpnet.cpp \
   script/sigcache.cpp \
   shutdown.cpp \
   signet.cpp \
