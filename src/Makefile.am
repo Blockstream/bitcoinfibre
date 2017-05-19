@@ -224,6 +224,7 @@ BITCOIN_CORE_H = \
   node/validation_cache_args.h \
   noui.h \
   outputtype.h \
+  open_hash_set.h \
   policy/feerate.h \
   policy/fees.h \
   policy/fees_args.h \
