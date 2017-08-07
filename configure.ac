@@ -470,6 +470,9 @@ if test "$CXXFLAGS_overridden" = "no"; then
   if test "$suppress_external_warnings" != "yes" ; then
     AX_CHECK_COMPILE_FLAG([-Wdeprecated-copy], [NOWARN_CXXFLAGS="$NOWARN_CXXFLAGS -Wno-deprecated-copy"], [], [$CXXFLAG_WERROR])
   fi
+
+  # Need this for wh256, but this is really not what we should be doing...
+  AX_CHECK_COMPILE_FLAG([-march=native],[CXXFLAGS="$CXXFLAGS -march=native"],,[[$CXXFLAG_WERROR]])
 fi
 
 dnl Don't allow extended (non-ASCII) symbols in identifiers. This is easier for code review.
