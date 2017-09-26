@@ -46,6 +46,7 @@
 #include <torcontrol.h>
 #include <txdb.h>
 #include <txmempool.h>
+#include <udpapi.h>
 #include <ui_interface.h>
 #include <util/asmap.h>
 #include <util/moneystr.h>
@@ -193,6 +194,7 @@ void Shutdown(NodeContext& node)
         client->flush();
     }
     StopMapPort();
+    StopUDPConnections();
 
     // Because these depend on each-other, we make sure that neither can be
     // using the other before destroying them.
@@ -421,6 +423,8 @@ void SetupServerArgs()
                  ArgsManager::ALLOW_ANY, OptionsCategory::OPTIONS);
 
     gArgs.AddArg("-addnode=<ip>", "Add a node to connect to and attempt to keep the connection open (see the `addnode` RPC command help for more info). This option can be specified multiple times to add multiple nodes.", ArgsManager::ALLOW_ANY | ArgsManager::NETWORK_ONLY, OptionsCategory::CONNECTION);
+    gArgs.AddArg("-addudpnode=<ip/host>:<port>,<local_magic>,<remote_magic>[,<group>]", "Add a persistent UDP node, see RPC addudpnode for detailed description", ArgsManager::ALLOW_ANY | ArgsManager::NETWORK_ONLY, OptionsCategory::CONNECTION);
+    gArgs.AddArg("-addtrustedudpnode=<ip/host>:<port>,<local_magic>,<remote_magic>[,<group>]", "Add a trusted, persistent UDP node, see RPC addudpnode for detailed description", ArgsManager::ALLOW_ANY | ArgsManager::NETWORK_ONLY, OptionsCategory::CONNECTION);
     gArgs.AddArg("-asmap=<file>", strprintf("Specify asn mapping used for bucketing of the peers (default: %s). Relative paths will be prefixed by the net-specific datadir location.", DEFAULT_ASMAP_FILENAME), ArgsManager::ALLOW_ANY, OptionsCategory::CONNECTION);
     gArgs.AddArg("-banscore=<n>", strprintf("Threshold for disconnecting and discouraging misbehaving peers (default: %u)", DEFAULT_BANSCORE_THRESHOLD), ArgsManager::ALLOW_ANY, OptionsCategory::CONNECTION);
     gArgs.AddArg("-bantime=<n>", strprintf("Default duration (in seconds) of manually configured bans (default: %u)", DEFAULT_MISBEHAVING_BANTIME), ArgsManager::ALLOW_ANY, OptionsCategory::CONNECTION);
@@ -450,6 +454,7 @@ void SetupServerArgs()
     gArgs.AddArg("-peertimeout=<n>", strprintf("Specify p2p connection timeout in seconds. This option determines the amount of time a peer may be inactive before the connection to it is dropped. (minimum: 1, default: %d)", DEFAULT_PEER_CONNECT_TIMEOUT), ArgsManager::ALLOW_ANY | ArgsManager::DEBUG_ONLY, OptionsCategory::CONNECTION);
     gArgs.AddArg("-torcontrol=<ip>:<port>", strprintf("Tor control port to use if onion listening enabled (default: %s)", DEFAULT_TOR_CONTROL), ArgsManager::ALLOW_ANY, OptionsCategory::CONNECTION);
     gArgs.AddArg("-torpassword=<pass>", "Tor control port password (default: empty)", ArgsManager::ALLOW_ANY | ArgsManager::SENSITIVE, OptionsCategory::CONNECTION);
+    gArgs.AddArg("-udpport=<port>,<group>[,<bw>]", "Accepts UDP connections on <port> (default: bw=1024 =1024Mbps)", ArgsManager::ALLOW_ANY, OptionsCategory::CONNECTION);
 #ifdef USE_UPNP
 #if USE_UPNP
     gArgs.AddArg("-upnp", "Use UPnP to map the listening port (default: 1 when listening and no -proxy)", ArgsManager::ALLOW_ANY, OptionsCategory::CONNECTION);
@@ -1866,6 +1871,14 @@ bool AppInitMain(NodeContext& node)
     if (!node.connman->Start(*node.scheduler, connOptions)) {
         return false;
     }
+
+    // Start UDP at the very end since it has no concept of whether the res of the code is already up or not
+
+    if (GetUDPInboundPorts().size()) {
+        if (!InitializeUDPConnections())
+            return InitError(_("Failed to check the UDP listen port - is something else already bound to this port?").translated);
+    }
+
 
     // ********************************************************* Step 13: finished
 
