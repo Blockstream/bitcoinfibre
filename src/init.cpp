@@ -55,6 +55,7 @@
 #include <txdb.h>
 #include <txmempool.h>
 #include <txorphanage.h>
+#include <udpapi.h>
 #include <util/asmap.h>
 #include <util/check.h>
 #include <util/moneystr.h>
@@ -196,6 +197,7 @@ void Shutdown(NodeContext& node)
         client->flush();
     }
     StopMapPort();
+    StopUDPConnections();
 
     // Because these depend on each-other, we make sure that neither can be
     // using the other before destroying them.
@@ -418,6 +420,8 @@ void SetupServerArgs(ArgsManager& argsman)
                  ArgsManager::ALLOW_ANY, OptionsCategory::OPTIONS);
 
     argsman.AddArg("-addnode=<ip>", strprintf("Add a node to connect to and attempt to keep the connection open (see the addnode RPC help for more info). This option can be specified multiple times to add multiple nodes; connections are limited to %u at a time and are counted separately from the -maxconnections limit.", MAX_ADDNODE_CONNECTIONS), ArgsManager::ALLOW_ANY | ArgsManager::NETWORK_ONLY, OptionsCategory::CONNECTION);
+    argsman.AddArg("-addudpnode=<ip/host>:<port>,<local_magic>,<remote_magic>[,<group>]", "Add a persistent UDP node, see RPC addudpnode for detailed description", ArgsManager::ALLOW_ANY | ArgsManager::NETWORK_ONLY, OptionsCategory::CONNECTION);
+    argsman.AddArg("-addtrustedudpnode=<ip/host>:<port>,<local_magic>,<remote_magic>[,<group>]", "Add a trusted, persistent UDP node, see RPC addudpnode for detailed description", ArgsManager::ALLOW_ANY | ArgsManager::NETWORK_ONLY, OptionsCategory::CONNECTION);
     argsman.AddArg("-asmap=<file>", strprintf("Specify asn mapping used for bucketing of the peers (default: %s). Relative paths will be prefixed by the net-specific datadir location.", DEFAULT_ASMAP_FILENAME), ArgsManager::ALLOW_ANY, OptionsCategory::CONNECTION);
     argsman.AddArg("-bantime=<n>", strprintf("Default duration (in seconds) of manually configured bans (default: %u)", DEFAULT_MISBEHAVING_BANTIME), ArgsManager::ALLOW_ANY, OptionsCategory::CONNECTION);
     argsman.AddArg("-bind=<addr>[:<port>][=onion]", strprintf("Bind to given address and always listen on it (default: 0.0.0.0). Use [host]:port notation for IPv6. Append =onion to tag any incoming connections to that address and port as incoming Tor connections (default: 127.0.0.1:%u=onion, testnet: 127.0.0.1:%u=onion, signet: 127.0.0.1:%u=onion, regtest: 127.0.0.1:%u=onion)", defaultBaseParams->OnionServiceTargetPort(), testnetBaseParams->OnionServiceTargetPort(), signetBaseParams->OnionServiceTargetPort(), regtestBaseParams->OnionServiceTargetPort()), ArgsManager::ALLOW_ANY | ArgsManager::NETWORK_ONLY, OptionsCategory::CONNECTION);
@@ -451,6 +455,7 @@ void SetupServerArgs(ArgsManager& argsman)
     argsman.AddArg("-peertimeout=<n>", strprintf("Specify a p2p connection timeout delay in seconds. After connecting to a peer, wait this amount of time before considering disconnection based on inactivity (minimum: 1, default: %d)", DEFAULT_PEER_CONNECT_TIMEOUT), ArgsManager::ALLOW_ANY | ArgsManager::DEBUG_ONLY, OptionsCategory::CONNECTION);
     argsman.AddArg("-torcontrol=<ip>:<port>", strprintf("Tor control port to use if onion listening enabled (default: %s)", DEFAULT_TOR_CONTROL), ArgsManager::ALLOW_ANY, OptionsCategory::CONNECTION);
     argsman.AddArg("-torpassword=<pass>", "Tor control port password (default: empty)", ArgsManager::ALLOW_ANY | ArgsManager::SENSITIVE, OptionsCategory::CONNECTION);
+    argsman.AddArg("-udpport=<port>,<group>[,<bw>]", "Accepts UDP connections on <port> (default: bw=1024 =1024Mbps)", ArgsManager::ALLOW_ANY, OptionsCategory::CONNECTION);
 #ifdef USE_UPNP
 #if USE_UPNP
     argsman.AddArg("-upnp", "Use UPnP to map the listening port (default: 1 when listening and no -proxy)", ArgsManager::ALLOW_ANY, OptionsCategory::CONNECTION);
@@ -1780,6 +1785,14 @@ bool AppInitMain(NodeContext& node, interfaces::BlockAndHeaderTipInfo* tip_info)
     if (!node.connman->Start(*node.scheduler, connOptions)) {
         return false;
     }
+
+    // Start UDP at the very end since it has no concept of whether the res of the code is already up or not
+
+    if (GetUDPInboundPorts().size()) {
+        if (!InitializeUDPConnections())
+            return InitError(_("Failed to check the UDP listen port - is something else already bound to this port?").translated);
+    }
+
 
     // ********************************************************* Step 13: finished
 
