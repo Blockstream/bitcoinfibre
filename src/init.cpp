@@ -1874,7 +1874,7 @@ bool AppInitMain(NodeContext& node)
 
     // Start UDP at the very end since it has no concept of whether the res of the code is already up or not
 
-    if (GetUDPInboundPorts().size()) {
+    if (GetUDPInboundPorts().size() || gArgs.GetArg("-fecwritedevice", "") != "" || gArgs.GetArg("-fecreaddevice", "") != "") {
         if (!InitializeUDPConnections())
             return InitError(_("Failed to check the UDP listen port - is something else already bound to this port?").translated);
     }
