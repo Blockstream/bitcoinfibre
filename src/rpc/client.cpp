@@ -222,6 +222,9 @@ static const CRPCConvertParam vRPCConvertParams[] =
     { "addpeeraddress", 1, "port"},
     { "addpeeraddress", 2, "tried"},
     { "stop", 0, "wait" },
+    { "getblocksize", 0, "height"},
+    { "getblockanalysis", 0, "height"},
+    { "testcompression", 0, "height"},
 };
 // clang-format on
 

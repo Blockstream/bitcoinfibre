@@ -538,7 +538,7 @@ public:
     VectorInputStream(const std::vector<unsigned char>* vIn, int nTypeIn, int nVersionIn) : v(vIn), nType(nTypeIn), nVersion(nVersionIn), nReadPos(0) {}
 
     template <typename T>
-    VectorInputStream& operator>>(T& obj)
+    VectorInputStream& operator>>(T&& obj)
     {
         ::Unserialize(*this, obj);
         return *this;

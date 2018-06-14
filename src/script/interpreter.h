@@ -239,6 +239,7 @@ extern const HashWriter HASHER_TAPBRANCH;  //!< Hasher with tag "TapBranch" pre-
 
 template <class T>
 uint256 SignatureHash(const CScript& scriptCode, const T& txTo, unsigned int nIn, int nHashType, const CAmount& amount, SigVersion sigversion, const PrecomputedTransactionData* cache = nullptr);
+bool IsValidSignatureEncoding(const std::vector<unsigned char> &sig);
 
 class BaseSignatureChecker
 {
