@@ -25,6 +25,10 @@ public:
     constexpr Span(C* data, std::ptrdiff_t size) noexcept : m_data(data), m_size(size) {}
     constexpr Span(C* data, C* end) noexcept : m_data(data), m_size(end - data) {}
 
+    // if C is const, also allow constructing it from a non-const span
+    template <typename T = typename std::remove_const<C>::type, typename W = C>
+    constexpr Span(Span<T> const& s, typename std::enable_if<std::is_const<W>::value>::type* = 0) noexcept : m_data(s.data()), m_size(s.size()) {}
+
     constexpr C* data() const noexcept { return m_data; }
     constexpr C* begin() const noexcept { return m_data; }
     constexpr C* end() const noexcept { return m_data + m_size; }
@@ -59,6 +63,8 @@ constexpr Span<A> MakeSpan(A (&a)[N]) { return Span<A>(a, N); }
 
 template<typename V>
 constexpr Span<typename std::remove_pointer<decltype(std::declval<V>().data())>::type> MakeSpan(V& v) { return Span<typename std::remove_pointer<decltype(std::declval<V>().data())>::type>(v.data(), v.size()); }
+template<typename V>
+constexpr Span<typename std::remove_pointer<decltype(std::declval<V>().data())>::type> MakeSpan(V&& v) { return Span<typename std::remove_pointer<decltype(std::declval<V>().data())>::type>(v.data(), v.size()); }
 
 /** Pop the last element off a span, and return a reference to that element. */
 template <typename T>
