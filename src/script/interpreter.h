@@ -220,6 +220,7 @@ static constexpr size_t TAPROOT_CONTROL_MAX_SIZE = TAPROOT_CONTROL_BASE_SIZE + T
 
 template <class T>
 uint256 SignatureHash(const CScript& scriptCode, const T& txTo, unsigned int nIn, int nHashType, const CAmount& amount, SigVersion sigversion, const PrecomputedTransactionData* cache = nullptr);
+bool IsValidSignatureEncoding(const std::vector<unsigned char> &sig);
 
 class BaseSignatureChecker
 {
