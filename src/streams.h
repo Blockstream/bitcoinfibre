@@ -43,7 +43,7 @@ public:
     OverrideStream<Stream>& operator>>(T&& obj)
     {
         // Unserialize from this stream
-        ::Unserialize(*this, obj);
+        ::Unserialize(*this, std::forward<T>(obj));
         return (*this);
     }
 
@@ -458,7 +458,7 @@ public:
     CDataStream& operator>>(T&& obj)
     {
         // Unserialize from this stream
-        ::Unserialize(*this, obj);
+        ::Unserialize(*this, std::forward<T>(obj));
         return (*this);
     }
 
@@ -649,8 +649,8 @@ public:
         v(vIn), nType(nTypeIn), nVersion(nVersionIn), nReadPos(0) {}
 
     template <typename T>
-    VectorInputStream& operator>>(T& obj) {
-        ::Unserialize(*this, obj);
+    VectorInputStream& operator>>(T&& obj) {
+        ::Unserialize(*this, std::forward<T>(obj));
         return *this;
     }
 
@@ -784,7 +784,7 @@ public:
         // Unserialize from this stream
         if (!file)
             throw std::ios_base::failure("CAutoFile::operator>>: file handle is nullptr");
-        ::Unserialize(*this, obj);
+        ::Unserialize(*this, std::forward<T>(obj));
         return (*this);
     }
 };
@@ -914,7 +914,7 @@ public:
     template<typename T>
     CBufferedFile& operator>>(T&& obj) {
         // Unserialize from this stream
-        ::Unserialize(*this, obj);
+        ::Unserialize(*this, std::forward<T>(obj));
         return (*this);
     }
 
