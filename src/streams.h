@@ -522,7 +522,7 @@ public:
         v(vIn), nType(nTypeIn), nVersion(nVersionIn), nReadPos(0) {}
 
     template <typename T>
-    VectorInputStream& operator>>(T& obj) {
+    VectorInputStream& operator>>(T&& obj) {
         ::Unserialize(*this, obj);
         return *this;
     }
