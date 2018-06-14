@@ -24,11 +24,18 @@ public:
     constexpr Span(C* data, std::ptrdiff_t size) noexcept : m_data(data), m_size(size) {}
     constexpr Span(C* data, C* end) noexcept : m_data(data), m_size(end - data) {}
 
+    // if C is const, also allow constructing it from a non-const span
+    template <typename T = typename std::remove_const<C>::type, typename W = C>
+    constexpr Span(Span<T> const& s, typename std::enable_if<std::is_const<W>::value>::type* = 0) noexcept : m_data(s.data()), m_size(s.size()) {}
+
     constexpr C* data() const noexcept { return m_data; }
     constexpr C* begin() const noexcept { return m_data; }
     constexpr C* end() const noexcept { return m_data + m_size; }
     constexpr std::ptrdiff_t size() const noexcept { return m_size; }
     constexpr C& operator[](std::ptrdiff_t pos) const noexcept { return m_data[pos]; }
+
+    constexpr C& front() const noexcept { return *m_data; }
+    constexpr C& back() const noexcept { return m_data[m_size - 1]; }
 
     constexpr Span<C> subspan(std::ptrdiff_t offset) const noexcept { return Span<C>(m_data + offset, m_size - offset); }
     constexpr Span<C> subspan(std::ptrdiff_t offset, std::ptrdiff_t count) const noexcept { return Span<C>(m_data + offset, count); }
@@ -56,5 +63,7 @@ constexpr Span<A> MakeSpan(A (&a)[N]) { return Span<A>(a, N); }
 
 template<typename V>
 constexpr Span<typename std::remove_pointer<decltype(std::declval<V>().data())>::type> MakeSpan(V& v) { return Span<typename std::remove_pointer<decltype(std::declval<V>().data())>::type>(v.data(), v.size()); }
+template<typename V>
+constexpr Span<typename std::remove_pointer<decltype(std::declval<V>().data())>::type> MakeSpan(V&& v) { return Span<typename std::remove_pointer<decltype(std::declval<V>().data())>::type>(v.data(), v.size()); }
 
 #endif

@@ -172,6 +172,9 @@ static const CRPCConvertParam vRPCConvertParams[] =
     { "createwallet", 4, "avoid_reuse"},
     { "getnodeaddresses", 0, "count"},
     { "stop", 0, "wait" },
+    { "getblocksize", 0, "height"},
+    { "getblockanalysis", 0, "height"},
+    { "testcompression", 0, "height"},
 };
 // clang-format on
 

@@ -40,6 +40,9 @@
 
 #include <univalue.h>
 
+#include <boost/algorithm/string.hpp>
+#include <compressor.h>
+
 #include <boost/thread/thread.hpp> // boost::thread::interrupt
 
 #include <condition_variable>
@@ -908,6 +911,285 @@ static UniValue getblock(const JSONRPCRequest& request)
     }
 
     return blockToJSON(block, tip, pblockindex, verbosity >= 2);
+}
+
+float blockMetrics(const CBlock& block)
+{
+    AssertLockHeld(cs_main);
+    std::vector<uint64_t> statistics (2, 0);
+    CDataStream txstream (SER_NETWORK, PROTOCOL_VERSION);
+    for (const auto& tx : block.vtx)
+    {
+        statistics[0] += (uint64_t)tx->GetTotalSize();
+        txstream << CTxCompressor(*tx);
+        statistics[1] += txstream.size();
+        CMutableTransaction baretx;
+        txstream >> CTxCompressor(baretx);
+        txstream.clear();
+    }
+    float txsavings = (float)1 - ((float)statistics[1] / (float)statistics[0]);
+    return txsavings;
+}
+
+UniValue getblocksize(const JSONRPCRequest& request)
+{
+    if (request.fHelp || request.params.size() > 1)
+        throw std::runtime_error(
+            "getblocksize \"height\"\n"
+            "\nArguments:\n"
+            "1. \"height\"     (numeric, optional) The height of the requested block.\n"
+            "Result:"
+            "Returns an object with information about block and transaction sizes."
+            "Accepts a height as an argument, and chooses a uniform sample of historical blocks otherwise."
+        );
+
+    LOCK(cs_main);
+
+    int tipheight = ::ChainActive().Height();
+    CBlock block;
+    int initialheight = 0;
+    int interval = 1000;
+    UniValue result(UniValue::VOBJ);
+
+    if (!request.params[0].isNull()) {
+        int userint = request.params[0].get_int();
+        if (userint % 10 == 0 && userint < interval) {
+            interval = userint;
+        } else {
+            initialheight = userint;
+        }
+    }
+
+    if (initialheight == 0) {
+        int blocktotal = tipheight / interval;
+
+        UniValue blocksizes(UniValue::VARR);
+
+        for (int index = initialheight; index <= blocktotal; ++index)
+        {
+            int height = index * interval;
+
+            if (!ReadBlockFromDisk(block, ::ChainActive()[height], Params().GetConsensus()))
+                throw JSONRPCError(RPC_MISC_ERROR, "Block not found on disk.");
+
+            blocksizes.push_back(UniValue(blockMetrics(block)));
+        }
+
+        result.pushKV("blocks", blocksizes);
+
+        return result;
+    } else {
+        if (initialheight > tipheight)
+            throw JSONRPCError(RPC_MISC_ERROR, "Block not yet seen by node.");
+
+        if (!ReadBlockFromDisk(block, ::ChainActive()[initialheight], Params().GetConsensus()))
+            throw JSONRPCError(RPC_MISC_ERROR, "Block not found on disk.");
+
+        result.pushKV("savings", blockMetrics(block));
+
+        return result;
+    }
+}
+
+void blockAnalyzer(const CBlock& block, std::vector<std::array<uint64_t, 3>>& statistics, stattype multisigstats)
+{
+    AssertLockHeld(cs_main);
+    uint8_t const nomulticutoff = 9;
+    uint8_t const othercutoff = 4;
+    uint16_t kncval = 0;
+    std::array<uint64_t, 5> statistic = {0, 0, 0, 0, 0};
+    for (size_t i = 1; i < block.vtx.size(); ++i)
+    {
+        CTxCompressor ctx (*block.vtx[i]);
+        for (size_t j = 0; j < block.vtx[i]->vin.size(); ++j)
+        {
+            auto const scriptSigType = AnalyzeScriptSig(j, block.vtx[i]->vin[j], MakeSpan(statistic));
+            auto const idx = static_cast<uint8_t>(scriptSigType);
+            statistics[idx][0] += statistic[0];
+            statistics[idx][1] += statistic[1];
+            if (idx >= othercutoff) {
+                if (idx < nomulticutoff) {
+                    statistics[idx][2] += statistic[2];
+                    statistics[idx][3] += statistic[3];
+                } else {
+                    kncval += ((statistic[2] + (21 * statistic[3])));
+                    multisigstats[kncval]++;
+                    kncval = 0;
+                }
+            }
+            statistic.fill(0);
+        }
+    }
+}
+
+UniValue getblockanalysis(const JSONRPCRequest& request)
+{
+    if (request.fHelp || request.params.size() > 1)
+        throw std::runtime_error(
+            "getblockanalysis \"height\"\n"
+            "\nArguments:\n"
+            "1. \"height\"     (numeric, optional) The height to start scanning from.\n"
+            "Result:"
+            "Returns an object with information about transaction input scripts."
+            "Accepts a height as an argument, and chooses all blocks otherwise."
+        );
+
+    LOCK(cs_main);
+
+    int tipheight = ::ChainActive().Height();
+    CBlock block;
+    UniValue result(UniValue::VOBJ);
+    UniValue blockanalysis(UniValue::VARR);
+    uint8_t const templatecount = 13;
+    uint8_t const nomulticutoff = 9;
+    uint8_t const othercutoff = 4;
+    std::vector<std::array<uint64_t, 3>> finalstatistics(templatecount);
+    std::array<uint64_t, 500> finalmultisigstats;
+    finalmultisigstats.fill(0);
+    int baseheight = 0;
+    if (!request.params[0].isNull())
+        baseheight = request.params[0].get_int();
+
+    if (baseheight > tipheight)
+        throw JSONRPCError(RPC_MISC_ERROR, "Block not yet seen by node.");
+
+    for (int index = baseheight; index <= tipheight; ++index) {
+        if (!ReadBlockFromDisk(block, ::ChainActive()[index], Params().GetConsensus()))
+            throw JSONRPCError(RPC_MISC_ERROR, "Block not found on disk.");
+
+        blockAnalyzer(block, finalstatistics, MakeSpan(finalmultisigstats));
+    }
+
+    uint64_t finaltotal = 0;
+    uint64_t multisigtotal = 0;
+
+    uint16_t multisigcode = 0;
+    for (uint64_t const val : finalmultisigstats) {
+        ++multisigcode;
+        if (val == 0) continue;
+        multisigtotal += val;
+        uint8_t const k = (multisigcode - 1) % 21;
+        uint8_t const n = (multisigcode - 1) / 21;
+        blockanalysis.push_back(UniValue("k"));
+        blockanalysis.push_back(UniValue(k));
+        blockanalysis.push_back(UniValue("n"));
+        blockanalysis.push_back(UniValue(n));
+        blockanalysis.push_back(UniValue("frequency"));
+        blockanalysis.push_back(UniValue(val));
+    }
+
+    blockanalysis.push_back(UniValue("multisigtotal"));
+    blockanalysis.push_back(UniValue(multisigtotal));
+
+    int idx = 0;
+    for (auto const& stats : finalstatistics) {
+        blockanalysis.push_back(UniValue("type"));
+        blockanalysis.push_back(UniValue(scriptSigTemplateNames[idx]));
+        blockanalysis.push_back(UniValue("total"));
+        blockanalysis.push_back(UniValue(stats[1]));
+        finaltotal += stats[1];
+        if (idx >= othercutoff) {
+            blockanalysis.push_back(UniValue("sighashnotall"));
+            blockanalysis.push_back(UniValue(stats[0]));
+            if (idx != 0 && idx < nomulticutoff) {
+                blockanalysis.push_back(UniValue("notcompressed"));
+                blockanalysis.push_back(UniValue(stats[2]));
+            }
+        } else {
+            blockanalysis.push_back(UniValue("average stack size"));
+            if (stats[0] != 0 && stats[1] != 0) {
+                blockanalysis.push_back(UniValue(double(stats[0]) / double(stats[1])));
+            } else {
+                blockanalysis.push_back(UniValue(0));
+            }
+        }
+        ++idx;
+    }
+
+    result.pushKV("starting block", baseheight);
+    result.pushKV("total", finaltotal);
+    result.pushKV("blocks", blockanalysis);
+
+    return result;
+}
+
+UniValue testcompression(const JSONRPCRequest& request)
+{
+    if (request.fHelp || request.params.size() > 1)
+        throw std::runtime_error(
+            "testcompression \"height\"\n"
+            "\nArguments:\n"
+            "1. \"height\"     (numeric, optional) The height to start scanning from.\n"
+            "Result:"
+            "Test round-trip compression of all transactions in all blocks starting from 'height' to the head.\n"
+            "Accepts a height as an argument, and chooses all blocks otherwise."
+        );
+
+    LOCK(cs_main);
+
+    int const tipheight = ::ChainActive().Height();
+    int baseheight = 0;
+    if (!request.params[0].isNull())
+        baseheight = request.params[0].get_int();
+
+    if (baseheight > tipheight)
+        throw JSONRPCError(RPC_MISC_ERROR, "Block not yet seen by node.");
+
+    int txcount = 0;
+    for (int index = baseheight; index <= tipheight; ++index) {
+        CBlock block;
+        if (!ReadBlockFromDisk(block, ::ChainActive()[index], Params().GetConsensus()))
+            throw JSONRPCError(RPC_MISC_ERROR, "Block not found on disk.");
+
+        fprintf(stderr, "block: %d\n", index);
+        CDataStream stream(SER_NETWORK, PROTOCOL_VERSION);
+        for (size_t i = 1; i < block.vtx.size(); ++i) try
+        {
+            stream.clear();
+            auto const& ctx = *block.vtx[i];
+            stream << CTxCompressor(ctx);
+            CMutableTransaction identity;
+            stream >> CTxCompressor(identity);
+
+            if (ctx.nVersion != identity.nVersion
+                || ctx.vin == identity.vin
+                || ctx.vout == identity.vout
+                || ctx.nLockTime == identity.nLockTime)
+            {
+                fprintf(stderr, "failure to compress/decompress transaction %d in block %d\n"
+                    , int(i), index);
+            }
+        }
+        catch (std::exception const& e)
+        {
+            fprintf(stderr, "TxCompression failure: %s\n", e.what());
+            auto const& ctx = *block.vtx[i];
+            CDataStream str(SER_NETWORK, PROTOCOL_VERSION);
+            str << ctx;
+            std::array<char, 50> name;
+            snprintf(name.data(), name.size(), "./test-tx/tx-%05d", txcount);
+            {
+                CSerializeData data;
+                str.GetAndClear(data);
+                std::ofstream f(name.data());
+                f.write(data.data(), data.size());
+            }
+
+            str.clear();
+            str << CTxCompressor(ctx);
+            snprintf(name.data(), name.size(), "./corpus-tx/tx-%05d", txcount);
+            {
+                CSerializeData data;
+                str.GetAndClear(data);
+                std::ofstream f(name.data());
+                f.write(data.data(), data.size());
+            }
+
+            ++txcount;
+        }
+    }
+
+    return UniValue(UniValue::VARR);
 }
 
 static UniValue pruneblockchain(const JSONRPCRequest& request)
@@ -2288,6 +2570,9 @@ static const CRPCCommand commands[] =
     { "hidden",             "waitforblock",           &waitforblock,           {"blockhash","timeout"} },
     { "hidden",             "waitforblockheight",     &waitforblockheight,     {"height","timeout"} },
     { "hidden",             "syncwithvalidationinterfacequeue", &syncwithvalidationinterfacequeue, {} },
+    { "hidden",             "getblocksize",           &getblocksize,           {"height"} },
+    { "hidden",             "getblockanalysis",       &getblockanalysis,       {"height"} },
+    { "hidden",             "testcompression",        &testcompression,        {"height"} },
 };
 // clang-format on
 
