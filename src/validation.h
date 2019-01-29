@@ -134,6 +134,10 @@ extern CBlockIndex *pindexBestHeader;
 /** Documentation for argument 'checklevel'. */
 extern const std::vector<std::string> CHECKLEVEL_DOC;
 
+bool StoreOoOBlock(const CChainParams&, const std::shared_ptr<const CBlock>) EXCLUSIVE_LOCKS_REQUIRED(cs_main);
+void ProcessSuccessorOoOBlocks(const CChainParams&, const uint256& prev_block_hash);
+void CheckForOoOBlocks(const CChainParams&);
+
 /** Unload database information */
 void UnloadBlockIndex(CTxMemPool* mempool, ChainstateManager& chainman);
 /** Run instances of script checking worker threads */
@@ -1010,9 +1014,11 @@ public:
      * @param[in]   block The block we want to process.
      * @param[in]   force_processing Process this block even if unrequested; used for non-network block sources.
      * @param[out]  new_block A boolean which is set to indicate if the block was first received via this call
+     * @param[in]   dbp Position in disk if the file already resides in disk
+     * @param[in]   do_ooob Whether to try processing succeeding out-of-order blocks
      * @returns     If the block was processed, independently of block validity
      */
-    bool ProcessNewBlock(const CChainParams& chainparams, const std::shared_ptr<const CBlock>& block, bool force_processing, bool* new_block) LOCKS_EXCLUDED(cs_main);
+    bool ProcessNewBlock(const CChainParams& chainparams, const std::shared_ptr<const CBlock>& block, bool force_processing, bool* new_block, const FlatFilePos* dbp=nullptr, bool do_ooob=true) LOCKS_EXCLUDED(cs_main);
 
     /**
      * Process incoming block headers.

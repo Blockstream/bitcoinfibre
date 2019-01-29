@@ -3480,7 +3480,7 @@ bool CChainState::AcceptBlock(const std::shared_ptr<const CBlock>& pblock, Block
     return true;
 }
 
-bool ChainstateManager::ProcessNewBlock(const CChainParams& chainparams, const std::shared_ptr<const CBlock>& block, bool force_processing, bool* new_block)
+bool ChainstateManager::ProcessNewBlock(const CChainParams& chainparams, const std::shared_ptr<const CBlock>& block, bool force_processing, bool* new_block, const FlatFilePos* dbp, const bool do_ooob)
 {
     AssertLockNotHeld(cs_main);
 
@@ -3501,7 +3501,7 @@ bool ChainstateManager::ProcessNewBlock(const CChainParams& chainparams, const s
         bool ret = CheckBlock(*block, state, chainparams.GetConsensus());
         if (ret) {
             // Store to disk
-            ret = ActiveChainstate().AcceptBlock(block, state, &pindex, force_processing, nullptr, new_block);
+            ret = ActiveChainstate().AcceptBlock(block, state, &pindex, force_processing, dbp, new_block);
         }
         if (!ret) {
             GetMainSignals().BlockChecked(*block, state);
@@ -3514,6 +3514,11 @@ bool ChainstateManager::ProcessNewBlock(const CChainParams& chainparams, const s
     BlockValidationState state; // Only used to report errors, not invalidity - ignore it
     if (!ActiveChainstate().ActivateBestChain(state, block)) {
         return error("%s: ActivateBestChain failed (%s)", __func__, state.ToString());
+    }
+
+    if (do_ooob) {
+        // Check if we have any other blocks to process waiting on this one
+        ProcessSuccessorOoOBlocks(chainparams, pblock->GetHash());
     }
 
     return true;

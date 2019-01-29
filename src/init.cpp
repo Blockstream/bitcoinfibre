@@ -1517,6 +1517,7 @@ bool AppInitMain(NodeContext& node, interfaces::BlockAndHeaderTipInfo* tip_info)
             if (!failed_verification) {
                 fLoaded = true;
                 LogPrintf(" block index %15dms\n", GetTimeMillis() - load_block_index_start_time);
+                CheckForOoOBlocks(chainparams);
             }
         } while(false);
 

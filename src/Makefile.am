@@ -372,6 +372,7 @@ libbitcoin_server_a_SOURCES = \
   node/transaction.cpp \
   node/ui_interface.cpp \
   noui.cpp \
+  outoforder.cpp \
   policy/fees.cpp \
   policy/packages.cpp \
   policy/rbf.cpp \
