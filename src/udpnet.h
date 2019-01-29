@@ -159,6 +159,9 @@ public:
     bool AreAllAvailable() const { return allSent; }
 };
 
+static const size_t LOCAL_RECEIVE_GROUP = (size_t)-1;
+static size_t LOCAL_SEND_GROUP = (size_t)-1;
+
 struct UDPConnectionInfo {
     uint64_t local_magic;  // Already LE
     uint64_t remote_magic; // Already LE

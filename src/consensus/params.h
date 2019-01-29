@@ -51,6 +51,8 @@ struct Params {
     uint256 BIP16Exception;
     /** Block height and hash at which BIP34 becomes active */
     int BIP34Height;
+    /** Block bits below which BIP34 can be assumed active */
+    uint32_t BIP34AssumedBits{0};
     uint256 BIP34Hash;
     /** Block height at which BIP65 becomes active */
     int BIP65Height;

@@ -1619,6 +1619,8 @@ bool AppInitMain(InitInterfaces& interfaces)
             }
 
             fLoaded = true;
+
+            CheckForOoOBlocks(chainparams);
             LogPrintf(" block index %15dms\n", GetTimeMillis() - load_block_index_start_time);
         } while(false);
 
