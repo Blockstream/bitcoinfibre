@@ -434,6 +434,7 @@ libbitcoin_node_a_SOURCES = \
   node/utxo_snapshot.cpp \
   node/validation_cache_args.cpp \
   noui.cpp \
+  outoforder.cpp \
   policy/fees.cpp \
   policy/fees_args.cpp \
   policy/packages.cpp \

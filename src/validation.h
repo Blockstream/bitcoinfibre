@@ -96,6 +96,10 @@ extern uint256 g_best_block;
 /** Documentation for argument 'checklevel'. */
 extern const std::vector<std::string> CHECKLEVEL_DOC;
 
+bool StoreOoOBlock(const CChainParams&, const std::shared_ptr<const CBlock>) EXCLUSIVE_LOCKS_REQUIRED(cs_main);
+void ProcessSuccessorOoOBlocks(const CChainParams&, const uint256& prev_block_hash);
+void CheckForOoOBlocks(const CChainParams&);
+
 /** Run instances of script checking worker threads */
 void StartScriptCheckWorkerThreads(int threads_num);
 /** Stop all of the script checking worker threads */
@@ -1095,9 +1099,11 @@ public:
      *                               block header is already present in block
      *                               index then this parameter has no effect)
      * @param[out]  new_block A boolean which is set to indicate if the block was first received via this call
+     * @param[in]   dbp Position in disk if the file already resides in disk
+     * @param[in]   do_ooob Whether to try processing succeeding out-of-order blocks
      * @returns     If the block was processed, independently of block validity
      */
-    bool ProcessNewBlock(const std::shared_ptr<const CBlock>& block, bool force_processing, bool min_pow_checked, bool* new_block) LOCKS_EXCLUDED(cs_main);
+    bool ProcessNewBlock(const std::shared_ptr<const CBlock>& block, bool force_processing, bool min_pow_checked, bool* new_block, const FlatFilePos* dbp=nullptr, bool do_ooob=true) LOCKS_EXCLUDED(cs_main);
 
     /**
      * Process incoming block headers.
