@@ -1766,6 +1766,7 @@ bool AppInitMain(const util::Ref& context, NodeContext& node, interfaces::BlockA
             if (!failed_verification) {
                 fLoaded = true;
                 LogPrintf(" block index %15dms\n", GetTimeMillis() - load_block_index_start_time);
+                CheckForOoOBlocks(chainparams);
             }
         } while(false);
 
