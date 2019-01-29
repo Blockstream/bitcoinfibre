@@ -192,7 +192,12 @@ static const unsigned int DEFAULT_CHECKLEVEL = 3;
 // Setting the target to >= 550 MiB will make it likely we can respect the target.
 static const uint64_t MIN_DISK_SPACE_FOR_BLOCK_FILES = 550 * 1024 * 1024;
 
-/**
+FlatFilePos SaveBlockToDisk(const CBlock&, int nHeight, const CChainParams&, const FlatFilePos*);
+bool StoreOoOBlock(const CChainParams&, const std::shared_ptr<const CBlock>) EXCLUSIVE_LOCKS_REQUIRED(cs_main);
+void ProcessSuccessorOoOBlocks(const CChainParams&, const uint256& prev_block_hash);
+void CheckForOoOBlocks(const CChainParams&);
+
+/** 
  * Process an incoming block. This only returns after the best known valid
  * block is made active. Note that it does not, however, guarantee that the
  * specific block passed to it has been checked for validity!
@@ -212,7 +217,7 @@ static const uint64_t MIN_DISK_SPACE_FOR_BLOCK_FILES = 550 * 1024 * 1024;
  * @param[out]  fNewBlock A boolean which is set to indicate if the block was first received via this call
  * @returns     If the block was processed, independently of block validity
  */
-bool ProcessNewBlock(const CChainParams& chainparams, const std::shared_ptr<const CBlock> pblock, bool fForceProcessing, bool* fNewBlock) LOCKS_EXCLUDED(cs_main);
+bool ProcessNewBlock(const CChainParams& chainparams, const std::shared_ptr<const CBlock> pblock, bool fForceProcessing, bool* fNewBlock, const FlatFilePos* diskpos=nullptr, bool do_ooob=true) LOCKS_EXCLUDED(cs_main);
 
 /**
  * Process incoming block headers.

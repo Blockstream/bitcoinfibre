@@ -671,8 +671,6 @@ struct PerGroupMessageQueue {
     PerGroupMessageQueue(PerGroupMessageQueue&& q) =delete;
 };
 static std::vector<PerGroupMessageQueue> messageQueues;
-static const size_t LOCAL_RECEIVE_GROUP = (size_t)-1;
-static size_t LOCAL_SEND_GROUP = (size_t)-1;
 
 static inline void SendMessage(const UDPMessage& msg, const unsigned int length, PerGroupMessageQueue& queue, PendingMessagesBuff& buff, const CService& service, const uint64_t magic) {
     std::unique_lock<std::mutex> lock(send_messages_mutex);

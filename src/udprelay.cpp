@@ -652,14 +652,31 @@ static void ProcessBlockThread() {
 
                     bool fNewBlock;
                     if (!ProcessNewBlock(Params(), pdecoded_block, false, &fNewBlock)) {
-                        bool have_prev;
+                        bool have_prev, save_block_for_later;
                         {
                             LOCK(cs_main);
                             have_prev = BlockIndex().count(pdecoded_block->hashPrevBlock);
+
+                            if (have_prev) {
+                                save_block_for_later = false;
+                            } else {
+                                std::lock_guard<std::recursive_mutex> udpNodesLock(cs_mapUDPNodes);
+                                const auto it = mapUDPNodes.find(node);
+                                if (it == mapUDPNodes.end()) {
+                                    save_block_for_later = false;
+                                } else {
+                                    UDPConnectionState& conn_state = it->second;
+                                    const UDPConnectionInfo& conn_info = conn_state.connection;
+                                    save_block_for_later = (conn_info.group == LOCAL_RECEIVE_GROUP);
+                                }
+                            }
+                            if (save_block_for_later) {
+                                save_block_for_later = StoreOoOBlock(Params(), pdecoded_block);
+                            }
                         }
                         LogPrintf("UDP: Failed to decode block %s\n", decoded_block.GetHash().ToString());
                         std::lock_guard<std::recursive_mutex> udpNodesLock(cs_mapUDPNodes);
-                        if (have_prev) {
+                        if (have_prev || save_block_for_later) {
                             setBlocksReceived.insert(process_block.first);
                         } else {
                             // Allow re-downloading again later, useful for local backfill downloads
