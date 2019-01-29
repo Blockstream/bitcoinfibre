@@ -148,6 +148,11 @@ extern uint64_t nPruneTarget;
 /** Documentation for argument 'checklevel'. */
 extern const std::vector<std::string> CHECKLEVEL_DOC;
 
+FlatFilePos SaveBlockToDisk(const CBlock&, int nHeight, const CChainParams&, const FlatFilePos*);
+bool StoreOoOBlock(const CChainParams&, const std::shared_ptr<const CBlock>) EXCLUSIVE_LOCKS_REQUIRED(cs_main);
+void ProcessSuccessorOoOBlocks(const CChainParams&, const uint256& prev_block_hash);
+void CheckForOoOBlocks(const CChainParams&);
+
 /** Open a block file (blk?????.dat) */
 FILE* OpenBlockFile(const FlatFilePos &pos, bool fReadOnly = false);
 /** Translation to a filesystem path */
@@ -909,9 +914,11 @@ public:
      * @param[in]   pblock  The block we want to process.
      * @param[in]   fForceProcessing Process this block even if unrequested; used for non-network block sources.
      * @param[out]  fNewBlock A boolean which is set to indicate if the block was first received via this call
+     * @param[in]   dbp Position in disk if the file already resides in disk
+     * @param[in]   do_ooob Whether to try processing succeeding out-of-order blocks
      * @returns     If the block was processed, independently of block validity
      */
-    bool ProcessNewBlock(const CChainParams& chainparams, const std::shared_ptr<const CBlock> pblock, bool fForceProcessing, bool* fNewBlock) LOCKS_EXCLUDED(cs_main);
+	bool ProcessNewBlock(const CChainParams& chainparams, const std::shared_ptr<const CBlock> pblock, bool fForceProcessing, bool* fNewBlock, const FlatFilePos* dbp=nullptr, bool do_ooob=true) LOCKS_EXCLUDED(cs_main);
 
     /**
      * Process incoming block headers.
