@@ -660,6 +660,7 @@ static void ProcessBlockThread() {
                             if (have_prev) {
                                 save_block_for_later = false;
                             } else {
+                                // Only save blocks from the local receive group
                                 std::lock_guard<std::recursive_mutex> udpNodesLock(cs_mapUDPNodes);
                                 const auto it = mapUDPNodes.find(node);
                                 if (it == mapUDPNodes.end()) {
@@ -669,6 +670,11 @@ static void ProcessBlockThread() {
                                     const UDPConnectionInfo& conn_info = conn_state.connection;
                                     save_block_for_later = (conn_info.group == LOCAL_RECEIVE_GROUP);
                                 }
+                            }
+                            if (save_block_for_later) {
+                                // Only save blocks that are at least minimally valid
+                                CValidationState state;
+                                save_block_for_later = CheckBlock(*pdecoded_block, state, Params().GetConsensus());
                             }
                             if (save_block_for_later) {
                                 save_block_for_later = StoreOoOBlock(Params(), pdecoded_block);
