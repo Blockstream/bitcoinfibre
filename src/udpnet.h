@@ -159,9 +159,6 @@ public:
     bool AreAllAvailable() const { return allSent; }
 };
 
-static const size_t LOCAL_RECEIVE_GROUP = (size_t)-1;
-static size_t LOCAL_SEND_GROUP = (size_t)-1;
-
 struct UDPConnectionInfo {
     uint64_t local_magic;  // Already LE
     uint64_t remote_magic; // Already LE
@@ -203,5 +200,7 @@ extern bool maybe_have_write_nodes;
 void SendMessage(const UDPMessage& msg, const unsigned int length, bool high_prio, const CService& service, const uint64_t magic, size_t group);
 void SendMessage(const UDPMessage& msg, const unsigned int length, bool high_prio, const std::map<CService, UDPConnectionState>::const_iterator& node);
 void DisconnectNode(const std::map<CService, UDPConnectionState>::iterator& it);
+
+bool IsNodeLocalReceive(const CService&);
 
 #endif
