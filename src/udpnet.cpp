@@ -671,6 +671,8 @@ struct PerGroupMessageQueue {
     PerGroupMessageQueue(PerGroupMessageQueue&& q) =delete;
 };
 static std::vector<PerGroupMessageQueue> messageQueues;
+static const size_t LOCAL_RECEIVE_GROUP = (size_t)-1;
+static size_t LOCAL_SEND_GROUP = (size_t)-1;
 
 static inline void SendMessage(const UDPMessage& msg, const unsigned int length, PerGroupMessageQueue& queue, PendingMessagesBuff& buff, const CService& service, const uint64_t magic) {
     std::unique_lock<std::mutex> lock(send_messages_mutex);
@@ -1123,4 +1125,16 @@ static void OpenLocalDeviceConnection(bool fWrite) {
     OpenPersistentUDPConnectionTo(service, LOCAL_DEVICE_CHECKSUM_MAGIC, LOCAL_DEVICE_CHECKSUM_MAGIC, false,
             fWrite ? UDP_CONNECTION_TYPE_OUTBOUND_ONLY : UDP_CONNECTION_TYPE_INBOUND_ONLY,
             fWrite ? LOCAL_SEND_GROUP : LOCAL_RECEIVE_GROUP);
+}
+
+bool IsNodeLocalReceive(const CService& node) {
+    std::lock_guard<std::recursive_mutex> udpNodesLock(cs_mapUDPNodes);
+    const auto it = mapUDPNodes.find(node);
+    if (it == mapUDPNodes.end()) {
+        return false;
+    }
+
+    UDPConnectionState& conn_state = it->second;
+    const UDPConnectionInfo& conn_info = conn_state.connection;
+    return (conn_info.group == LOCAL_RECEIVE_GROUP);
 }
