@@ -407,6 +407,8 @@ void SetupServerArgs()
                  ArgsManager::ALLOW_ANY, OptionsCategory::OPTIONS);
 
     gArgs.AddArg("-addnode=<ip>", "Add a node to connect to and attempt to keep the connection open (see the `addnode` RPC command help for more info). This option can be specified multiple times to add multiple nodes.", ArgsManager::ALLOW_ANY | ArgsManager::NETWORK_ONLY, OptionsCategory::CONNECTION);
+    gArgs.AddArg("-addudpnode=<ip/host>:<port>,<local_magic>,<remote_magic>[,<group>]", "Add a persistent UDP node, see RPC addudpnode for detailed description", ArgsManager::ALLOW_ANY | ArgsManager::NETWORK_ONLY, OptionsCategory::CONNECTION);
+    gArgs.AddArg("-addtrustedudpnode=<ip/host>:<port>,<local_magic>,<remote_magic>[,<group>]", "Add a trusted, persistent UDP node, see RPC addudpnode for detailed description", ArgsManager::ALLOW_ANY | ArgsManager::NETWORK_ONLY, OptionsCategory::CONNECTION);
     gArgs.AddArg("-banscore=<n>", strprintf("Threshold for disconnecting misbehaving peers (default: %u)", DEFAULT_BANSCORE_THRESHOLD), ArgsManager::ALLOW_ANY, OptionsCategory::CONNECTION);
     gArgs.AddArg("-bantime=<n>", strprintf("Number of seconds to keep misbehaving peers from reconnecting (default: %u)", DEFAULT_MISBEHAVING_BANTIME), ArgsManager::ALLOW_ANY, OptionsCategory::CONNECTION);
     gArgs.AddArg("-bind=<addr>", "Bind to given address and always listen on it. Use [host]:port notation for IPv6", ArgsManager::ALLOW_ANY | ArgsManager::NETWORK_ONLY, OptionsCategory::CONNECTION);
@@ -437,6 +439,9 @@ void SetupServerArgs()
     gArgs.AddArg("-torcontrol=<ip>:<port>", strprintf("Tor control port to use if onion listening enabled (default: %s)", DEFAULT_TOR_CONTROL), ArgsManager::ALLOW_ANY, OptionsCategory::CONNECTION);
     gArgs.AddArg("-torpassword=<pass>", "Tor control port password (default: empty)", ArgsManager::ALLOW_ANY, OptionsCategory::CONNECTION);
     gArgs.AddArg("-udpport=<port>,<group>[,<bw>]", "Accepts UDP connections on <port> (default: bw=1024 =1024Mbps)", ArgsManager::ALLOW_ANY, OptionsCategory::CONNECTION);
+    gArgs.AddArg("-udpmulticast=<if>,<dst_ip>:<port>,<src_ip>[,<label>]", "Listen to multicast-addressed UDP messages sent by <src_ip> towards <dst_ip>:<port> using interface <if>. An optional <label> may be defined for the multicast group in order to facilitate inspection of logs.", ArgsManager::ALLOW_ANY, OptionsCategory::CONNECTION);
+    gArgs.AddArg("-udpmulticasttx=<if>,<ip/host>:<port>,<bw>[,<ttl>]", "Transmit multicast-addressed mesages to <ip/host>:<port> through interface <if> with bandwidth <bw> and TTL <ttl> (3 by default).", ArgsManager::ALLOW_ANY, OptionsCategory::CONNECTION);
+    gArgs.AddArg("-udpmulticaststat=<interval>", "Print multicast bit rates after every <interval> seconds.", ArgsManager::ALLOW_ANY, OptionsCategory::CONNECTION);
 #ifdef USE_UPNP
 #if USE_UPNP
     gArgs.AddArg("-upnp", "Use UPnP to map the listening port (default: 1 when listening and no -proxy)", ArgsManager::ALLOW_ANY, OptionsCategory::CONNECTION);
@@ -1822,9 +1827,9 @@ bool AppInitMain(InitInterfaces& interfaces)
 
     // Start UDP at the very end since it has no concept of whether the res of the code is already up or not
 
-    if (GetUDPInboundPorts().size() || gArgs.GetArg("-fecwritedevice", "") != "" || gArgs.GetArg("-fecreaddevice", "") != "") {
+    if (GetUDPInboundPorts().size() || gArgs.GetArg("-udpmulticast", "") != "" || gArgs.GetArg("-udpmulticasttx", "") != "") {
         if (!InitializeUDPConnections())
-            return InitError(_("Failed to check the UDP listen port - is something else already bound to this port?").translated);
+            return InitError(_("Failed to initialize UDP connections").translated);
     }
 
 

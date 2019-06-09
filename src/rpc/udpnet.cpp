@@ -129,7 +129,7 @@ UniValue addudpnode(const JSONRPCRequest& request)
     if (strCommand == "onetry")
         OpenUDPConnectionTo(addr, local_magic, remote_magic, fTrust, connection_type, group);
     else if (strCommand == "add")
-        OpenPersistentUDPConnectionTo(addr, local_magic, remote_magic, fTrust, connection_type, group);
+        OpenPersistentUDPConnectionTo(addr, local_magic, remote_magic, fTrust, connection_type, group, udp_mode_t::unicast);
 
     return NullUniValue;
 }

@@ -21,9 +21,11 @@ enum UDPConnectionType {
     UDP_CONNECTION_TYPE_INBOUND_ONLY,
 };
 
+enum class udp_mode_t : std::uint8_t { multicast, unicast };
+
 // fUltimatelyTrusted means you trust them (ie whitelist) and ALL OF THEIR SUBSEQUENT WHITELISTED PEERS
 void OpenUDPConnectionTo(const CService& remote_addr, uint64_t local_magic, uint64_t remote_magic, bool fUltimatelyTrusted, UDPConnectionType connection_type = UDP_CONNECTION_TYPE_NORMAL, uint64_t group = 0);
-void OpenPersistentUDPConnectionTo(const CService& remote_addr, uint64_t local_magic, uint64_t remote_magic, bool fUltimatelyTrusted, UDPConnectionType connection_type = UDP_CONNECTION_TYPE_NORMAL, uint64_t group = 0);
+void OpenPersistentUDPConnectionTo(const CService& remote_addr, uint64_t local_magic, uint64_t remote_magic, bool fUltimatelyTrusted, UDPConnectionType connection_type = UDP_CONNECTION_TYPE_NORMAL, uint64_t group = 0, udp_mode_t udp_mode = udp_mode_t::unicast);
 
 void CloseUDPConnectionTo(const CService& remote_addr);
 

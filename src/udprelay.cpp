@@ -660,8 +660,9 @@ static void ProcessBlockThread() {
                             if (have_prev) {
                                 save_block_for_later = false;
                             } else {
-                                // Only save blocks from the local receive group
-                                save_block_for_later = IsNodeLocalReceive(node);
+	                            /* Only save out-of-order blocks received
+	                             * through a one-way multicast service */
+                                save_block_for_later = IsMulticastRxNode(node);
                             }
                             if (save_block_for_later) {
                                 // Only save blocks that are at least minimally valid
