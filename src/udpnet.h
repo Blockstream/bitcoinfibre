@@ -1,4 +1,5 @@
 // Copyright (c) 2016, 2017 Matt Corallo
+// Copyright (c) 2019 Blockstream
 // Unlike the rest of Bitcoin Core, this file is
 // distributed under the Affero General Public License (AGPL v3)
 
@@ -165,6 +166,19 @@ struct UDPConnectionInfo {
     size_t group;
     bool fTrusted;
     UDPConnectionType connection_type;
+    udp_mode_t udp_mode;
+};
+
+struct UDPMulticastInfo {
+    char ifname[IFNAMSIZ];
+    char mcast_ip[INET_ADDRSTRLEN];
+    char tx_ip[INET_ADDRSTRLEN];
+    std::string groupname;
+    unsigned short port;
+    uint64_t bw; // in bps
+    int ttl;
+    size_t group;
+    bool tx;
 };
 
 struct UDPConnectionState {
@@ -201,6 +215,6 @@ void SendMessage(const UDPMessage& msg, const unsigned int length, bool high_pri
 void SendMessage(const UDPMessage& msg, const unsigned int length, bool high_prio, const std::map<CService, UDPConnectionState>::const_iterator& node);
 void DisconnectNode(const std::map<CService, UDPConnectionState>::iterator& it);
 
-bool IsNodeLocalReceive(const CService&);
+bool IsMulticastRxNode(const CService&);
 
 #endif
