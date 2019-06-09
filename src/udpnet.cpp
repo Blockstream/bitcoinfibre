@@ -26,6 +26,7 @@
 #include <util/time.h>
 
 #include <sys/socket.h>
+#include <sys/ioctl.h>
 
 #include <event2/event.h>
 
@@ -45,7 +46,6 @@
 #define to_millis_double(t) (std::chrono::duration_cast<std::chrono::duration<double, std::chrono::milliseconds::period> >(t).count())
 
 static std::vector<int> udp_socks; // The sockets we use to send/recv (bound to *:GetUDPInboundPorts()[*])
-static bool last_sock_is_local;
 
 std::recursive_mutex cs_mapUDPNodes;
 std::map<CService, UDPConnectionState> mapUDPNodes;
@@ -55,10 +55,24 @@ bool maybe_have_write_nodes;
 static std::map<int64_t, std::tuple<CService, uint64_t, size_t> > nodesToRepeatDisconnect;
 static std::map<CService, UDPConnectionInfo> mapPersistentNodes;
 
-static CService LOCAL_WRITE_DEVICE_SERVICE(CNetAddr(), 1);
-static CService LOCAL_READ_DEVICE_SERVICE(CNetAddr(), 2);
+static int mcastStatPrintInterval = 0;
 
-#define LOCAL_DEVICE_CHECKSUM_MAGIC htole64(0xdeadbeef)
+/*
+ * UDP multicast service
+ *
+ * Unlike the main UDP communication mechanism, the multicast service does not
+ * require a "connection". The multicast Tx node transmits messages without ever
+ * knowing about the existing receivers and receivers only need to listen to a
+ * particular multicast ip:port by joining the multicast group.
+ */
+namespace {
+    CService multicasttxUDPNode;
+    std::map<std::pair<CService, int>, UDPMulticastInfo> mapMulticastNodes;
+    std::map<size_t, std::string> mapMulticastGroupNames;
+    char const* const multicast_pass = "multicast";
+    uint64_t const multicast_magic = Hash(&multicast_pass[0], &multicast_pass[0] + strlen(multicast_pass)).GetUint64(0);
+    uint64_t const multicast_checksum_magic = htole64(multicast_magic);
+}
 
 //TODO: The checksum stuff is not endian-safe (esp the poly impl):
 static void FillChecksum(uint64_t magic, UDPMessage& msg, const unsigned int length) {
@@ -113,22 +127,21 @@ static struct timeval timer_interval;
 
 static void ThreadRunReadEventLoop() { event_base_dispatch(event_base_read); }
 static void do_send_messages();
-static void do_read_local_messages();
-static std::atomic_bool local_read_messages_break(false);
 static void send_messages_flush_and_break();
-static void send_messages_init(const std::vector<std::pair<unsigned short, uint64_t> >& group_list, const std::tuple<int64_t, bool, std::string>& local_write_device);
+static void send_messages_init(const std::vector<std::pair<unsigned short, uint64_t> >& group_list,
+                               const std::vector<UDPMulticastInfo>& multicast_list);
 static void ThreadRunWriteEventLoop() { do_send_messages(); }
-static void ThreadRunLocalReadEventLoop() { do_read_local_messages(); }
 
 static void read_socket_func(evutil_socket_t fd, short event, void* arg);
 static void timer_func(evutil_socket_t fd, short event, void* arg);
 
-static boost::thread *udp_read_thread = NULL, *udp_local_read_thread = NULL;
+static boost::thread *udp_read_thread = NULL;
 static std::vector<boost::thread> udp_write_threads;
 
-static void OpenLocalDeviceConnection(bool fWrite);
-static void StartLocalBackfillThread();
-static std::tuple<int64_t, bool, std::string> get_local_device();
+static void OpenMulticastConnection(const CService& service, bool multicast_tx, size_t group);
+static void MulticastBackfillThread();
+static UDPMulticastInfo ParseUDPMulticastInfo(const std::string& s, bool tx);
+static std::vector<UDPMulticastInfo> GetUDPMulticastInfo();
 
 static void AddConnectionFromString(const std::string& node, bool fTrust) {
     size_t host_port_end = node.find(',');
@@ -163,7 +176,7 @@ static void AddConnectionFromString(const std::string& node, bool fTrust) {
         group = atoi64(group_str);
     }
 
-    OpenPersistentUDPConnectionTo(addr, local_magic, remote_magic, fTrust, UDP_CONNECTION_TYPE_NORMAL, group);
+    OpenPersistentUDPConnectionTo(addr, local_magic, remote_magic, fTrust, UDP_CONNECTION_TYPE_NORMAL, group, udp_mode_t::unicast);
 }
 
 static void AddConfAddedConnections() {
@@ -188,8 +201,215 @@ static void CloseSocketsAndReadEvents() {
     udp_socks.clear();
 }
 
+/* Find the IPv4 address corresponding to a given interface name */
+static struct in_addr GetIfIpAddr(const char* const ifname) {
+    struct ifaddrs* myaddrs;
+    struct in_addr res_sin_addr;
+    bool if_ip_found = false;
+
+    if (getifaddrs(&myaddrs) == 0)
+    {
+        for (struct ifaddrs* ifa = myaddrs; ifa != nullptr; ifa = ifa->ifa_next)
+        {
+            if (ifa->ifa_addr == nullptr) continue;
+            if (ifa->ifa_addr->sa_family == AF_INET)
+            {
+                struct sockaddr_in* s4 = (struct sockaddr_in*)(ifa->ifa_addr);
+                char astring[INET_ADDRSTRLEN];
+                inet_ntop(AF_INET, &(s4->sin_addr), astring, INET_ADDRSTRLEN);
+                if (strcmp(ifa->ifa_name, ifname) == 0) {
+                    res_sin_addr = s4->sin_addr;
+                    if_ip_found = true;
+                    break;
+                }
+            }
+        }
+        freeifaddrs(myaddrs);
+    }
+
+    if (!if_ip_found) {
+        LogPrintf("UDP: find IP address of interface %s\n", ifname);
+        throw std::runtime_error("Couldn't find IP address");
+    }
+
+    return res_sin_addr;
+}
+
+/**
+ * Initialize multicast tx/rx services
+ *
+ * Initialize the multicast tx services configured via `udpmulticasttx` and the
+ * multicast reception groups configured via `udpmulticast`.
+ */
+static bool InitializeUDPMulticast(std::vector<int> &udp_socks,
+                                   std::vector<UDPMulticastInfo> &multicast_list) {
+    int group = udp_socks.size() - 1;
+
+    for (auto& mcast_info : multicast_list) {
+        udp_socks.push_back(socket(AF_INET6, SOCK_DGRAM, 0));
+        assert(udp_socks.back());
+
+        int opt = 1;
+        if (setsockopt(udp_socks.back(), SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt)) != 0) {
+            LogPrintf("UDP: setsockopt failed: %s\n", strerror(errno));
+            return false;
+        }
+
+        opt = 0;
+        if (setsockopt(udp_socks.back(), IPPROTO_IPV6, IPV6_V6ONLY, &opt, sizeof(opt)) != 0) {
+            LogPrintf("UDP: setsockopt failed: %s\n", strerror(errno));
+            return false;
+        }
+
+        fcntl(udp_socks.back(), F_SETFL, fcntl(udp_socks.back(), F_GETFL) | O_NONBLOCK);
+
+        /* Bind socket to the multicast service UDP port for any IP address */
+        unsigned short multicast_port = mcast_info.port;
+
+        struct sockaddr_in6 wildcard;
+        memset(&wildcard, 0, sizeof(wildcard));
+        wildcard.sin6_family = AF_INET6;
+        memcpy(&wildcard.sin6_addr, &in6addr_any, sizeof(in6addr_any));
+        wildcard.sin6_port = htons(multicast_port);
+
+        if (bind(udp_socks.back(), (sockaddr*) &wildcard, sizeof(wildcard))) {
+            LogPrintf("UDP: bind failed: %s\n", strerror(errno));
+            return false;
+        }
+
+        /* Get index of network interface */
+        struct ifreq ifr;
+        memset(&ifr, 0, sizeof(ifr));
+        strncpy(ifr.ifr_name, mcast_info.ifname, IFNAMSIZ);
+        if (ioctl(udp_socks.back(), SIOCGIFINDEX, (void *)&ifr) != 0) {
+            LogPrintf("Error: couldn't find an index for interface %s: %s\n",
+                      mcast_info.ifname, strerror(errno));
+            return false;
+        }
+        int ifindex = ifr.ifr_ifindex;
+
+        /* Get network interface IPv4 address */
+        struct in_addr imr_interface = GetIfIpAddr(mcast_info.ifname);
+        char imr_interface_str[INET_ADDRSTRLEN];
+        inet_ntop(AF_INET, &imr_interface, imr_interface_str,
+                  INET_ADDRSTRLEN);
+
+        struct sockaddr_in multicastaddr;
+        memset(&multicastaddr, 0, sizeof(multicastaddr));
+
+        /* Is this a multicast Tx group? i.e. if target bandwidth is defined */
+        if (mcast_info.tx) {
+            LogPrintf("UDP: bind multicast Tx socket %d to interface %s\n",
+                      udp_socks.back(), mcast_info.ifname);
+
+            /* Don't loop messages that we send back to us */
+            int no_loop = 0;
+            if (setsockopt(udp_socks.back(), IPPROTO_IP, IP_MULTICAST_LOOP, &no_loop, sizeof(no_loop)) != 0) {
+                LogPrintf("UDP: setsockopt failed: %s\n", strerror(errno));
+                return false;
+            }
+
+            /* Set TTL of multicast messages */
+            int ttl = mcast_info.ttl;
+            if (setsockopt(udp_socks.back(), IPPROTO_IP, IP_MULTICAST_TTL, &ttl, sizeof(ttl)) != 0) {
+                LogPrintf("UDP: setsockopt failed: %s\n", strerror(errno));
+                return false;
+            }
+
+            /* Bind socket to chosen network interface (device) */
+            struct ifreq ifr;
+            memset(&ifr, 0, sizeof(ifr));
+            strncpy(ifr.ifr_name, mcast_info.ifname, IFNAMSIZ);
+            if (setsockopt(udp_socks.back(), SOL_SOCKET, SO_BINDTODEVICE, (void *)&ifr, sizeof(ifr)) != 0) {
+                LogPrintf("UDP: setsockopt failed: %s\n", strerror(errno));
+                return false;
+            }
+
+            /* Ensure multicast packets are tx'ed by the chosen interface
+             *
+             * NOTE: the preceding binding restricts the device used for
+             * reception, whereas the option that follows determines the
+             * device for transmission. */
+            struct ip_mreqn req;
+            memset(&req, 0, sizeof(req));
+            req.imr_ifindex = ifindex;
+            if (setsockopt(udp_socks.back(), IPPROTO_IP, IP_MULTICAST_IF, &req, sizeof(req)) != 0) {
+                LogPrintf("UDP: setsockopt failed: %s\n", strerror(errno));
+                return false;
+            }
+
+            /* CService identifier: destination multicast IP address */
+            inet_pton(AF_INET, mcast_info.mcast_ip, &multicastaddr.sin_addr);
+            multicasttxUDPNode = CService(multicastaddr.sin_addr, multicast_port);
+        } else {
+            /* Multicast Rx mode */
+
+            /* Join multicast group, but only allow multicast packets from a
+             * specific source address */
+            struct ip_mreq_source req;
+            memset(&req, 0, sizeof(req));
+            inet_pton(AF_INET, mcast_info.mcast_ip, &(req.imr_multiaddr));
+            req.imr_interface = imr_interface;
+            inet_pton(AF_INET, mcast_info.tx_ip, &(req.imr_sourceaddr));
+
+            LogPrintf("UDP: multicast rx -  multiaddr: %s interface: %s (%s) sourceaddr: %s\n",
+                      mcast_info.mcast_ip,
+                      mcast_info.ifname,
+                      imr_interface_str,
+                      mcast_info.tx_ip);
+
+            if (setsockopt(udp_socks.back(), IPPROTO_IP, IP_ADD_SOURCE_MEMBERSHIP, &req, sizeof(req)) != 0) {
+                LogPrintf("UDP: setsockopt failed: %s\n", strerror(errno));
+                return false;
+            }
+
+            /* CService identifier: Tx node IP address (source address). On
+             * "read_socket_func", the source address obtained by "recvfrom"
+             * is used in order to find the corresponding CService */
+            inet_pton(AF_INET, mcast_info.tx_ip, &multicastaddr.sin_addr);
+        }
+
+        group++;
+        mcast_info.group = group;
+        CService addr{multicastaddr.sin_addr, multicast_port};
+
+        /* Index based on multicast "addr" and network interface index
+         *
+         * On udpmulticasttx, "addr" is the destination multicast address,
+         * while on udpmulticast (rx), "addr" is the source address. As a
+         * result, in Rx it is possible to receive from the same source
+         * address as long as the interface differs, i.e. a
+         * receive-redundancy setup. Similarly, in tx, it is also possible
+         * to feed two streams to the same destination multicast address, as
+         * long as the interface differs. */
+        const auto mcast_map_key = std::make_pair(addr, ifindex);
+        if (mapMulticastNodes.count(mcast_map_key) > 0) {
+            LogPrintf("UDP: error - multicast node (%s, %s) already exists\n",
+                      mcast_map_key.first.ToString(), mcast_map_key.second);
+            return false;
+        }
+        mapMulticastNodes[mcast_map_key] = mcast_info;
+
+        /* Map group number to an optional group name (label) */
+        if (mapMulticastGroupNames.count(group) > 0) {
+            LogPrintf("UDP: error - multicast group %d already exists\n", group);
+            return false;
+        }
+        mapMulticastGroupNames[group] = mcast_info.groupname;
+
+        LogPrintf("UDP: Socket %d bound to port %hd for multicast group %d %s\n",
+                  udp_socks.back(), multicast_port, group,
+                  mapMulticastGroupNames[group]);
+    }
+
+    return true;
+}
+
 bool InitializeUDPConnections() {
     assert(udp_write_threads.empty() && !udp_read_thread);
+
+    if (gArgs.IsArgSet("-udpmulticaststat") && (atoi(gArgs.GetArg("-udpmulticaststat", "")) > 0))
+        mcastStatPrintInterval = atoi(gArgs.GetArg("-udpmulticaststat", ""));
 
     const std::vector<std::pair<unsigned short, uint64_t> > group_list(GetUDPInboundPorts());
     for (std::pair<unsigned short, uint64_t> port : group_list) {
@@ -222,6 +442,17 @@ bool InitializeUDPConnections() {
         return false;
     }
 
+    auto multicast_list = GetUDPMulticastInfo();
+    if (multicast_list.empty()) {
+        CloseSocketsAndReadEvents();
+        return false;
+    }
+
+    if (!InitializeUDPMulticast(udp_socks, multicast_list)) {
+        CloseSocketsAndReadEvents();
+        return false;
+    }
+
     for (int socket : udp_socks) {
         event *read_event = event_new(event_base_read, socket, EV_READ | EV_PERSIST, read_socket_func, NULL);
         if (!read_event) {
@@ -231,19 +462,6 @@ bool InitializeUDPConnections() {
         }
         read_events.push_back(read_event);
         event_add(read_event, NULL);
-    }
-
-    // Init local write device only after udp socks were all added to read_event
-    auto local_write_device = get_local_device();
-    if (std::get<0>(local_write_device)) {
-        int fd = open(std::get<2>(local_write_device).c_str(), O_WRONLY);
-        if (fd < 0) {
-            LogPrintf("Failed to open -fecwritedevice, not running any FIBRE connections\n");
-            event_base_free(event_base_read);
-            CloseSocketsAndReadEvents();
-            return false;
-        }
-        udp_socks.push_back(fd);
     }
 
     timer_event = event_new(event_base_read, -1, EV_PERSIST, timer_func, NULL);
@@ -256,20 +474,21 @@ bool InitializeUDPConnections() {
     timer_interval.tv_usec = 500*1000;
     evtimer_add(timer_event, &timer_interval);
 
-    send_messages_init(group_list, local_write_device);
+    /* Initialize Tx message queues and their corresponding bandwidth budgets */
+    send_messages_init(group_list, multicast_list);
+
     udp_write_threads.emplace_back(boost::bind(&TraceThread<boost::function<void ()> >, "udpwrite", &ThreadRunWriteEventLoop));
 
+    /* Add persistent connections to pre-defined udpnodes or trustedudpnodes */
     AddConfAddedConnections();
 
-    if (std::get<0>(local_write_device)) {
-        OpenLocalDeviceConnection(true);
-        if (std::get<1>(local_write_device))
-            StartLocalBackfillThread();
-    }
-
-    if (gArgs.IsArgSet("-fecreaddevice")) {
-        OpenLocalDeviceConnection(false);
-        udp_local_read_thread = new boost::thread(boost::bind(&TraceThread<void (*)()>, "udpreadlocal", &ThreadRunLocalReadEventLoop));
+    /* One-way multicast connections */
+    for (const auto& multicastNode : mapMulticastNodes) {
+        OpenMulticastConnection(multicastNode.first.first,
+                                multicastNode.second.tx,
+                                multicastNode.second.group);
+        if (multicastNode.second.tx)
+            MulticastBackfillThread();
     }
 
     BlockRecvInit();
@@ -286,12 +505,6 @@ void StopUDPConnections() {
     event_base_loopbreak(event_base_read);
     udp_read_thread->join();
     delete udp_read_thread;
-
-    local_read_messages_break = true;
-    if (udp_local_read_thread) {
-        udp_local_read_thread->join();
-        delete udp_local_read_thread;
-    }
 
     BlockRecvShutdown();
 
@@ -371,6 +584,47 @@ static void read_socket_func(evutil_socket_t fd, short event, void* arg) {
 
     const uint8_t msg_type_masked = (msg.header.msg_type & UDP_MSG_TYPE_TYPE_MASK);
 
+    /* Handle multicast msgs first (no need to check connection state) */
+    if (state.connection.udp_mode == udp_mode_t::multicast)
+    {
+        if (msg_type_masked == MSG_TYPE_BLOCK_HEADER ||
+            msg_type_masked == MSG_TYPE_BLOCK_CONTENTS ||
+            msg_type_masked == MSG_TYPE_TX_CONTENTS) {
+            if (!HandleBlockTxMessage(msg, sizeof(UDPMessage) - 1, it->first, it->second, start))
+                send_and_disconnect(it);
+            else {
+                if (mcastStatPrintInterval > 0) {
+                    if (!state.lastAvgTime)
+                        state.lastAvgTime = GetTimeMillis();
+                    state.rcvdBytes += sizeof(UDPMessage) - 1;
+                    int64_t timeDeltaMillis = GetTimeMillis() - state.lastAvgTime;
+                    if (timeDeltaMillis > 1000*mcastStatPrintInterval) {
+                        auto const itm = mapMulticastGroupNames.find(state.connection.group);
+                        std::string groupname;
+                        if (itm == mapMulticastGroupNames.end())
+                            groupname = "";
+                        else
+                            groupname = itm->second;
+
+                        LogPrintf("UDP multicast group %d (%s): Average bit rate %.4f Mbit/sec\n",
+                                  state.connection.group, groupname,
+                                  (double)state.rcvdBytes*8/(1000*timeDeltaMillis));
+                        state.lastAvgTime += timeDeltaMillis;
+                        state.rcvdBytes = 0;
+                    }
+                }
+            }
+        } else
+            LogPrintf("UDP: Unexpected message from %s!\n", it->first.ToString());
+
+        if (fBench) {
+            std::chrono::steady_clock::time_point finish(std::chrono::steady_clock::now());
+            if (to_millis_double(finish - start) > 1)
+                LogPrintf("UDP: Multicast packet took %lf ms to process\n", to_millis_double(finish - start));
+        }
+        return;
+    }
+
     state.lastRecvTime = GetTimeMillis();
     if (msg_type_masked == MSG_TYPE_SYN) {
         if (res != sizeof(UDPMessageHeader) + 8) {
@@ -416,6 +670,7 @@ static void read_socket_func(evutil_socket_t fd, short event, void* arg) {
         }
     } else if (msg_type_masked == MSG_TYPE_TX_CONTENTS) {
         LogPrintf("UDP: Got tx message over the wire from %s, this isn't supposed to happen!\n", it->first.ToString());
+        /* NOTE Only the multicast service sends tx messages. */
         send_and_disconnect(it);
         return;
     } else if (msg_type_masked == MSG_TYPE_PING) {
@@ -452,109 +707,6 @@ static void read_socket_func(evutil_socket_t fd, short event, void* arg) {
         if (to_millis_double(finish - start) > 1)
             LogPrintf("UDP: Packet took %lf ms to process\n", to_millis_double(finish - start));
     }
-}
-
-static bool read_local_bytes(int fd, unsigned char* buf, size_t num) {
-    fd_set read_set;
-    struct timeval timeout;
-    while (!local_read_messages_break) {
-        FD_ZERO(&read_set);
-        FD_SET(fd, &read_set);
-        timeout.tv_sec = 0; timeout.tv_usec = 50 * 1000;
-        int res = select(fd + 1, &read_set, NULL, NULL, &timeout);
-        if (res > 0) {
-            ssize_t read_res = read(fd, buf, num);
-            if (read_res <= 0) return false;
-            buf += (size_t)read_res; num -= (size_t)read_res;
-            if (num == 0) return true;
-            continue;
-        }
-        if (res != 0) return false;
-    }
-    return false;
-}
-
-static void do_read_local_messages() {
-    std::string localUDPReadDevice(gArgs.GetArg("-fecreaddevice", ""));
-    assert(localUDPReadDevice != "");
-
-    do {
-        int fd = open(localUDPReadDevice.c_str(), O_RDONLY);
-        assert(fd >= 0 && "Failed to open -fecreaddevice, please try again");
-        assert(fd <= FD_SETSIZE && "Failed to open -fecreaddevice, please try again");
-        while (!local_read_messages_break) {
-            // Scan forward until we find magic bytes
-            for (ssize_t i = 0; i < (ssize_t)sizeof(LOCAL_MAGIC_BYTES); i++) {
-                unsigned char c;
-                if (!read_local_bytes(fd, &c, 1))
-                    break;
-                if (LOCAL_MAGIC_BYTES[i] != c) {
-                    i = -1;
-                    continue;
-                }
-            }
-
-            UDPMessage msg;
-            // UDPMessage is 1 byte larger than block messages
-            if (!read_local_bytes(fd, (unsigned char*)&msg, sizeof(UDPMessage) - 1))
-                break;
-
-            const bool fBench = LogAcceptCategory(BCLog::BENCH);
-            std::chrono::steady_clock::time_point start(std::chrono::steady_clock::now());
-
-            std::unique_lock<std::recursive_mutex> lock(cs_mapUDPNodes);
-            std::map<CService, UDPConnectionState>::iterator it = mapUDPNodes.find(LOCAL_READ_DEVICE_SERVICE);
-            if (it == mapUDPNodes.end())
-                continue; // We lost our local node - it'll come back when we reconnect
-            if (!CheckChecksum(it->second.connection.local_magic, msg, sizeof(UDPMessage) - 1))
-                continue;
-
-            UDPConnectionState& state = it->second;
-
-            state.lastRecvTime = GetTimeMillis();
-
-            /* update bytes stat
-             * for speed calculations (mbps)
-             * example:
-             *  ./bitcoind -fecreaddevice=/tmp/async_rx -fecstat=60
-             */
-            if (gArgs.IsArgSet("-fecstat")) {
-                int avgInterval = atoi(gArgs.GetArg("-fecstat", ""));
-                if (avgInterval <= 0) // invalid argument specified
-                    break;
-                if (!state.lastAvgTime)
-                    state.lastAvgTime = GetTimeMillis();
-                state.rcvdBytes += sizeof(UDPMessage) - 1;
-                int64_t timeDelta = GetTimeMillis() - state.lastAvgTime;
-                if (timeDelta > 1000*avgInterval) {
-                    // print statistics
-                    LogPrintf("UDP[%d]: Average speed %.4f Mbit/sec\n",
-                            fd, (double)state.rcvdBytes*8*1000/(1024*1024*timeDelta));
-                    state.lastAvgTime = GetTimeMillis();
-                    state.rcvdBytes = 0;
-                }
-            }
-
-            const uint8_t msg_type_masked = (msg.header.msg_type & UDP_MSG_TYPE_TYPE_MASK);
-            if (msg_type_masked == MSG_TYPE_BLOCK_HEADER || msg_type_masked == MSG_TYPE_BLOCK_CONTENTS || msg_type_masked == MSG_TYPE_TX_CONTENTS) {
-                if (!HandleBlockTxMessage(msg, sizeof(UDPMessage) - 1, it->first, it->second, start)) {
-                    send_and_disconnect(it);
-                    continue;
-                }
-            } else {
-                // Huh? Only supposed to get block messages
-                continue;
-            }
-
-            if (fBench) {
-                std::chrono::steady_clock::time_point finish(std::chrono::steady_clock::now());
-                if (to_millis_double(finish - start) > 1)
-                    LogPrintf("UDP: Packet took %lf ms to process\n", to_millis_double(finish - start));
-            }
-        }
-
-        close(fd);
-    } while (!local_read_messages_break);
 }
 
 static void OpenUDPConnectionTo(const CService& addr, const UDPConnectionInfo& info);
@@ -667,12 +819,11 @@ struct PerGroupMessageQueue {
         return {-1, 0, 0};
     }
     uint64_t bw;
+    bool multicast;
     PerGroupMessageQueue() : bw(0) {}
     PerGroupMessageQueue(PerGroupMessageQueue&& q) =delete;
 };
 static std::vector<PerGroupMessageQueue> messageQueues;
-static const size_t LOCAL_RECEIVE_GROUP = (size_t)-1;
-static size_t LOCAL_SEND_GROUP = (size_t)-1;
 
 static inline void SendMessage(const UDPMessage& msg, const unsigned int length, PerGroupMessageQueue& queue, PendingMessagesBuff& buff, const CService& service, const uint64_t magic) {
     std::unique_lock<std::mutex> lock(send_messages_mutex);
@@ -697,12 +848,14 @@ static inline void SendMessage(const UDPMessage& msg, const unsigned int length,
 
 void SendMessage(const UDPMessage& msg, const unsigned int length, bool high_prio, const CService& service, const uint64_t magic, size_t group) {
     assert(length <= sizeof(UDPMessage));
-
-    if (group == LOCAL_RECEIVE_GROUP)
-        return;
-
     assert(group < messageQueues.size());
     PerGroupMessageQueue& queue = messageQueues[group];
+
+    /* Only the backfill thread sends to the multicast group. Since it uses the
+     * above SendMessage definition directly, prevent transmission here: */
+    if (queue.multicast)
+        return;
+
     PendingMessagesBuff& buff = high_prio ? queue.buffs[0] : queue.buffs[1];
 
     SendMessage(msg, length, queue, buff, service, magic);
@@ -715,7 +868,7 @@ struct PerQueueSendState {
     MessageStateCache buff_state;
     std::chrono::steady_clock::time_point next_send;
     size_t write_objs_per_call, bytes_per_obj, target_bytes_per_sec;
-    bool local, buff_emptied;
+    bool multicast, buff_emptied;
 };
 
 static inline bool fill_cache(PerQueueSendState* states, std::chrono::steady_clock::time_point& now) {
@@ -753,9 +906,11 @@ static void do_send_messages() {
     for (size_t i = 0; i < messageQueues.size(); i++) {
         states[i].buff_state           = {-1, 0, 0};
         states[i].next_send            = std::chrono::steady_clock::now();
-        states[i].local                = last_sock_is_local && i == messageQueues.size() - 1;
-        states[i].target_bytes_per_sec = messageQueues[i].bw * (states[i].local ? 1 : 1024 * 1024) / 8;
-        states[i].bytes_per_obj        = states[i].local ? (sizeof(UDPMessageHeader) + MAX_UDP_MESSAGE_LENGTH + sizeof(LOCAL_MAGIC_BYTES)) : PACKET_SIZE;
+        states[i].multicast            = messageQueues[i].multicast;
+        states[i].target_bytes_per_sec = messageQueues[i].bw * (states[i].multicast ? 1 : 1024 * 1024) / 8;
+        /* NOTE: for -udpport argument, bandwidth is set in Mbps. For
+         * -udpmulticasttx, bandwidth is set in bps. */
+        states[i].bytes_per_obj        = states[i].multicast ? (sizeof(UDPMessageHeader) + MAX_UDP_MESSAGE_LENGTH) : PACKET_SIZE;
         states[i].write_objs_per_call  = std::max<size_t>(1, states[i].target_bytes_per_sec / WRITES_PER_SEC / states[i].bytes_per_obj / messageQueues.size());
         states[i].buff_emptied         = true;
     }
@@ -766,6 +921,7 @@ static void do_send_messages() {
             return;
         std::chrono::steady_clock::time_point sleep_until(start + std::chrono::minutes(60));
 
+        /* Message queues are per group - iterate over them and schedule Tx's */
         for (size_t group = 0; group < messageQueues.size(); group++) {
             PerQueueSendState& send_state = states[group];
             if (send_state.next_send > start) {
@@ -793,7 +949,7 @@ static void do_send_messages() {
             for (; i < send_state.write_objs_per_call + extra_writes && send_state.buff_state.buff_id != -1; i++) {
                 std::tuple<CService, UDPMessage, unsigned int, uint64_t>& msg = buff->messagesPendingRingBuff[send_state.buff_state.nextPendingMessage];
 
-                if (send_state.local) {
+                if (send_state.multicast) {
                     assert((std::get<1>(msg).header.msg_type & UDP_MSG_TYPE_TYPE_MASK) == MSG_TYPE_BLOCK_HEADER ||
                            (std::get<1>(msg).header.msg_type & UDP_MSG_TYPE_TYPE_MASK) == MSG_TYPE_BLOCK_CONTENTS ||
                            (std::get<1>(msg).header.msg_type & UDP_MSG_TYPE_TYPE_MASK) == MSG_TYPE_TX_CONTENTS);
@@ -801,23 +957,15 @@ static void do_send_messages() {
 
                 FillChecksum(std::get<3>(msg), std::get<1>(msg), std::get<2>(msg));
 
-                if (send_state.local) {
-                    assert(std::get<2>(msg) == sizeof(UDPMessage) - 1); // UDPMessage is 1 byte larger than block messages
+                sockaddr_in6 remoteaddr{};
+                remoteaddr.sin6_family = AF_INET6;
+                assert(std::get<0>(msg).GetIn6Addr(&remoteaddr.sin6_addr));
+                remoteaddr.sin6_port = htons(std::get<0>(msg).GetPort());
 
-                    if (write(udp_socks[group], &LOCAL_MAGIC_BYTES, sizeof(LOCAL_MAGIC_BYTES)) != sizeof(LOCAL_MAGIC_BYTES) ||
-                            write(udp_socks[group], &std::get<1>(msg), std::get<2>(msg)) != std::get<2>(msg)) {
-                        //TODO: Handle?
-                    }
-                } else {
-                    sockaddr_in6 remoteaddr;
-                    memset(&remoteaddr, 0, sizeof(remoteaddr));
-                    remoteaddr.sin6_family = AF_INET6;
-                    assert(std::get<0>(msg).GetIn6Addr(&remoteaddr.sin6_addr));
-                    remoteaddr.sin6_port = htons(std::get<0>(msg).GetPort());
-
-                    if (sendto(udp_socks[group], &std::get<1>(msg), std::get<2>(msg), 0, (sockaddr*)&remoteaddr, sizeof(remoteaddr)) != std::get<2>(msg)) {
-                        //TODO: Handle?
-                    }
+                if (sendto(udp_socks[group], &std::get<1>(msg), std::get<2>(msg), 0, (sockaddr*)&remoteaddr, sizeof(remoteaddr)) != std::get<2>(msg)) {
+                    //TODO: Handle?
+                    LogPrintf("UDP: sendto to group %d failed: %s\n",
+                              group, strerror(errno));
                 }
 
                 send_state.buff_state.nextPendingMessage = (send_state.buff_state.nextPendingMessage + 1) % PENDING_MESSAGES_BUFF_SIZE;
@@ -847,9 +995,9 @@ static void do_send_messages() {
     }
 }
 
-static void StartLocalBackfillThread() {
-    assert(LOCAL_SEND_GROUP < messageQueues.size());
+static void MulticastBackfillThread() {
     boost::thread(boost::bind(&TraceThread<boost::function<void ()> >, "udpbackfill", [] {
+        /* Start only after the initial sync */
         while (::ChainstateActive().IsInitialBlockDownload() && !send_messages_break)
             std::this_thread::sleep_for(std::chrono::milliseconds(50));
 
@@ -861,10 +1009,23 @@ static void StartLocalBackfillThread() {
             assert(lastBlock);
         }
 
-        PerGroupMessageQueue& queue = messageQueues[LOCAL_SEND_GROUP];
+        /* Find the multicast Tx queue */
+        size_t i_mcast_tx;
+        int n_multicast_tx_queues = 0;
+        for (size_t i = 0; i < messageQueues.size(); i++) {
+            if (messageQueues[i].multicast && messageQueues[i].bw > 0) {
+                i_mcast_tx = i;
+                n_multicast_tx_queues++;
+            }
+        }
+        assert(n_multicast_tx_queues == 1);
+
+        PerGroupMessageQueue& queue = messageQueues[i_mcast_tx];
+
         while (!send_messages_break) {
             while (!send_messages_break && queue.buffs[2].nextUndefinedMessage.load(std::memory_order_acquire) != queue.buffs[2].nextPendingMessage.load(std::memory_order_acquire))
                 std::this_thread::sleep_for(std::chrono::milliseconds(5));
+
             int height;
             size_t send_txn = 0;
             {
@@ -912,11 +1073,12 @@ static void StartLocalBackfillThread() {
                         }
                     }
                 }
+
                 for (const CTransactionRef& tx : txn_to_send) {
                     std::vector<UDPMessage> msgs;
                     UDPFillMessagesFromTx(*tx, msgs);
                     for (UDPMessage& msg : msgs) {
-                        SendMessage(msg, sizeof(UDPMessageHeader) + MAX_UDP_MESSAGE_LENGTH, queue, queue.buffs[2], LOCAL_WRITE_DEVICE_SERVICE, LOCAL_DEVICE_CHECKSUM_MAGIC);
+                        SendMessage(msg, sizeof(UDPMessageHeader) + MAX_UDP_MESSAGE_LENGTH, queue, queue.buffs[2], multicasttxUDPNode, multicast_checksum_magic);
                     }
                 }
             }
@@ -929,49 +1091,32 @@ static void StartLocalBackfillThread() {
             UDPFillMessagesFromBlock(block, msgs);
 
             for (UDPMessage& msg : msgs) {
-                SendMessage(msg, sizeof(UDPMessageHeader) + MAX_UDP_MESSAGE_LENGTH, queue, queue.buffs[2], LOCAL_WRITE_DEVICE_SERVICE, LOCAL_DEVICE_CHECKSUM_MAGIC);
+                SendMessage(msg, sizeof(UDPMessageHeader) + MAX_UDP_MESSAGE_LENGTH, queue, queue.buffs[2], multicasttxUDPNode, multicast_checksum_magic);
             }
         }
     })).detach();
 }
 
-static std::tuple<int64_t, bool, std::string> get_local_device() {
-    std::string localUDPWriteDevice(gArgs.GetArg("-fecwritedevice", ""));
+static void send_messages_init(const std::vector<std::pair<unsigned short, uint64_t> >& group_list,
+                               const std::vector<UDPMulticastInfo>& multicast_list) {
+    messageQueues = std::vector<PerGroupMessageQueue>(group_list.size() + multicast_list.size());
 
-    if (localUDPWriteDevice == "")
-        return std::make_tuple((int64_t)0, false, std::string());
-
-    size_t bw_end = localUDPWriteDevice.find(',');
-    size_t backfill_end = localUDPWriteDevice.find(',', bw_end + 1);
-
-    if (bw_end == std::string::npos || backfill_end == std::string::npos) {
-        LogPrintf("Failed to parse -fecwritedevice=bw,backfill,file option, not writing\n");
-        return std::make_tuple((int64_t)0, false, std::string());
-    }
-
-    std::string backfill_str(localUDPWriteDevice.substr(bw_end + 1, backfill_end - bw_end - 1));
-    if (backfill_str != "true" && backfill_str != "false") {
-        LogPrintf("-fecwritedevice=bw,backfill,file backfill option must be true or false, not writing\n");
-        return std::make_tuple((int64_t)0, false, std::string());
-    }
-
-    int64_t bw = atoi64(localUDPWriteDevice.substr(0, bw_end));
-    bool backfill = backfill_str == "true";
-    localUDPWriteDevice = localUDPWriteDevice.substr(backfill_end + 1);
-
-    return std::make_tuple(bw, backfill, localUDPWriteDevice);
-}
-
-static void send_messages_init(const std::vector<std::pair<unsigned short, uint64_t> >& group_list, const std::tuple<int64_t, bool, std::string>& local_write_device) {
-    messageQueues = std::vector<PerGroupMessageQueue>(group_list.size() + (std::get<0>(local_write_device) ? 1 : 0));
-    for (size_t i = 0; i < group_list.size(); i++)
+    for (size_t i = 0; i < group_list.size(); i++) {
+        LogPrintf("UDP: Set bw for group %d: %d Mbps\n", i, group_list[i].second);
         messageQueues[i].bw = group_list[i].second;
-    if (std::get<0>(local_write_device)) {
-        LOCAL_SEND_GROUP = group_list.size();
-        messageQueues[LOCAL_SEND_GROUP].bw = std::get<0>(local_write_device);
-        last_sock_is_local = true;
-    } else {
-        last_sock_is_local = false;
+    }
+
+    size_t j = group_list.size();
+
+    for (auto& mcast_info : multicast_list) {
+        if (mcast_info.port) {
+            messageQueues[j].bw        = mcast_info.bw;
+            messageQueues[j].multicast = true;
+            if (messageQueues[j].bw > 0) {
+                LogPrintf("UDP: Set bw for group %d: %d bps\n", j, mcast_info.bw);
+            }
+        }
+        j++;
     }
 }
 
@@ -980,7 +1125,105 @@ static void send_messages_flush_and_break() {
     send_messages_wake_cv.notify_all();
 }
 
+static UDPMulticastInfo ParseUDPMulticastInfo(const std::string& s, const bool tx) {
+    UDPMulticastInfo info{};
+    info.port = 0; // use port == 0 to infer error
 
+    const size_t if_end = s.find(',');
+    if (if_end == std::string::npos) {
+        LogPrintf("Failed to parse -udpmulticast option, net interface not set\n");
+        return info;
+    }
+    strncpy(info.ifname, s.substr(0, if_end).c_str(), IFNAMSIZ);
+
+    const size_t mcastaddr_end = s.find(',', if_end + 1);
+    if (mcastaddr_end == std::string::npos) {
+        LogPrintf("Failed to parse -udpmulticast option, missing required arguments\n");
+        return info;
+    }
+
+    int port;
+    std::string ip;
+    const std::string mcast_ip_port = s.substr(if_end + 1, mcastaddr_end - if_end - 1);
+    SplitHostPort(mcast_ip_port, port, ip);
+    if (port != (unsigned short)port || port == 0) {
+        LogPrintf("Failed to parse -udpmulticast option, invalid port\n");
+        return info;
+    }
+    strncpy(info.mcast_ip, ip.c_str(), INET_ADDRSTRLEN);
+
+    info.tx = tx;
+
+    if (info.tx) {
+        const size_t bw_end = s.find(',', mcastaddr_end + 1);
+
+        if (bw_end == std::string::npos) {
+            info.bw   = atoi64(s.substr(mcastaddr_end + 1));
+            info.ttl = 3; // Multicast time-to-live (TTL)
+        } else {
+            info.bw  = atoi64(s.substr(mcastaddr_end + 1, bw_end - mcastaddr_end - 1));
+            info.ttl = atoi(s.substr(bw_end + 1));
+        }
+
+        if (info.bw == 0) {
+            LogPrintf("Failed to parse -udpmulticasttx option, bw must be non-zero\n");
+            return info;
+        }
+    } else {
+        const size_t tx_ip_end = s.find(',', mcastaddr_end + 1);
+        std::string tx_ip;
+
+        if (tx_ip_end == std::string::npos) {
+            tx_ip          = s.substr(mcastaddr_end + 1);
+            info.groupname = "";
+        } else {
+            tx_ip          = s.substr(mcastaddr_end + 1, tx_ip_end - mcastaddr_end - 1);
+            info.groupname = s.substr(tx_ip_end + 1);
+        }
+
+        if (tx_ip.empty()) {
+            LogPrintf("Failed to parse -udpmulticast option, source (tx) IP empty\n");
+            return info;
+        }
+        strncpy(info.tx_ip, tx_ip.c_str(), INET_ADDRSTRLEN);
+    }
+
+    info.port = port; /* set non-zero port if successful */
+
+    return info;
+}
+
+static std::vector<UDPMulticastInfo> GetUDPMulticastInfo()
+{
+    int n_multicast_tx = 0;
+
+    if (!gArgs.IsArgSet("-udpmulticast") && !gArgs.IsArgSet("-udpmulticasttx"))
+        return std::vector<UDPMulticastInfo>();
+
+    std::vector<UDPMulticastInfo> v;
+
+    for (const std::string& s : gArgs.GetArgs("-udpmulticast")) {
+        v.push_back(ParseUDPMulticastInfo(s, false));
+        if (v.back().port == 0)
+            return std::vector<UDPMulticastInfo>();
+    }
+
+    for (const std::string& s : gArgs.GetArgs("-udpmulticasttx")) {
+        v.push_back(ParseUDPMulticastInfo(s, true));
+        if (v.back().port == 0)
+            return std::vector<UDPMulticastInfo>();
+        n_multicast_tx++;
+    }
+
+    assert(n_multicast_tx <= 1);
+    return v;
+}
+
+static void OpenMulticastConnection(const CService& service, bool multicast_tx, size_t group) {
+    OpenPersistentUDPConnectionTo(service, multicast_magic, multicast_magic, false,
+                                  multicast_tx ? UDP_CONNECTION_TYPE_OUTBOUND_ONLY : UDP_CONNECTION_TYPE_INBOUND_ONLY,
+                                  group, udp_mode_t::multicast);
+}
 
 /**
  * Public API follows
@@ -1051,7 +1294,7 @@ void GetUDPConnectionList(std::vector<UDPConnectionStats>& connections_list) {
 
 static void OpenUDPConnectionTo(const CService& addr, const UDPConnectionInfo& info) {
     std::unique_lock<std::recursive_mutex> lock(cs_mapUDPNodes);
-    assert(info.group < messageQueues.size() || addr == LOCAL_READ_DEVICE_SERVICE);
+    assert(info.group < messageQueues.size());
 
     std::pair<std::map<CService, UDPConnectionState>::iterator, bool> res = mapUDPNodes.insert(std::make_pair(addr, UDPConnectionState()));
     if (!res.second) {
@@ -1062,17 +1305,15 @@ static void OpenUDPConnectionTo(const CService& addr, const UDPConnectionInfo& i
     if (info.connection_type != UDP_CONNECTION_TYPE_INBOUND_ONLY)
         maybe_have_write_nodes = true;
 
-    bool fIsLocal = (addr == LOCAL_WRITE_DEVICE_SERVICE || addr == LOCAL_READ_DEVICE_SERVICE);
-
     LogPrint(BCLog::UDPNET, "UDP: Initializing connection to %s...\n", addr.ToString());
 
     UDPConnectionState& state = res.first->second;
     state.connection = info;
-    state.state = fIsLocal ? STATE_INIT_COMPLETE : STATE_INIT;
+    state.state = (info.udp_mode == udp_mode_t::multicast) ? STATE_INIT_COMPLETE : STATE_INIT;
     state.lastSendTime = 0;
     state.lastRecvTime = GetTimeMillis();
 
-    if (addr != LOCAL_READ_DEVICE_SERVICE) {
+    if (info.udp_mode == udp_mode_t::unicast) {
         size_t group_count = 0;
         for (const auto& it : mapUDPNodes)
             if (it.second.connection.group == info.group)
@@ -1080,7 +1321,7 @@ static void OpenUDPConnectionTo(const CService& addr, const UDPConnectionInfo& i
         min_per_node_mbps = std::min(min_per_node_mbps.load(), messageQueues[info.group].bw / group_count);
     }
 
-    if (fIsLocal) {
+    if (info.udp_mode == udp_mode_t::multicast) {
         for (size_t i = 0; i < sizeof(state.last_pings) / sizeof(double); i++) {
             state.last_pings[i] = 0;
         }
@@ -1088,22 +1329,16 @@ static void OpenUDPConnectionTo(const CService& addr, const UDPConnectionInfo& i
 }
 
 void OpenUDPConnectionTo(const CService& addr, uint64_t local_magic, uint64_t remote_magic, bool fUltimatelyTrusted, UDPConnectionType connection_type, uint64_t group) {
-    if (connection_type == UDP_CONNECTION_TYPE_INBOUND_ONLY)
-        group = LOCAL_RECEIVE_GROUP;
-
-    OpenUDPConnectionTo(addr, {htole64(local_magic), htole64(remote_magic), group, fUltimatelyTrusted, connection_type});
+    OpenUDPConnectionTo(addr, {htole64(local_magic), htole64(remote_magic), group, fUltimatelyTrusted, connection_type, udp_mode_t::unicast});
 }
 
-void OpenPersistentUDPConnectionTo(const CService& addr, uint64_t local_magic, uint64_t remote_magic, bool fUltimatelyTrusted, UDPConnectionType connection_type, uint64_t group) {
-    if (connection_type == UDP_CONNECTION_TYPE_INBOUND_ONLY)
-        group = LOCAL_RECEIVE_GROUP;
-
+void OpenPersistentUDPConnectionTo(const CService& addr, uint64_t local_magic, uint64_t remote_magic, bool fUltimatelyTrusted, UDPConnectionType connection_type, uint64_t group, udp_mode_t udp_mode) {
     std::unique_lock<std::recursive_mutex> lock(cs_mapUDPNodes);
 
     if (mapPersistentNodes.count(addr))
         return;
 
-    UDPConnectionInfo info = {htole64(local_magic), htole64(remote_magic), group, fUltimatelyTrusted, connection_type};
+    UDPConnectionInfo info = {htole64(local_magic), htole64(remote_magic), group, fUltimatelyTrusted, connection_type, udp_mode};
     OpenUDPConnectionTo(addr, info);
     mapPersistentNodes[addr] = info;
 }
@@ -1120,14 +1355,7 @@ void CloseUDPConnectionTo(const CService& addr) {
     DisconnectNode(it2);
 }
 
-static void OpenLocalDeviceConnection(bool fWrite) {
-    const CService& service = fWrite ? LOCAL_WRITE_DEVICE_SERVICE : LOCAL_READ_DEVICE_SERVICE;
-    OpenPersistentUDPConnectionTo(service, LOCAL_DEVICE_CHECKSUM_MAGIC, LOCAL_DEVICE_CHECKSUM_MAGIC, false,
-            fWrite ? UDP_CONNECTION_TYPE_OUTBOUND_ONLY : UDP_CONNECTION_TYPE_INBOUND_ONLY,
-            fWrite ? LOCAL_SEND_GROUP : LOCAL_RECEIVE_GROUP);
-}
-
-bool IsNodeLocalReceive(const CService& node) {
+bool IsMulticastRxNode(const CService& node) {
     std::lock_guard<std::recursive_mutex> udpNodesLock(cs_mapUDPNodes);
     const auto it = mapUDPNodes.find(node);
     if (it == mapUDPNodes.end()) {
@@ -1136,5 +1364,5 @@ bool IsNodeLocalReceive(const CService& node) {
 
     UDPConnectionState& conn_state = it->second;
     const UDPConnectionInfo& conn_info = conn_state.connection;
-    return (conn_info.group == LOCAL_RECEIVE_GROUP);
+    return (conn_info.udp_mode == udp_mode_t::multicast) && (conn_info.connection_type == UDP_CONNECTION_TYPE_INBOUND_ONLY);
 }
