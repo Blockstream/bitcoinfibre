@@ -1,4 +1,5 @@
 // Copyright (c) 2016, 2017 Matt Corallo
+// Copyright (c) 2019 Blockstream
 // Unlike the rest of Bitcoin Core, this file is
 // distributed under the Affero General Public License (AGPL v3)
 
@@ -660,8 +661,9 @@ static void ProcessBlockThread() {
                             if (have_prev) {
                                 save_block_for_later = false;
                             } else {
-                                // Only save blocks from the local receive group
-                                save_block_for_later = IsNodeLocalReceive(node);
+	                            /* Only save out-of-order blocks received
+	                             * through a one-way multicast service */
+                                save_block_for_later = IsMulticastRxNode(node);
                             }
                             if (save_block_for_later) {
                                 // Only save blocks that are at least minimally valid

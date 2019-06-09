@@ -1,4 +1,5 @@
 // Copyright (c) 2017 Matt Corallo
+// Copyright (c) 2019 Blockstream
 // Unlike the rest of Bitcoin Core, this file is
 // distributed under the Affero General Public License (AGPL v3)
 
@@ -129,7 +130,7 @@ UniValue addudpnode(const JSONRPCRequest& request)
     if (strCommand == "onetry")
         OpenUDPConnectionTo(addr, local_magic, remote_magic, fTrust, connection_type, group);
     else if (strCommand == "add")
-        OpenPersistentUDPConnectionTo(addr, local_magic, remote_magic, fTrust, connection_type, group);
+        OpenPersistentUDPConnectionTo(addr, local_magic, remote_magic, fTrust, connection_type, group, udp_mode_t::unicast);
 
     return NullUniValue;
 }
