@@ -1087,14 +1087,14 @@ static void OpenUDPConnectionTo(const CService& addr, const UDPConnectionInfo& i
     }
 }
 
-void OpenUDPConnectionTo(const CService& addr, uint64_t local_magic, uint64_t remote_magic, bool fUltimatelyTrusted, UDPConnectionType connection_type, size_t group) {
+void OpenUDPConnectionTo(const CService& addr, uint64_t local_magic, uint64_t remote_magic, bool fUltimatelyTrusted, UDPConnectionType connection_type, uint64_t group) {
     if (connection_type == UDP_CONNECTION_TYPE_INBOUND_ONLY)
         group = LOCAL_RECEIVE_GROUP;
 
     OpenUDPConnectionTo(addr, {htole64(local_magic), htole64(remote_magic), group, fUltimatelyTrusted, connection_type});
 }
 
-void OpenPersistentUDPConnectionTo(const CService& addr, uint64_t local_magic, uint64_t remote_magic, bool fUltimatelyTrusted, UDPConnectionType connection_type, size_t group) {
+void OpenPersistentUDPConnectionTo(const CService& addr, uint64_t local_magic, uint64_t remote_magic, bool fUltimatelyTrusted, UDPConnectionType connection_type, uint64_t group) {
     if (connection_type == UDP_CONNECTION_TYPE_INBOUND_ONLY)
         group = LOCAL_RECEIVE_GROUP;
 
