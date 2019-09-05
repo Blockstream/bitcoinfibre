@@ -224,41 +224,76 @@ void decompressTransaction(Stream& s, CMutableTransaction& tx);
 template <typename Stream>
 void compressTransaction(Stream& s, CTransaction const& tx);
 
+enum codec_version_t : std::uint8_t { none, v1, default_version = v1 };
+
 struct CTxCompressor
 {
-    CTxCompressor(CTransactionRef& txin) : tx(&txin) {}
-    CTxCompressor(CTransaction const& txin) : tx(&txin) {}
-    CTxCompressor(CMutableTransaction &txin) : tx(&txin) {}
+    CTxCompressor(CTransactionRef& txin, codec_version_t v) : tx(&txin), codec_version(v) {}
+    CTxCompressor(CTransaction const& txin, codec_version_t v) : tx(&txin), codec_version(v) {}
+    CTxCompressor(CMutableTransaction &txin, codec_version_t v) : tx(&txin), codec_version(v) {}
 
     template<typename Stream>
     void Serialize(Stream& s) const {
-        if (boost::get<CTransactionRef*>(&tx) != nullptr) {
-           compressTransaction(s, **boost::get<CTransactionRef*>(tx));
+        if (codec_version == codec_version_t::none) {
+            if (boost::get<CTransactionRef*>(&tx) != nullptr) {
+                s << **boost::get<CTransactionRef*>(tx);
+            }
+            else if (boost::get<CTransaction const*>(&tx) != nullptr) {
+                s << *boost::get<CTransaction const*>(tx);
+            }
+            else {
+                throw std::runtime_error("cannot serialize CMutableTransaction");
+            }
         }
-        else if (boost::get<CTransaction const*>(&tx) != nullptr) {
-           compressTransaction(s, *boost::get<CTransaction const*>(tx));
+        else if (codec_version == codec_version_t::v1) {
+            if (boost::get<CTransactionRef*>(&tx) != nullptr) {
+                compressTransaction(s, **boost::get<CTransactionRef*>(tx));
+            }
+            else if (boost::get<CTransaction const*>(&tx) != nullptr) {
+                compressTransaction(s, *boost::get<CTransaction const*>(tx));
+            }
+            else {
+                throw std::runtime_error("cannot serialize CMutableTransaction");
+            }
         }
         else {
-           throw std::runtime_error("cannot serialize CMutableTransaction");
+            throw std::runtime_error("Unsupported codec version");
         }
     }
 
     template<typename Stream>
     void Unserialize(Stream& s) {
-        if (boost::get<CTransactionRef*>(&tx) != nullptr) {
-           CMutableTransaction local_tx;
-           decompressTransaction(s, local_tx);
-           *boost::get<CTransactionRef*>(tx) = MakeTransactionRef(std::move(local_tx));
+        if (codec_version == codec_version_t::none) {
+            if (boost::get<CTransactionRef*>(&tx) != nullptr) {
+                s >> *boost::get<CTransactionRef*>(tx);
+            }
+            else if (boost::get<CMutableTransaction*>(&tx) != nullptr) {
+                s >> *boost::get<CMutableTransaction*>(tx);
+            }
+            else {
+                throw std::runtime_error("cannot un-serialize into CTransaction");
+           }
         }
-        else if (boost::get<CMutableTransaction*>(&tx) != nullptr) {
-           decompressTransaction(s, *boost::get<CMutableTransaction*>(tx));
+        else if (codec_version == codec_version_t::v1) {
+            if (boost::get<CTransactionRef*>(&tx) != nullptr) {
+                CMutableTransaction local_tx;
+                decompressTransaction(s, local_tx);
+                *boost::get<CTransactionRef*>(tx) = MakeTransactionRef(std::move(local_tx));
+            }
+            else if (boost::get<CMutableTransaction*>(&tx) != nullptr) {
+                decompressTransaction(s, *boost::get<CMutableTransaction*>(tx));
+            }
+            else {
+                throw std::runtime_error("cannot un-serialize into CTransaction");
+            }
         }
         else {
-           throw std::runtime_error("cannot un-serialize into CTransaction");
+            throw std::runtime_error("Unsupported codec version");
         }
     }
 private:
     boost::variant<CMutableTransaction*, CTransaction const*, CTransactionRef*> tx;
+    codec_version_t codec_version = codec_version_t::v1;
 };
 
 #endif // BITCOIN_COMPRESSOR_H
