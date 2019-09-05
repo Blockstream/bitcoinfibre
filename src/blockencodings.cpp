@@ -286,8 +286,10 @@ CBlockHeaderAndLengthShortTxIDs::CBlockHeaderAndLengthShortTxIDs(const CBlock& b
             lastprefilledindex += prefilledit->index + 1;
             prefilledit++;
             index_offset++;
-        } else
-            txlens[i - index_offset] = GetSerializeSize(TransactionCompressor(const_cast<CTransactionRef&>(block.vtx[i])), PROTOCOL_VERSION);
+        } else {
+	    const CTransactionRef& tx = block.vtx[i];
+            txlens[i - index_offset] = GetSerializeSize(CTxCompressor(*tx), PROTOCOL_VERSION);
+    	}
     }
 }
 
@@ -369,7 +371,8 @@ struct FillIndexOffsetMapSerializer {
         if (stream.pos() < offset)
             stream.skip_bytes(offset - stream.pos());
         assert(stream.pos() == offset);
-        stream << TransactionCompressor(const_cast<CTransactionRef&>(block.vtx[index]));
+	const CTransactionRef& tx = block.vtx[index];
+	stream << CTxCompressor(*tx);
     }
 };
 
@@ -476,7 +479,7 @@ bool PartiallyDownloadedChunkBlock::SerializeTransaction(VectorOutputStream& str
     // We're fine blindly serializing tx -> either it came from mempool and is fully valid,
     // or it was received over the wire, so it shouldn't be able to eat all our memory.
     const CTransactionRef& tx = PartiallyDownloadedBlock::txn_available[it->second];
-    stream << TransactionCompressor(const_cast<CTransactionRef&>(tx));
+    stream << CTxCompressor(*tx);
 
     it++;
     if (it == index_offsets.end())
@@ -610,7 +613,7 @@ ReadStatus PartiallyDownloadedChunkBlock::FinalizeBlock() {
             if (it->first < stream.pos()) // Last transaction was longer than expected
                 return READ_STATUS_FAILED; // Could be a shorttxid collision
             stream.seek(it->first);
-            stream >> REF(TransactionCompressor(block.vtx[it->second]));
+            stream >> REF(CTxCompressor(block.vtx[it->second]));
         } catch (const std::ios_base::failure& e) {
             return READ_STATUS_FAILED; // Could be a shorttxid collision
         }
