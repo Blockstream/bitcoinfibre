@@ -127,7 +127,7 @@ public:
 };
 
 void Send(CBlock& block, Receiver& recv, bool fIncludeBlock) {
-    CBlockHeaderAndLengthShortTxIDs headerAndIDs(block, true);
+    CBlockHeaderAndLengthShortTxIDs headerAndIDs(block, codec_version_t::default_version, true);
     ChunkCodedBlock fecBlock(block, headerAndIDs);
 
     std::vector<unsigned char> header_data;
