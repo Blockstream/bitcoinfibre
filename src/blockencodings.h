@@ -7,25 +7,11 @@
 
 #include <fec.h> // For consumers - defines FEC_CHUNK_SIZE
 #include <primitives/block.h>
+#include <compressor.h>
 
 #include <memory>
 
 class CTxMemPool;
-
-// Dumb helper to handle CTransaction compression at serialize-time
-struct TransactionCompressor {
-private:
-    CTransactionRef& tx;
-public:
-    explicit TransactionCompressor(CTransactionRef& txIn) : tx(txIn) {}
-
-    ADD_SERIALIZE_METHODS;
-
-    template <typename Stream, typename Operation>
-    inline void SerializationOp(Stream& s, Operation ser_action) {
-        READWRITE(tx); //TODO: Compress tx encoding
-    }
-};
 
 class BlockTransactionsRequest {
 public:
@@ -90,12 +76,24 @@ public:
             size_t i = 0;
             while (txn.size() < txn_size) {
                 txn.resize(std::min((uint64_t)(1000 + txn.size()), txn_size));
-                for (; i < txn.size(); i++)
-                    READWRITE(TransactionCompressor(txn[i]));
+                for (; i < txn.size(); i++) {
+                    if (s.GetVersion() & SERIALIZE_TRANSACTION_COMPRESSED) {
+                        READWRITE(CTxCompressor(txn[i]));
+                    }
+                    else {
+                        READWRITE(txn[i]);
+                    }
+                }
             }
         } else {
-            for (size_t i = 0; i < txn.size(); i++)
-                READWRITE(TransactionCompressor(txn[i]));
+            for (size_t i = 0; i < txn.size(); i++) {
+                if (s.GetVersion() & SERIALIZE_TRANSACTION_COMPRESSED) {
+                    READWRITE(CTxCompressor(txn[i]));
+                }
+                else {
+                    READWRITE(txn[i]);
+                }
+            }
         }
     }
 };
@@ -116,7 +114,12 @@ struct PrefilledTransaction {
         if (idx > std::numeric_limits<uint16_t>::max())
             throw std::ios_base::failure("index overflowed 16-bits");
         index = idx;
-        READWRITE(TransactionCompressor(tx));
+        if (s.GetVersion() & SERIALIZE_TRANSACTION_COMPRESSED) {
+            READWRITE(CTxCompressor(tx));
+        }
+        else {
+            READWRITE(tx);
+        }
     }
 };
 
@@ -217,7 +220,7 @@ public:
 
 class CBlockHeaderAndLengthShortTxIDs : public CBlockHeaderAndShortTxIDs {
 private:
-    std::vector<uint32_t> txlens; // size by TransactionCompressor
+    std::vector<uint32_t> txlens; // size by CTxCompressor
     friend class PartiallyDownloadedChunkBlock;
 public:
     CBlockHeaderAndLengthShortTxIDs(const CBlock& block, bool fDeterministic = false);

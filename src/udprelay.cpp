@@ -283,7 +283,7 @@ void UDPRelayBlock(const CBlock& block) {
         CBlockHeaderAndLengthShortTxIDs headerAndIDs(block, true);
         std::vector<unsigned char> data;
         data.reserve(2500 + 8 * block.vtx.size()); // Rather conservatively high estimate
-        VectorOutputStream stream(&data, SER_NETWORK, PROTOCOL_VERSION);
+        VectorOutputStream stream(&data, SER_NETWORK, SERIALIZE_TRANSACTION_COMPRESSED | PROTOCOL_VERSION);
         stream << headerAndIDs;
 
         std::chrono::steady_clock::time_point coded;
@@ -379,7 +379,7 @@ void UDPRelayBlock(const CBlock& block) {
             std::chrono::steady_clock::time_point all_sent(std::chrono::steady_clock::now());
             LogPrintf("UDP: Built all FEC chunks for block %s in %lf %lf %lf %lf %lf %lf %lf ms with %lu header chunks\n", hashBlock.ToString(), to_millis_double(initd - start), to_millis_double(coded - initd), to_millis_double(feced - coded), to_millis_double(header_sent - feced), to_millis_double(block_coded - header_sent), to_millis_double(block_fec_initd - block_coded), to_millis_double(all_sent - block_fec_initd), header_fecer.fec_chunks);
             if (!inUDPProcess)
-                LogPrintf("UDP: Block %s had serialized size %lu\n", hashBlock.ToString(), GetSerializeSize(block, PROTOCOL_VERSION));
+                LogPrintf("UDP: Block %s had serialized size %lu\n", hashBlock.ToString(), GetSerializeSize(block, SERIALIZE_TRANSACTION_COMPRESSED | PROTOCOL_VERSION));
         } else
             LogPrintf("UDP: Built all FEC chunks for block %s\n", hashBlock.ToString());
 
@@ -395,8 +395,8 @@ void UDPFillMessagesFromTx(const CTransaction& tx, std::vector<UDPMessage>& msgs
     const uint64_t hash_prefix = hash.GetUint64(0);
 
     std::vector<unsigned char> data;
-    VectorOutputStream stream(&data, SER_NETWORK, PROTOCOL_VERSION);
-    stream << tx;
+    VectorOutputStream stream(&data, SER_NETWORK, SERIALIZE_TRANSACTION_COMPRESSED | PROTOCOL_VERSION);
+    stream << CTxCompressor(tx);
 
     const size_t data_chunks = DIV_CEIL(data.size(), FEC_CHUNK_SIZE);
     DataFECer fecer(data, data_chunks * 1.2 + 1);
@@ -420,7 +420,7 @@ void UDPFillMessagesFromBlock(const CBlock& block, std::vector<UDPMessage>& msgs
 
     std::vector<unsigned char> data;
     data.reserve(2500 + 8 * block.vtx.size()); // Rather conservatively high estimate
-    VectorOutputStream stream(&data, SER_NETWORK, PROTOCOL_VERSION);
+    VectorOutputStream stream(&data, SER_NETWORK, SERIALIZE_TRANSACTION_COMPRESSED | PROTOCOL_VERSION);
     stream << headerAndIDs;
 
     const size_t header_data_chunks = DIV_CEIL(data.size(), FEC_CHUNK_SIZE);
@@ -528,7 +528,7 @@ static void ProcessBlockThread() {
 
                 CBlockHeaderAndLengthShortTxIDs header;
                 try {
-                    VectorInputStream stream(&block.data_recvd, SER_NETWORK, PROTOCOL_VERSION);
+                    VectorInputStream stream(&block.data_recvd, SER_NETWORK, SERIALIZE_TRANSACTION_COMPRESSED | PROTOCOL_VERSION);
                     stream >> header;
                 } catch (std::ios_base::failure& e) {
                     lock.unlock();
@@ -687,7 +687,7 @@ static void ProcessBlockThread() {
                     if (fBench) {
                         LogPrintf("UDP: Final block processing for %s took %lf %lf %lf %lf ms (new: %d)\n", decoded_block.GetHash().ToString(), to_millis_double(fec_reconstruct_finished - reconstruct_start), to_millis_double(block_finalized - fec_reconstruct_finished), to_millis_double(process_start - block_finalized), to_millis_double(std::chrono::steady_clock::now() - process_start), fNewBlock);
                         if (fNewBlock) {
-                            LogPrintf("UDP: Block %s had serialized size %lu\n", decoded_block.GetHash().ToString(), GetSerializeSize(decoded_block, PROTOCOL_VERSION));
+                            LogPrintf("UDP: Block %s had serialized size %lu\n", decoded_block.GetHash().ToString(), GetSerializeSize(decoded_block, SERIALIZE_TRANSACTION_COMPRESSED | PROTOCOL_VERSION));
                         }
                     }
 
@@ -855,14 +855,14 @@ static bool HandleTx(UDPMessage& msg, size_t length, const CService& node, UDPCo
         }
 
         try {
-            VectorInputStream stream(&tx_data, SER_NETWORK, PROTOCOL_VERSION);
+            VectorInputStream stream(&tx_data, SER_NETWORK, SERIALIZE_TRANSACTION_COMPRESSED | PROTOCOL_VERSION);
             CTransactionRef tx;
-            stream >> tx;
+            stream >> CTxCompressor(tx);
             LOCK(cs_main);
             CValidationState state;
             AcceptToMemoryPool(mempool, state, tx, nullptr, nullptr, false, 0);
-        } catch (std::ios_base::failure& e) {
-            LogPrintf("UDP: Tx decode failed for tx %lu from %s\n", msg.msg.block.hash_prefix, node.ToString());
+        } catch (std::exception& e) {
+            LogPrintf("UDP: Tx decode failed for tx %lu from %s: %s\n", msg.msg.block.hash_prefix, node.ToString(), e.what());
         }
 
         state.tx_in_flight.reset();
