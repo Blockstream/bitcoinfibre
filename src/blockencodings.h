@@ -7,6 +7,7 @@
 
 #include <fec.h> // For consumers - defines FEC_CHUNK_SIZE
 #include <primitives/block.h>
+#include <compressor.h>
 
 
 class CTxMemPool;
@@ -143,10 +144,20 @@ public:
 
 class CBlockHeaderAndLengthShortTxIDs : public CBlockHeaderAndShortTxIDs {
 private:
-    std::vector<uint32_t> txlens; // size by TransactionCompressor
+    codec_version_t codec_version; // Compression/decompression scheme's version
+    std::vector<uint32_t> txlens; // compressed size by CTxCompressor
+    // NOTE: the prefilled transactions from the base class are not compressed
+    // since that would require an out-of-band channel to communicate
+    // compression version down to the base class. Note that
+    // CBlockHeadersAnsShortTxIDs is used in the normal bitcoin peer protocol as
+    // well, where transactions are not compressed.
     friend class PartiallyDownloadedChunkBlock;
 public:
-    CBlockHeaderAndLengthShortTxIDs(const CBlock& block, bool fDeterministic = false);
+
+    codec_version_t codec_ver() const { return codec_version; }
+
+    CBlockHeaderAndLengthShortTxIDs(const CBlock& block, codec_version_t const cv,
+        bool fDeterministic = false);
 
     // Dummy for deserialization
     CBlockHeaderAndLengthShortTxIDs() {}
@@ -160,6 +171,8 @@ public:
 
     template <typename Stream, typename Operation>
     inline void SerializationOp(Stream& s, Operation ser_action) {
+        READWRITE(*reinterpret_cast<std::uint8_t*>(&codec_version));
+
         READWRITE(*(CBlockHeaderAndShortTxIDs*)this);
         if (ser_action.ForRead()) {
             txlens.clear();
@@ -198,6 +211,9 @@ private:
     bool allTxnFromMempool;
     bool block_finalized = false;
     std::shared_ptr<CBlock> decoded_block;
+
+    // this is initialied to what we read off the network in InitData()
+    codec_version_t codec_version = codec_version_t::default_version;
 
     // Things used in the iterative fill-from-mempool:
     std::map<size_t, size_t>::iterator fill_coding_index_offsets_it;

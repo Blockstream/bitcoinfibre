@@ -658,7 +658,7 @@ public:
         // Read from the beginning of the buffer
         unsigned int nReadPosNext = nReadPos + nSize;
         if (nReadPosNext > v->size())
-            throw std::ios_base::failure("CDataStream::read(): end of data");
+            throw std::ios_base::failure("CVectorStream::read(): end of data");
         memcpy(pch, &(*v)[nReadPos], nSize);
         nReadPos = nReadPosNext;
         return (*this);
