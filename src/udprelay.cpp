@@ -863,7 +863,6 @@ static bool HandleTx(UDPMessage& msg, size_t length, const CService& node, UDPCo
             AcceptToMemoryPool(mempool, state, tx, nullptr, nullptr, false, 0);
         } catch (std::ios_base::failure& e) {
             LogPrintf("UDP: Tx decode failed for tx %lu from %s\n", msg.msg.block.hash_prefix, node.ToString());
-            return true;
         }
 
         state.tx_in_flight.reset();
