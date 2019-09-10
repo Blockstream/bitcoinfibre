@@ -60,7 +60,7 @@ static CBlock BuildBlockTestCase() {
 
 // Number of shared use_counts we expect for a tx we haven't touched
 // (block + mempool + our copy from the GetSharedTx call)
-constexpr long SHARED_TX_OFFSET{3};
+constexpr long SHARED_TX_OFFSET{2};
 
 BOOST_AUTO_TEST_CASE(SimpleRoundTripTest)
 {
@@ -397,7 +397,7 @@ BOOST_AUTO_TEST_CASE(SimpleBlockFECRoundTripTest)
     BOOST_CHECK_EQUAL(pool.mapTx.find(block.vtx[2]->GetHash())->GetSharedTx().use_count(), SHARED_TX_OFFSET + 0);
 }
 
-#define DIV_CEIL(a, b) (((a) + (b) - 1) / (b))
+size_t div_ceil(size_t const a, size_t const b) { return (a + b - 1) / b; }
 
 BOOST_AUTO_TEST_CASE(FECedBlockFECRoundTripTest)
 {
@@ -438,8 +438,8 @@ BOOST_AUTO_TEST_CASE(FECedBlockFECRoundTripTest)
             BOOST_CHECK(header_decoder.ProvideChunk(&header_fec_chunks.first[1], header_fec_chunks.second[1]));
             BOOST_CHECK(header_decoder.DecodeReady());
 
-            std::vector<unsigned char> header_data(DIV_CEIL(header_size, FEC_CHUNK_SIZE) * FEC_CHUNK_SIZE);
-            for (size_t i = 0; i < DIV_CEIL(header_size, FEC_CHUNK_SIZE); i++)
+            std::vector<unsigned char> header_data(div_ceil(header_size, FEC_CHUNK_SIZE) * FEC_CHUNK_SIZE);
+            for (size_t i = 0; i < div_ceil(header_size, FEC_CHUNK_SIZE); i++)
                 memcpy(&header_data[i * FEC_CHUNK_SIZE], header_decoder.GetDataPtr(i), FEC_CHUNK_SIZE);
 
             VectorInputStream stream(&header_data, SER_NETWORK, PROTOCOL_VERSION);
@@ -483,7 +483,7 @@ BOOST_AUTO_TEST_CASE(FECedBlockFECRoundTripTest)
                 BOOST_CHECK(block_decoder.DecodeReady());
             }
 
-            for (size_t i = 0; i < DIV_CEIL(block_size, FEC_CHUNK_SIZE); i++)
+            for (size_t i = 0; i < div_ceil(block_size, FEC_CHUNK_SIZE); i++)
                 memcpy(&block_data[i * FEC_CHUNK_SIZE], block_decoder.GetDataPtr(i), FEC_CHUNK_SIZE);
         }
 
@@ -516,37 +516,37 @@ static void TestBlockWithMempool(const CBlock& block, CTxMemPool& pool) {
         stream << headerAndIDs;
 
         header_size = header_data.size();
-        size_t header_fec_chunk_count = DIV_CEIL(header_size, FEC_CHUNK_SIZE) + 10;
+        size_t header_fec_chunk_count = div_ceil(header_size, FEC_CHUNK_SIZE) + 10;
         std::pair<std::unique_ptr<FECChunkType[]>, std::vector<uint32_t>> header_fec_chunks(std::piecewise_construct, std::forward_as_tuple(new FECChunkType[header_fec_chunk_count]), std::forward_as_tuple(header_fec_chunk_count));
         BOOST_CHECK(BuildFECChunks(header_data, header_fec_chunks));
 
-        for (size_t i = 0; i < DIV_CEIL(header_size, FEC_CHUNK_SIZE); i++) {
+        for (size_t i = 0; i < div_ceil(header_size, FEC_CHUNK_SIZE); i++) {
             std::vector<unsigned char>::iterator endit = header_data.begin() + std::min(header_size, (i+1) * FEC_CHUNK_SIZE);
             header_chunks.push_back(std::make_pair(i,
                         std::vector<unsigned char>(header_data.begin() + i * FEC_CHUNK_SIZE, endit)));
             header_chunks.back().second.resize(FEC_CHUNK_SIZE);
         }
-        for (size_t i = 0; i < DIV_CEIL(header_size, FEC_CHUNK_SIZE) + 10; i++)
+        for (size_t i = 0; i < div_ceil(header_size, FEC_CHUNK_SIZE) + 10; i++)
             header_chunks.push_back(std::make_pair(header_fec_chunks.second[i],
                         std::vector<unsigned char>(((unsigned char*)&header_fec_chunks.first[i]), ((unsigned char*)&header_fec_chunks.first[i]) + FEC_CHUNK_SIZE)));
 
         block_size = fecBlock.GetCodedBlock().size();
         BOOST_CHECK(block_size % FEC_CHUNK_SIZE == 0);
-        size_t block_fec_chunk_count = DIV_CEIL(block_size, FEC_CHUNK_SIZE) + 10;
+        size_t block_fec_chunk_count = div_ceil(block_size, FEC_CHUNK_SIZE) + 10;
         std::pair<std::unique_ptr<FECChunkType[]>, std::vector<uint32_t>> block_fec_chunks(std::piecewise_construct, std::forward_as_tuple(new FECChunkType[block_fec_chunk_count]), std::forward_as_tuple(block_fec_chunk_count));
         BOOST_CHECK(BuildFECChunks(fecBlock.GetCodedBlock(), block_fec_chunks));
 
-        for (size_t i = 0; i < DIV_CEIL(block_size, FEC_CHUNK_SIZE); i++)
+        for (size_t i = 0; i < div_ceil(block_size, FEC_CHUNK_SIZE); i++)
             block_chunks.push_back(std::make_pair(i,
                         std::vector<unsigned char>(fecBlock.GetCodedBlock().begin() + i * FEC_CHUNK_SIZE, fecBlock.GetCodedBlock().begin() + (i+1) * FEC_CHUNK_SIZE)));
-        for (size_t i = 0; i < DIV_CEIL(block_size, FEC_CHUNK_SIZE) + 10; i++)
+        for (size_t i = 0; i < div_ceil(block_size, FEC_CHUNK_SIZE) + 10; i++)
             block_chunks.push_back(std::make_pair(block_fec_chunks.second[i],
                         std::vector<unsigned char>(((unsigned char*)&block_fec_chunks.first[i]), ((unsigned char*)&block_fec_chunks.first[i]) + FEC_CHUNK_SIZE)));
     }
 
     CBlockHeaderAndLengthShortTxIDs shortIDs;
     {
-        size_t header_chunk_count = DIV_CEIL(header_size, FEC_CHUNK_SIZE);
+        size_t header_chunk_count = div_ceil(header_size, FEC_CHUNK_SIZE);
         FECDecoder header_decoder(header_size);
 
         // Pass in random chunks until we have enough
@@ -573,7 +573,7 @@ static void TestBlockWithMempool(const CBlock& block, CTxMemPool& pool) {
         FECDecoder block_decoder(block_size);
         std::vector<std::pair<size_t, std::vector<unsigned char> > > block_chunks_sorted(block_chunks);
 
-        for (size_t i = 0; i < DIV_CEIL(block_size, FEC_CHUNK_SIZE); i++) {
+        for (size_t i = 0; i < div_ceil(block_size, FEC_CHUNK_SIZE); i++) {
             if (partialBlock.IsChunkAvailable(i)) {
                 BOOST_CHECK(block_decoder.ProvideChunk(partialBlock.GetChunk(i), i));
                 BOOST_CHECK(!memcmp(partialBlock.GetChunk(i), &block_chunks_sorted[i].second[0], FEC_CHUNK_SIZE));
@@ -585,14 +585,14 @@ static void TestBlockWithMempool(const CBlock& block, CTxMemPool& pool) {
         for (size_t i = 0; i < block_chunks.size() - 5 && !block_decoder.DecodeReady(); i++)
             BOOST_CHECK(block_decoder.ProvideChunk(&block_chunks[i].second[0], block_chunks[i].first));
 
-        for (size_t i = 0; i < DIV_CEIL(block_size, FEC_CHUNK_SIZE); i++) {
+        for (size_t i = 0; i < div_ceil(block_size, FEC_CHUNK_SIZE); i++) {
             if (!partialBlock.IsChunkAvailable(i)) {
                 memcpy(partialBlock.GetChunk(i), block_decoder.GetDataPtr(i), FEC_CHUNK_SIZE);
                 partialBlock.MarkChunkAvailable(i);
             }
         }
 
-        for (size_t i = 0; i < DIV_CEIL(block_size, FEC_CHUNK_SIZE); i++) {
+        for (size_t i = 0; i < div_ceil(block_size, FEC_CHUNK_SIZE); i++) {
             BOOST_CHECK(partialBlock.IsChunkAvailable(i));
             BOOST_CHECK(!memcmp(partialBlock.GetChunk(i), &block_chunks_sorted[i].second[0], FEC_CHUNK_SIZE));
         }
