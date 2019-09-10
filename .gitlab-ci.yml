@@ -1,0 +1,9 @@
+test:
+    script:
+    - set -e
+    - apt-get update -y
+    - apt-get install -yqq bsdmainutils libboost-thread-dev libboost-system-dev libboost-program-options-dev libboost-chrono-dev libboost-test-dev libboost-filesystem-dev
+    - ./autogen.sh
+    - ./configure --disable-wallet --enable-debug --with-gui=no
+    - make -j$(nproc)
+    - ./src/test/test_bitcoin
