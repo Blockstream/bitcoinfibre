@@ -121,7 +121,7 @@ static bool CheckChecksum(uint64_t magic, UDPMessage& msg, const unsigned int le
  * Init/shutdown logic follows
  */
 
-static struct event_base* event_base_read = NULL;
+static struct event_base* event_base_read = nullptr;
 static event *timer_event;
 static std::vector<event*> read_events;
 static struct timeval timer_interval;
@@ -136,7 +136,7 @@ static void ThreadRunWriteEventLoop() { do_send_messages(); }
 static void read_socket_func(evutil_socket_t fd, short event, void* arg);
 static void timer_func(evutil_socket_t fd, short event, void* arg);
 
-static boost::thread *udp_read_thread = NULL;
+static boost::thread *udp_read_thread = nullptr;
 static std::vector<boost::thread> udp_write_threads;
 
 static void OpenMulticastConnection(const CService& service, bool multicast_tx, size_t group);
@@ -455,17 +455,17 @@ bool InitializeUDPConnections() {
     }
 
     for (int socket : udp_socks) {
-        event *read_event = event_new(event_base_read, socket, EV_READ | EV_PERSIST, read_socket_func, NULL);
+        event *read_event = event_new(event_base_read, socket, EV_READ | EV_PERSIST, read_socket_func, nullptr);
         if (!read_event) {
             event_base_free(event_base_read);
             CloseSocketsAndReadEvents();
             return false;
         }
         read_events.push_back(read_event);
-        event_add(read_event, NULL);
+        event_add(read_event, nullptr);
     }
 
-    timer_event = event_new(event_base_read, -1, EV_PERSIST, timer_func, NULL);
+    timer_event = event_new(event_base_read, -1, EV_PERSIST, timer_func, nullptr);
     if (!timer_event) {
         CloseSocketsAndReadEvents();
         event_base_free(event_base_read);
