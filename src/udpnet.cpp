@@ -125,11 +125,44 @@ static event *timer_event;
 static std::vector<event*> read_events;
 static struct timeval timer_interval;
 
+// ~10MB of outbound messages pending
+#define PENDING_MESSAGES_BUFF_SIZE 8192
+static std::atomic_bool send_messages_break(false);
+std::mutex send_messages_mutex;
+std::condition_variable send_messages_wake_cv;
+struct PendingMessagesBuff {
+    std::tuple<CService, UDPMessage, unsigned int, uint64_t> messagesPendingRingBuff[PENDING_MESSAGES_BUFF_SIZE];
+    std::atomic<uint16_t> nextPendingMessage, nextUndefinedMessage;
+    PendingMessagesBuff() : nextPendingMessage(0), nextUndefinedMessage(0) {}
+};
+struct MessageStateCache {
+    ssize_t buff_id;
+    uint16_t nextPendingMessage;
+    uint16_t nextUndefinedMessage;
+};
+struct PerGroupMessageQueue {
+    std::array<PendingMessagesBuff, 3> buffs;
+    inline MessageStateCache NextBuff(std::memory_order order) {
+        for (size_t i = 0; i < buffs.size(); i++) {
+            uint16_t next_undefined_message = buffs[i].nextUndefinedMessage.load(order);
+            uint16_t next_pending_message = buffs[i].nextPendingMessage.load(order);
+            if (next_undefined_message != next_pending_message)
+                return {(ssize_t)i, next_pending_message, next_undefined_message};
+        }
+        return {-1, 0, 0};
+    }
+    uint64_t bw;
+    bool multicast;
+    PerGroupMessageQueue() : bw(0) {}
+    PerGroupMessageQueue(PerGroupMessageQueue&& q) =delete;
+};
+static std::vector<PerGroupMessageQueue> txQueues;
+
 static void ThreadRunReadEventLoop() { event_base_dispatch(event_base_read); }
 static void do_send_messages();
 static void send_messages_flush_and_break();
-static void send_messages_init(const std::vector<std::pair<unsigned short, uint64_t> >& group_list,
-                               const std::vector<UDPMulticastInfo>& multicast_list);
+static std::vector<PerGroupMessageQueue> init_tx_queues(const std::vector<std::pair<unsigned short, uint64_t> >& group_list,
+                                                        const std::vector<UDPMulticastInfo>& multicast_list);
 static void ThreadRunWriteEventLoop() { do_send_messages(); }
 
 static void read_socket_func(evutil_socket_t fd, short event, void* arg);
@@ -474,8 +507,8 @@ bool InitializeUDPConnections() {
     timer_interval.tv_usec = 500*1000;
     evtimer_add(timer_event, &timer_interval);
 
-    /* Initialize Tx message queues and their corresponding bandwidth budgets */
-    send_messages_init(group_list, multicast_list);
+    /* Initialize Tx message queues */
+    txQueues = init_tx_queues(group_list, multicast_list);
 
     udp_write_threads.emplace_back(boost::bind(&TraceThread<boost::function<void ()> >, "udpwrite", &ThreadRunWriteEventLoop));
 
@@ -791,39 +824,6 @@ static void timer_func(evutil_socket_t fd, short event, void* arg) {
     }
 }
 
-// ~10MB of outbound messages pending
-#define PENDING_MESSAGES_BUFF_SIZE 8192
-static std::atomic_bool send_messages_break(false);
-std::mutex send_messages_mutex;
-std::condition_variable send_messages_wake_cv;
-struct PendingMessagesBuff {
-    std::tuple<CService, UDPMessage, unsigned int, uint64_t> messagesPendingRingBuff[PENDING_MESSAGES_BUFF_SIZE];
-    std::atomic<uint16_t> nextPendingMessage, nextUndefinedMessage;
-    PendingMessagesBuff() : nextPendingMessage(0), nextUndefinedMessage(0) {}
-};
-struct MessageStateCache {
-    ssize_t buff_id;
-    uint16_t nextPendingMessage;
-    uint16_t nextUndefinedMessage;
-};
-struct PerGroupMessageQueue {
-    std::array<PendingMessagesBuff, 3> buffs;
-    inline MessageStateCache NextBuff(std::memory_order order) {
-        for (size_t i = 0; i < buffs.size(); i++) {
-            uint16_t next_undefined_message = buffs[i].nextUndefinedMessage.load(order);
-            uint16_t next_pending_message = buffs[i].nextPendingMessage.load(order);
-            if (next_undefined_message != next_pending_message)
-                return {(ssize_t)i, next_pending_message, next_undefined_message};
-        }
-        return {-1, 0, 0};
-    }
-    uint64_t bw;
-    bool multicast;
-    PerGroupMessageQueue() : bw(0) {}
-    PerGroupMessageQueue(PerGroupMessageQueue&& q) =delete;
-};
-static std::vector<PerGroupMessageQueue> messageQueues;
-
 static inline void SendMessage(const UDPMessage& msg, const unsigned int length, PerGroupMessageQueue& queue, PendingMessagesBuff& buff, const CService& service, const uint64_t magic) {
     std::unique_lock<std::mutex> lock(send_messages_mutex);
     const uint16_t next_undefined_message_cache = buff.nextUndefinedMessage.load(std::memory_order_acquire);
@@ -847,8 +847,8 @@ static inline void SendMessage(const UDPMessage& msg, const unsigned int length,
 
 void SendMessage(const UDPMessage& msg, const unsigned int length, bool high_prio, const CService& service, const uint64_t magic, size_t group) {
     assert(length <= sizeof(UDPMessage));
-    assert(group < messageQueues.size());
-    PerGroupMessageQueue& queue = messageQueues[group];
+    assert(group < txQueues.size());
+    PerGroupMessageQueue& queue = txQueues[group];
 
     /* Only the backfill thread sends to the multicast group. Since it uses the
      * above SendMessage definition directly, prevent transmission here: */
@@ -872,11 +872,11 @@ struct PerQueueSendState {
 
 static inline bool fill_cache(PerQueueSendState* states, std::chrono::steady_clock::time_point& now) {
     bool have_work = false;
-    for (size_t i = 0; i < messageQueues.size(); i++) {
+    for (size_t i = 0; i < txQueues.size(); i++) {
         if (states[i].next_send > now)
             continue;
 
-        states[i].buff_state = messageQueues[i].NextBuff(std::memory_order_acquire);
+        states[i].buff_state = txQueues[i].NextBuff(std::memory_order_acquire);
         if (states[i].buff_state.buff_id != -1) {
             have_work = true;
             break;
@@ -901,16 +901,16 @@ static void do_send_messages() {
 
     static const size_t WRITES_PER_SEC = 1000;
 
-    PerQueueSendState* states = (PerQueueSendState*)alloca(sizeof(PerQueueSendState) * messageQueues.size());
-    for (size_t i = 0; i < messageQueues.size(); i++) {
+    PerQueueSendState* states = (PerQueueSendState*)alloca(sizeof(PerQueueSendState) * txQueues.size());
+    for (size_t i = 0; i < txQueues.size(); i++) {
         states[i].buff_state           = {-1, 0, 0};
         states[i].next_send            = std::chrono::steady_clock::now();
-        states[i].multicast            = messageQueues[i].multicast;
-        states[i].target_bytes_per_sec = messageQueues[i].bw * (states[i].multicast ? 1 : 1024 * 1024) / 8;
+        states[i].multicast            = txQueues[i].multicast;
+        states[i].target_bytes_per_sec = txQueues[i].bw * (states[i].multicast ? 1 : 1024 * 1024) / 8;
         /* NOTE: for -udpport argument, bandwidth is set in Mbps. For
          * -udpmulticasttx, bandwidth is set in bps. */
         states[i].bytes_per_obj        = states[i].multicast ? (sizeof(UDPMessageHeader) + MAX_UDP_MESSAGE_LENGTH) : PACKET_SIZE;
-        states[i].write_objs_per_call  = std::max<size_t>(1, states[i].target_bytes_per_sec / WRITES_PER_SEC / states[i].bytes_per_obj / messageQueues.size());
+        states[i].write_objs_per_call  = std::max<size_t>(1, states[i].target_bytes_per_sec / WRITES_PER_SEC / states[i].bytes_per_obj / txQueues.size());
         states[i].buff_emptied         = true;
     }
 
@@ -921,7 +921,7 @@ static void do_send_messages() {
         std::chrono::steady_clock::time_point sleep_until(start + std::chrono::minutes(60));
 
         /* Message queues are per group - iterate over them and schedule Tx's */
-        for (size_t group = 0; group < messageQueues.size(); group++) {
+        for (size_t group = 0; group < txQueues.size(); group++) {
             PerQueueSendState& send_state = states[group];
             if (send_state.next_send > start) {
                 sleep_until = std::min(sleep_until, send_state.next_send);
@@ -937,13 +937,13 @@ static void do_send_messages() {
             if (send_state.buff_state.buff_id == -1 || // Skip if we got filled in in the locked check...
                     send_state.buff_state.nextPendingMessage == send_state.buff_state.nextUndefinedMessage || // ...or we're out of known messages
                     send_state.buff_state.buff_id == 0) // ...or we want to check for availability in a higher-priority buffer
-                send_state.buff_state = messageQueues[group].NextBuff(std::memory_order_acquire);
+                send_state.buff_state = txQueues[group].NextBuff(std::memory_order_acquire);
             if (send_state.buff_state.buff_id == -1) {
                 send_state.buff_emptied = true;
                 continue;
             }
 
-            PendingMessagesBuff* buff = &messageQueues[group].buffs[send_state.buff_state.buff_id];
+            PendingMessagesBuff* buff = &txQueues[group].buffs[send_state.buff_state.buff_id];
             size_t i = 0;
             for (; i < send_state.write_objs_per_call + extra_writes && send_state.buff_state.buff_id != -1; i++) {
                 std::tuple<CService, UDPMessage, unsigned int, uint64_t>& msg = buff->messagesPendingRingBuff[send_state.buff_state.nextPendingMessage];
@@ -970,9 +970,9 @@ static void do_send_messages() {
                 send_state.buff_state.nextPendingMessage = (send_state.buff_state.nextPendingMessage + 1) % PENDING_MESSAGES_BUFF_SIZE;
                 if (send_state.buff_state.nextPendingMessage == send_state.buff_state.nextUndefinedMessage) {
                     buff->nextPendingMessage.store(send_state.buff_state.nextPendingMessage, std::memory_order_release);
-                    send_state.buff_state = messageQueues[group].NextBuff(std::memory_order_acquire);
+                    send_state.buff_state = txQueues[group].NextBuff(std::memory_order_acquire);
                     if (send_state.buff_state.buff_id != -1)
-                        buff = &messageQueues[group].buffs[send_state.buff_state.buff_id];
+                        buff = &txQueues[group].buffs[send_state.buff_state.buff_id];
                 }
             }
             if (send_state.buff_state.buff_id != -1)
@@ -1011,15 +1011,15 @@ static void MulticastBackfillThread() {
         /* Find the multicast Tx queue */
         size_t i_mcast_tx;
         int n_multicast_tx_queues = 0;
-        for (size_t i = 0; i < messageQueues.size(); i++) {
-            if (messageQueues[i].multicast && messageQueues[i].bw > 0) {
+        for (size_t i = 0; i < txQueues.size(); i++) {
+            if (txQueues[i].multicast && txQueues[i].bw > 0) {
                 i_mcast_tx = i;
                 n_multicast_tx_queues++;
             }
         }
         assert(n_multicast_tx_queues == 1);
 
-        PerGroupMessageQueue& queue = messageQueues[i_mcast_tx];
+        PerGroupMessageQueue& queue = txQueues[i_mcast_tx];
 
         while (!send_messages_break) {
             while (!send_messages_break && queue.buffs[2].nextUndefinedMessage.load(std::memory_order_acquire) != queue.buffs[2].nextPendingMessage.load(std::memory_order_acquire))
@@ -1096,27 +1096,29 @@ static void MulticastBackfillThread() {
     })).detach();
 }
 
-static void send_messages_init(const std::vector<std::pair<unsigned short, uint64_t> >& group_list,
-                               const std::vector<UDPMulticastInfo>& multicast_list) {
-    messageQueues = std::vector<PerGroupMessageQueue>(group_list.size() + multicast_list.size());
+static std::vector<PerGroupMessageQueue> init_tx_queues(const std::vector<std::pair<unsigned short, uint64_t> >& group_list,
+                                                            const std::vector<UDPMulticastInfo>& multicast_list) {
+    std::vector<PerGroupMessageQueue> queues(group_list.size() + multicast_list.size());
 
     for (size_t i = 0; i < group_list.size(); i++) {
         LogPrintf("UDP: Set bw for group %d: %d Mbps\n", i, group_list[i].second);
-        messageQueues[i].bw = group_list[i].second;
+        queues[i].bw = group_list[i].second;
     }
 
     size_t j = group_list.size();
 
     for (auto& mcast_info : multicast_list) {
         if (mcast_info.port) {
-            messageQueues[j].bw        = mcast_info.bw;
-            messageQueues[j].multicast = true;
-            if (messageQueues[j].bw > 0) {
+            queues[j].bw        = mcast_info.bw;
+            queues[j].multicast = true;
+            if (queues[j].bw > 0) {
                 LogPrintf("UDP: Set bw for group %d: %d bps\n", j, mcast_info.bw);
             }
         }
         j++;
     }
+
+    return queues;
 }
 
 static void send_messages_flush_and_break() {
@@ -1293,7 +1295,7 @@ void GetUDPConnectionList(std::vector<UDPConnectionStats>& connections_list) {
 
 static void OpenUDPConnectionTo(const CService& addr, const UDPConnectionInfo& info) {
     std::unique_lock<std::recursive_mutex> lock(cs_mapUDPNodes);
-    assert(info.group < messageQueues.size());
+    assert(info.group < txQueues.size());
 
     std::pair<std::map<CService, UDPConnectionState>::iterator, bool> res = mapUDPNodes.insert(std::make_pair(addr, UDPConnectionState()));
     if (!res.second) {
@@ -1318,7 +1320,7 @@ static void OpenUDPConnectionTo(const CService& addr, const UDPConnectionInfo& i
         for (const auto& it : mapUDPNodes)
             if (it.second.connection.group == info.group)
                 group_count++;
-        min_per_node_mbps = std::min(min_per_node_mbps.load(), messageQueues[info.group].bw / group_count);
+        min_per_node_mbps = std::min(min_per_node_mbps.load(), txQueues[info.group].bw / group_count);
     }
 
     if (info.udp_mode == udp_mode_t::multicast) {
