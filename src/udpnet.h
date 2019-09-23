@@ -192,13 +192,13 @@ struct UDPConnectionState {
     unsigned int last_ping_location;
     // for speed calculations (mbps)
     int64_t rcvdBytes;
-    int64_t lastAvgTime;
+    std::chrono::steady_clock::time_point lastAvgTime;
     std::map<uint64_t, ChunksAvailableSet> chunks_avail;
     uint64_t tx_in_flight_hash_prefix, tx_in_flight_msg_size;
     std::unique_ptr<FECDecoder> tx_in_flight;
 
     UDPConnectionState() : connection({}), state(0), protocolVersion(0), lastSendTime(0), lastRecvTime(0), lastPingTime(0), last_ping_location(0),
-        rcvdBytes(0), lastAvgTime(0), tx_in_flight_hash_prefix(0), tx_in_flight_msg_size(0)
+        rcvdBytes(0), lastAvgTime(std::chrono::steady_clock::now()), tx_in_flight_hash_prefix(0), tx_in_flight_msg_size(0)
         { for (size_t i = 0; i < sizeof(last_pings) / sizeof(double); i++) last_pings[i] = -1; }
 };
 #define PROTOCOL_VERSION_MIN(ver) (((ver) >> 16) & 0xffff)

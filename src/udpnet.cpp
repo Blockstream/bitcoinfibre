@@ -594,10 +594,9 @@ static void read_socket_func(evutil_socket_t fd, short event, void* arg) {
                 send_and_disconnect(it);
             else {
                 if (mcastStatPrintInterval > 0) {
-                    if (!state.lastAvgTime)
-                        state.lastAvgTime = GetTimeMillis();
                     state.rcvdBytes += sizeof(UDPMessage) - 1;
-                    int64_t timeDeltaMillis = GetTimeMillis() - state.lastAvgTime;
+                    auto now = std::chrono::steady_clock::now();
+                    double timeDeltaMillis = to_millis_double(now - state.lastAvgTime);
                     if (timeDeltaMillis > 1000*mcastStatPrintInterval) {
                         auto const itm = mapMulticastGroupNames.find(state.connection.group);
                         std::string groupname;
@@ -609,7 +608,7 @@ static void read_socket_func(evutil_socket_t fd, short event, void* arg) {
                         LogPrintf("UDP multicast group %d (%s): Average bit rate %.4f Mbit/sec\n",
                                   state.connection.group, groupname,
                                   (double)state.rcvdBytes*8/(1000*timeDeltaMillis));
-                        state.lastAvgTime += timeDeltaMillis;
+                        state.lastAvgTime = now;
                         state.rcvdBytes = 0;
                     }
                 }
@@ -1312,6 +1311,7 @@ static void OpenUDPConnectionTo(const CService& addr, const UDPConnectionInfo& i
     state.state = (info.udp_mode == udp_mode_t::multicast) ? STATE_INIT_COMPLETE : STATE_INIT;
     state.lastSendTime = 0;
     state.lastRecvTime = GetTimeMillis();
+    state.lastAvgTime  = std::chrono::steady_clock::now();
 
     if (info.udp_mode == udp_mode_t::unicast) {
         size_t group_count = 0;
