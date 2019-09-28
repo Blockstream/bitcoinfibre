@@ -67,6 +67,7 @@ namespace BCLog {
         BLOCKSTORE  = (1 << 26),
         UDPNET      = (1 << 27),
         FEC         = (1 << 28),
+        UDPMCAST    = (1 << 29),
         ALL         = ~(uint32_t)0,
     };
 

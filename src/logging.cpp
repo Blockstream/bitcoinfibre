@@ -166,6 +166,7 @@ const CLogCategoryDesc LogCategories[] =
     {BCLog::UTIL, "util"},
     {BCLog::BLOCKSTORE, "blockstorage"},
     {BCLog::UDPNET, "udpnet"},
+    {BCLog::UDPMCAST, "udpmulticast"},
     {BCLog::FEC, "fec"},
     {BCLog::ALL, "1"},
     {BCLog::ALL, "all"},
