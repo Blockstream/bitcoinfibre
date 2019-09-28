@@ -159,6 +159,7 @@ const CLogCategoryDesc LogCategories[] =
     {BCLog::I2P, "i2p"},
     {BCLog::IPC, "ipc"},
     {BCLog::UDPNET, "udpnet"},
+    {BCLog::UDPMCAST, "udpmulticast"},
     {BCLog::FEC, "fec"},
     {BCLog::ALL, "1"},
     {BCLog::ALL, "all"},
