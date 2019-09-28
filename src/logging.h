@@ -58,6 +58,7 @@ namespace BCLog {
         VALIDATION  = (1 << 21),
         UDPNET      = (1 << 22),
         FEC         = (1 << 23),
+        UDPMCAST    = (1 << 24),
         ALL         = ~(uint32_t)0,
     };
 
