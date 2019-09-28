@@ -30,12 +30,14 @@ static std::unordered_set<uint64_t> setBlocksRelayed;
 // of packets into more ProcessNewBlock calls, so we have to keep a separate
 // set here.
 static std::set<std::pair<uint64_t, CService>> setBlocksReceived;
+// Keep track of used vs. received block chunks
+static std::map<std::pair<uint64_t, CService>, BlockChunkCount> mapChunkCount;
 
 static std::map<std::pair<uint64_t, CService>, std::shared_ptr<PartialBlockData> >::iterator RemovePartialBlock(std::map<std::pair<uint64_t, CService>, std::shared_ptr<PartialBlockData> >::iterator it) {
     uint64_t hash_prefix = it->first.first;
     std::lock_guard<std::mutex> lock(it->second->state_mutex);
-    // Note that we do not modify nodesWithChunksAvailableSet, as it might be "read-only" due to currentlyProcessing
-    for (const std::pair<CService, std::pair<uint32_t, uint32_t> >& node : it->second->nodesWithChunksAvailableSet) {
+    // Note that we do not modify perNodeChunkCount, as it might be "read-only" due to currentlyProcessing
+    for (const std::pair<CService, std::pair<uint32_t, uint32_t> >& node : it->second->perNodeChunkCount) {
         std::map<CService, UDPConnectionState>::iterator nodeIt = mapUDPNodes.find(node.first);
         if (nodeIt == mapUDPNodes.end())
             continue;
@@ -635,11 +637,16 @@ static void ProcessBlockThread() {
                     const CBlock& decoded_block = *pdecoded_block;
                     if (fBench) {
                         uint32_t total_chunks_recvd = 0, total_chunks_used = 0;
-                        std::map<CService, std::pair<uint32_t, uint32_t> >& chunksProvidedByNode = block.nodesWithChunksAvailableSet;
+                        std::map<CService, std::pair<uint32_t, uint32_t> >& chunksProvidedByNode = block.perNodeChunkCount;
                         for (const std::pair<CService, std::pair<uint32_t, uint32_t> >& provider : chunksProvidedByNode) {
                             total_chunks_recvd += provider.second.second;
                             total_chunks_used += provider.second.first;
                         }
+                        /* NOTE: the chunk count printed next is not necessarily
+                         * accurate. It reflects the count up to when the block
+                         * is decoded. However, further chunks may still be
+                         * received after the block is decoded. The count kept
+                         * at `mapChunkCount` is more reliable. */
                         LogPrintf("UDP: Block %s reconstructed from %s with %u chunks in %lf ms (%u recvd from %u peers)\n", decoded_block.GetHash().ToString(), block.nodeHeaderRecvd.ToString(), total_chunks_used, to_millis_double(std::chrono::steady_clock::now() - block.timeHeaderRecvd), total_chunks_recvd, chunksProvidedByNode.size());
                         for (const std::pair<CService, std::pair<uint32_t, uint32_t> >& provider : chunksProvidedByNode)
                             LogPrintf("UDP:    %u/%u used from %s\n", provider.second.first, provider.second.second, provider.first.ToString());
@@ -876,6 +883,7 @@ static bool HandleTx(UDPMessage& msg, size_t length, const CService& node, UDPCo
 bool HandleBlockTxMessage(UDPMessage& msg, size_t length, const CService& node, UDPConnectionState& state, const std::chrono::steady_clock::time_point& packet_process_start) {
     //TODO: There are way too many damn tree lookups here...either cut them down or increase parallelism
     const bool fBench = LogAcceptCategory(BCLog::BENCH);
+    const bool debugFec = LogAcceptCategory(BCLog::FEC);
     std::chrono::steady_clock::time_point start;
     if (fBench)
         start = std::chrono::steady_clock::now();
@@ -895,11 +903,22 @@ bool HandleBlockTxMessage(UDPMessage& msg, size_t length, const CService& node, 
         return HandleTx(msg, length, node, state);
 
     const uint64_t hash_prefix = msg.msg.block.hash_prefix; // Need a reference in a few places, but its packed, so we can't have one directly
-    const std::pair<uint64_t, CService> hash_peer_pair = std::make_pair(hash_prefix, state.connection.fTrusted ? TRUSTED_PEER_DUMMY : node);
+    CService peer              = state.connection.fTrusted ? TRUSTED_PEER_DUMMY : node;
+    const std::pair<uint64_t, CService> hash_peer_pair = std::make_pair(hash_prefix, peer);
 
     if (msg.msg.block.obj_length > MAX_BLOCK_SERIALIZED_SIZE * MAX_CHUNK_CODED_BLOCK_SIZE_FACTOR) {
         LogPrintf("UDP: Got massive obj_length of %u\n", msg.msg.block.obj_length);
         return false;
+    }
+
+    /* Track all received chunks */
+    std::map<std::pair<uint64_t, CService>, BlockChunkCount>::iterator mapChunkCountIt;
+    if (debugFec) {
+        mapChunkCountIt = mapChunkCount.insert(std::make_pair(hash_peer_pair, BlockChunkCount{0, 0, 0, 0})).first;
+        if ((msg.header.msg_type & UDP_MSG_TYPE_TYPE_MASK) == MSG_TYPE_BLOCK_HEADER)
+            mapChunkCountIt->second.header_rcvd++;
+        else
+            mapChunkCountIt->second.data_rcvd++;
     }
 
     if (setBlocksRelayed.count(msg.msg.block.hash_prefix) || setBlocksReceived.count(hash_peer_pair))
@@ -924,7 +943,7 @@ bool HandleBlockTxMessage(UDPMessage& msg, size_t length, const CService& node, 
                     mapPartialBlocks.erase(second_partial_block_it);
                 }
             }
-            // Once we add to chunks_avail, we MUST add to mapPartialBlocks->second->nodesWithChunksAvailableSet, or we will leak memory
+            // Once we add to chunks_avail, we MUST add to mapPartialBlocks->second->perNodeChunkCount, or we will leak memory
             bool they_have_block = msg.header.msg_type & HAVE_BLOCK;
             size_t header_data_chunks = DIV_CEIL(msg.msg.block.obj_length, sizeof(UDPBlockMessage::data));
             chunks_avail_it = state.chunks_avail.emplace(std::piecewise_construct,
@@ -961,6 +980,34 @@ bool HandleBlockTxMessage(UDPMessage& msg, size_t length, const CService& node, 
         new_block = true;
     }
     PartialBlockData& block = *it->second;
+
+    /* Print chunk stats from a previous block whenever the block hash being
+     * delivered by a peer changes */
+    if (debugFec && new_block) {
+        for (auto chunkCountIt = mapChunkCount.cbegin(); chunkCountIt != mapChunkCount.cend();)
+        {
+            if (chunkCountIt->first.first != hash_prefix &&
+                chunkCountIt->first.second == peer) {
+                LogPrint(BCLog::FEC, "FEC: Chunk count for block id %lu from %s:\n",
+                          chunkCountIt->first.first,
+                          chunkCountIt->first.second.ToString());
+                LogPrint(BCLog::FEC, "    Total chunks:  %4d used / %4d rcvd\n",
+                          (chunkCountIt->second.data_used +
+                           chunkCountIt->second.header_used),
+                          (chunkCountIt->second.data_rcvd +
+                           chunkCountIt->second.header_rcvd));
+                LogPrint(BCLog::FEC, "    Header chunks: %4d used / %4d rcvd\n",
+                          chunkCountIt->second.header_used,
+                          chunkCountIt->second.header_rcvd);
+                LogPrint(BCLog::FEC, "    Data chunks:   %4d used / %4d rcvd\n",
+                          chunkCountIt->second.data_used,
+                          chunkCountIt->second.data_rcvd);
+
+                chunkCountIt = mapChunkCount.erase(chunkCountIt);
+            } else
+                ++chunkCountIt;
+        }
+    }
 
     std::chrono::steady_clock::time_point maps_scanned;
     if (fBench)
@@ -1003,9 +1050,9 @@ bool HandleBlockTxMessage(UDPMessage& msg, size_t length, const CService& node, 
     if (block.is_decodeable || block.currentlyProcessing || block.is_header_processing)
         return true;
 
-    std::map<CService, std::pair<uint32_t, uint32_t> >::iterator usefulChunksFromNodeIt =
-            block.nodesWithChunksAvailableSet.insert(std::make_pair(node, std::make_pair(0, 0))).first;
-    usefulChunksFromNodeIt->second.second++;
+    std::map<CService, std::pair<uint32_t, uint32_t>>::iterator perNodeChunkCountIt =
+            block.perNodeChunkCount.insert(std::make_pair(node, std::make_pair(0, 0))).first;
+    perNodeChunkCountIt->second.second++;
 
     if ((msg.header.msg_type & UDP_MSG_TYPE_TYPE_MASK) == MSG_TYPE_BLOCK_HEADER && !block.in_header) {
         if (state.connection.fTrusted) {
@@ -1060,7 +1107,14 @@ bool HandleBlockTxMessage(UDPMessage& msg, size_t length, const CService& node, 
     if (fBench)
         chunks_processed = std::chrono::steady_clock::now();
 
-    usefulChunksFromNodeIt->second.first++;
+    // Keep track of chunks that are actually used for decoding
+    perNodeChunkCountIt->second.first++;
+    if (debugFec) {
+        if ((msg.header.msg_type & UDP_MSG_TYPE_TYPE_MASK) == MSG_TYPE_BLOCK_HEADER)
+            mapChunkCountIt->second.header_used++;
+        else
+            mapChunkCountIt->second.data_used++;
+    }
 
     if (state.connection.fTrusted) {
         BlockMsgHToLE(msg);

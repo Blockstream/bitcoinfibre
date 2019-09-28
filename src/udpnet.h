@@ -89,6 +89,13 @@ enum UDPState {
     STATE_INIT_COMPLETE = STATE_GOT_SYN | STATE_GOT_SYN_ACK, // We can now send data to this peer
 };
 
+struct BlockChunkCount {
+    uint32_t data_rcvd;   // number of received block contents (data) chunks
+    uint32_t data_used;   // number of used block contents (data) chunks
+    uint32_t header_rcvd; // number of received block header chunks
+    uint32_t header_used; // number of used block header chunks
+};
+
 struct PartialBlockData {
     const std::chrono::steady_clock::time_point timeHeaderRecvd;
     const CService nodeHeaderRecvd;
@@ -102,7 +109,7 @@ struct PartialBlockData {
     std::mutex state_mutex;
     // Background thread is preparing to, and is submitting to core
     // This is set with state_mutex held, and afterwards block_data and
-    // nodesWithChunksAvailableSet should be treated read-only.
+    // perNodeChunkCount should be treated read-only.
     std::atomic_bool currentlyProcessing;
 
     uint32_t obj_length; // FEC-coded length of currently-being-download object
@@ -111,7 +118,7 @@ struct PartialBlockData {
     PartiallyDownloadedChunkBlock block_data;
 
     // nodes with chunks_avail set -> packets that were useful, packets provided
-    std::map<CService, std::pair<uint32_t, uint32_t> > nodesWithChunksAvailableSet;
+    std::map<CService, std::pair<uint32_t, uint32_t>> perNodeChunkCount;
 
     bool Init(const UDPMessage& msg);
     ReadStatus ProvideHeaderData(const CBlockHeaderAndLengthShortTxIDs& header);
