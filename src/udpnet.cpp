@@ -56,7 +56,7 @@ bool maybe_have_write_nodes;
 static std::map<int64_t, std::tuple<CService, uint64_t, size_t> > nodesToRepeatDisconnect;
 static std::map<CService, UDPConnectionInfo> mapPersistentNodes;
 
-static int mcastStatPrintInterval = 0;
+static int mcastStatPrintInterval = 10;
 
 /*
  * UDP multicast service
@@ -442,8 +442,8 @@ static bool InitializeUDPMulticast(std::vector<int> &udp_socks,
 bool InitializeUDPConnections() {
     assert(udp_write_threads.empty() && !udp_read_thread);
 
-    if (gArgs.IsArgSet("-udpmulticaststat") && (atoi(gArgs.GetArg("-udpmulticaststat", "")) > 0))
-        mcastStatPrintInterval = atoi(gArgs.GetArg("-udpmulticaststat", ""));
+    if (gArgs.IsArgSet("-udpmulticastloginterval") && (atoi(gArgs.GetArg("-udpmulticastloginterval", "")) > 0))
+        mcastStatPrintInterval = atoi(gArgs.GetArg("-udpmulticastloginterval", ""));
 
     const std::vector<std::pair<unsigned short, uint64_t> > group_list(GetUDPInboundPorts());
     for (std::pair<unsigned short, uint64_t> port : group_list) {
@@ -627,7 +627,7 @@ static void read_socket_func(evutil_socket_t fd, short event, void* arg) {
             if (!HandleBlockTxMessage(msg, sizeof(UDPMessage) - 1, it->first, it->second, start))
                 send_and_disconnect(it);
             else {
-                if (mcastStatPrintInterval > 0) {
+                if (LogAcceptCategory(BCLog::UDPMCAST)) {
                     state.rcvdBytes += sizeof(UDPMessage) - 1;
                     auto now = std::chrono::steady_clock::now();
                     double timeDeltaMillis = to_millis_double(now - state.lastAvgTime);
@@ -639,7 +639,7 @@ static void read_socket_func(evutil_socket_t fd, short event, void* arg) {
                         else
                             groupname = itm->second;
 
-                        LogPrintf("UDP multicast group %d (%s): Average bit rate %.4f Mbit/sec\n",
+                        LogPrint(BCLog::UDPMCAST, "UDP multicast group %d (%s): Average bit rate %.4f Mbit/sec\n",
                                   state.connection.group, groupname,
                                   (double)state.rcvdBytes*8/(1000*timeDeltaMillis));
                         state.lastAvgTime = now;
