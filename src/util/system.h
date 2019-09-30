@@ -105,6 +105,7 @@ inline bool IsSwitchChar(char c)
 enum class OptionsCategory {
     OPTIONS,
     CONNECTION,
+    UDP,
     WALLET,
     WALLET_DEBUG_TEST,
     ZMQ,
