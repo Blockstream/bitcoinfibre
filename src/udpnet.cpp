@@ -172,7 +172,7 @@ static boost::thread *udp_read_thread = nullptr;
 static std::vector<boost::thread> udp_write_threads;
 
 static void OpenMulticastConnection(const CService& service, bool multicast_tx, size_t group);
-static void MulticastBackfillThread();
+static void MulticastBackfillThread(int);
 static UDPMulticastInfo ParseUDPMulticastInfo(const std::string& s, bool tx);
 static std::vector<UDPMulticastInfo> GetUDPMulticastInfo();
 
@@ -525,7 +525,7 @@ bool InitializeUDPConnections() {
                                 multicastNode.second.tx,
                                 multicastNode.second.group);
         if (multicastNode.second.tx)
-            MulticastBackfillThread();
+            MulticastBackfillThread(multicastNode.second.depth);
     }
 
     BlockRecvInit();
@@ -995,8 +995,8 @@ static void do_send_messages() {
     }
 }
 
-static void MulticastBackfillThread() {
-    boost::thread(boost::bind(&TraceThread<boost::function<void ()> >, "udpbackfill", [] {
+static void MulticastBackfillThread(int backfill_depth) {
+	boost::thread(boost::bind(&TraceThread<boost::function<void ()> >, "udpbackfill", [&backfill_depth] {
         /* Start only after the initial sync */
         while (::ChainstateActive().IsInitialBlockDownload() && !send_messages_break)
             std::this_thread::sleep_for(std::chrono::milliseconds(50));
@@ -1031,12 +1031,14 @@ static void MulticastBackfillThread() {
             {
                 LOCK(cs_main);
                 height = lastBlock->nHeight + 1;
-                if (height < ::ChainActive().Height() - 24 * 6) {
-                    height = ::ChainActive().Height() - 24 * 6;
-                } else if (height > ::ChainActive().Height()) {
+                const int chain_height = ::ChainActive().Height();
+
+                if (height < chain_height - backfill_depth + 1) {
+                    height = chain_height - backfill_depth + 1;
+                } else if (height > chain_height) {
                     send_txn = 2000;
-                    height = ::ChainActive().Height() - 24 * 6;
-                } else if (height > ::ChainActive().Height() - 12 * 6)
+                    height = chain_height - backfill_depth + 1;
+                } else if (height > chain_height - (backfill_depth/2))
                     send_txn = 100;
                 lastBlock = ::ChainActive()[height];
             }
@@ -1154,17 +1156,30 @@ static UDPMulticastInfo ParseUDPMulticastInfo(const std::string& s, const bool t
     }
     strncpy(info.mcast_ip, ip.c_str(), INET_ADDRSTRLEN);
 
-    info.tx = tx;
+    info.tx         = tx;
+
+    /* Defaults */
+    info.groupname   = "";
+    info.ttl         = 3;
+    info.bw          = 0;
+    info.depth       = 144;
 
     if (info.tx) {
         const size_t bw_end = s.find(',', mcastaddr_end + 1);
 
-        if (bw_end == std::string::npos) {
+        if (bw_end == std::string::npos)
             info.bw   = atoi64(s.substr(mcastaddr_end + 1));
-            info.ttl = 3; // Multicast time-to-live (TTL)
-        } else {
+        else {
             info.bw  = atoi64(s.substr(mcastaddr_end + 1, bw_end - mcastaddr_end - 1));
-            info.ttl = atoi(s.substr(bw_end + 1));
+
+            const size_t ttl_end = s.find(',', bw_end + 1);
+
+            if (ttl_end == std::string::npos) {
+                info.ttl = atoi(s.substr(bw_end + 1));
+            } else {
+                info.ttl   = atoi(s.substr(bw_end + 1, ttl_end - bw_end - 1));
+                info.depth = atoi(s.substr(ttl_end + 1));
+            }
         }
 
         if (info.bw == 0) {
@@ -1175,10 +1190,9 @@ static UDPMulticastInfo ParseUDPMulticastInfo(const std::string& s, const bool t
         const size_t tx_ip_end = s.find(',', mcastaddr_end + 1);
         std::string tx_ip;
 
-        if (tx_ip_end == std::string::npos) {
+        if (tx_ip_end == std::string::npos)
             tx_ip          = s.substr(mcastaddr_end + 1);
-            info.groupname = "";
-        } else {
+        else {
             tx_ip          = s.substr(mcastaddr_end + 1, tx_ip_end - mcastaddr_end - 1);
             info.groupname = s.substr(tx_ip_end + 1);
         }
