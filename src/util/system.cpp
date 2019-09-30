@@ -628,6 +628,9 @@ std::string ArgsManager::GetHelpMessage() const
             case OptionsCategory::CONNECTION:
                 usage += HelpMessageGroup("Connection options:");
                 break;
+            case OptionsCategory::UDP:
+                usage += HelpMessageGroup("UDP multicast options:");
+                break;
             case OptionsCategory::ZMQ:
                 usage += HelpMessageGroup("ZeroMQ notification options:");
                 break;

@@ -188,15 +188,18 @@ struct UDPConnectionInfo {
 };
 
 struct UDPMulticastInfo {
-    char ifname[IFNAMSIZ];
-    char mcast_ip[INET_ADDRSTRLEN];
-    char tx_ip[INET_ADDRSTRLEN];
-    std::string groupname;
-    unsigned short port;
-    uint64_t bw; // in bps
-    int ttl;
-    size_t group;
-    bool tx;
+    char ifname[IFNAMSIZ];          /** network interface name */
+    char mcast_ip[INET_ADDRSTRLEN]; /** multicast IPv4 address */
+    unsigned short port;            /** UDP port */
+    size_t group;                   /** UDP group */
+    bool tx;                        /** multicast Tx or Rx? */
+    /* Rx only: */
+    char tx_ip[INET_ADDRSTRLEN];    /** source IPv4 address (sender address) */
+    std::string groupname;          /** optional label for stream */
+    /* Tx only: */
+    int ttl;               /** time-to-live desired for multicast packets */
+    uint64_t bw;           /** target throughput in bps */
+    int depth;             /** backfill depth - no. of blocks to iterate over */
 };
 
 struct UDPConnectionState {
