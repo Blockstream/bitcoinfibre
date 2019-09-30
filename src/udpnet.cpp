@@ -45,6 +45,12 @@
 
 #define to_millis_double(t) (std::chrono::duration_cast<std::chrono::duration<double, std::chrono::milliseconds::period> >(t).count())
 
+template <typename Duration>
+double to_seconds(Duration d)
+{
+    return std::chrono::duration_cast<std::chrono::duration<double, std::chrono::seconds::period>>(d).count();
+}
+
 static std::vector<int> udp_socks; // The sockets we use to send/recv (bound to *:GetUDPInboundPorts()[*])
 
 std::recursive_mutex cs_mapUDPNodes;
@@ -175,6 +181,8 @@ static void OpenMulticastConnection(const CService& service, bool multicast_tx, 
 static void MulticastBackfillThread(int);
 static UDPMulticastInfo ParseUDPMulticastInfo(const std::string& s, bool tx);
 static std::vector<UDPMulticastInfo> GetUDPMulticastInfo();
+
+static const double txn_per_sec = 6.0;
 
 static void AddConnectionFromString(const std::string& node, bool fTrust) {
     size_t host_port_end = node.find(',');
@@ -1002,6 +1010,7 @@ static void MulticastBackfillThread(int backfill_depth) {
             std::this_thread::sleep_for(std::chrono::milliseconds(50));
 
         const CBlockIndex *lastBlock;
+        /* Use a bloom filter to keep track of txns already sent */
         CRollingBloomFilter sent_txn_bloom(500000, 0.001); // Hold 500k (~24*6 blocks of txn) txn
         {
             LOCK(cs_main);
@@ -1022,35 +1031,52 @@ static void MulticastBackfillThread(int backfill_depth) {
 
         PerGroupMessageQueue& queue = txQueues[i_mcast_tx];
 
+        std::chrono::steady_clock::time_point last_tx_time = std::chrono::steady_clock::now();
+
+        /* The txn transmission quota is based on the elapsed interval since
+         * last time txns were sent, which is the "txn quota of seconds". */
+        double txn_quota_sec = 0;
+
         while (!send_messages_break) {
             while (!send_messages_break && queue.buffs[2].nextUndefinedMessage.load(std::memory_order_acquire) != queue.buffs[2].nextPendingMessage.load(std::memory_order_acquire))
                 std::this_thread::sleep_for(std::chrono::milliseconds(5));
 
+            /* Define height of target block (to be transmitted) */
             int height;
-            size_t send_txn = 0;
             {
                 LOCK(cs_main);
                 height = lastBlock->nHeight + 1;
                 const int chain_height = ::ChainActive().Height();
 
-                if (height < chain_height - backfill_depth + 1) {
+                if (height < chain_height - backfill_depth + 1)
                     height = chain_height - backfill_depth + 1;
-                } else if (height > chain_height) {
-                    send_txn = 2000;
+                else if (height > chain_height)
                     height = chain_height - backfill_depth + 1;
-                } else if (height > chain_height - (backfill_depth/2))
-                    send_txn = 100;
-                lastBlock = ::ChainActive()[height];
+
+		lastBlock = ::ChainActive()[height];
             }
 
-            if (send_txn) {
+            std::chrono::steady_clock::time_point const now = std::chrono::steady_clock::now();
+            txn_quota_sec += to_seconds(now - last_tx_time);
+            last_tx_time = now;
+
+            /* Txn transmission quota (number of txns to transmit now) */
+            int const txn_tx_quota = txn_quota_sec * txn_per_sec;
+
+            if (txn_tx_quota > 0) {
+                /* We will send txns now, so we must remove the corresponding
+                 * interval from the quota of seconds. Any residual interval
+                 * will be left in the quota. This way, we avoid roundoff
+                 * errors. */
+                txn_quota_sec -= txn_tx_quota / txn_per_sec;
+
                 std::vector<CTransactionRef> txn_to_send;
-                txn_to_send.reserve(send_txn);
+                txn_to_send.reserve(txn_tx_quota);
                 {
                     std::set<uint256> txids_to_send;
                     LOCK(mempool.cs);
                     for (const auto& iter : mempool.mapTx.get<ancestor_score>()) {
-                        if (txn_to_send.size() >= send_txn)
+                        if (txn_to_send.size() >= (unsigned int)txn_tx_quota)
                             break;
                         if (txids_to_send.count(iter.GetTx().GetHash()) || sent_txn_bloom.contains(iter.GetTx().GetHash()))
                             continue;
