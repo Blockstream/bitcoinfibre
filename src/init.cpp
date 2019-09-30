@@ -474,11 +474,10 @@ void SetupServerArgs(NodeContext& node)
     argsman.AddArg("-peertimeout=<n>", strprintf("Specify p2p connection timeout in seconds. This option determines the amount of time a peer may be inactive before the connection to it is dropped. (minimum: 1, default: %d)", DEFAULT_PEER_CONNECT_TIMEOUT), ArgsManager::ALLOW_ANY | ArgsManager::DEBUG_ONLY, OptionsCategory::CONNECTION);
     argsman.AddArg("-torcontrol=<ip>:<port>", strprintf("Tor control port to use if onion listening enabled (default: %s)", DEFAULT_TOR_CONTROL), ArgsManager::ALLOW_ANY, OptionsCategory::CONNECTION);
     argsman.AddArg("-torpassword=<pass>", "Tor control port password (default: empty)", ArgsManager::ALLOW_ANY | ArgsManager::SENSITIVE, OptionsCategory::CONNECTION);
-    argsman.AddArg("-udpport=<port>,<group>[,<bw>]", "Accepts UDP connections on <port> (default: bw=1024 =1024Mbps)", ArgsManager::ALLOW_ANY, OptionsCategory::CONNECTION);
-    argsman.AddArg("-udpmulticast=<if>,<dst_ip>:<port>,<src_ip>[,<label>]", "Listen to multicast-addressed UDP messages sent by <src_ip> towards <dst_ip>:<port> using interface <if>. An optional <label> may be defined for the multicast group in order to facilitate inspection of logs.", ArgsManager::ALLOW_ANY, OptionsCategory::CONNECTION);
-    argsman.AddArg("-udpmulticasttx=<if>,<ip/host>:<port>,<bw>[,<ttl>]", "Transmit multicast-addressed mesages to <ip/host>:<port> through interface <if> with bandwidth <bw> and TTL <ttl> (3 by default).", ArgsManager::ALLOW_ANY, OptionsCategory::CONNECTION);
-    argsman.AddArg("-udpmulticaststat=<interval>", "Print multicast bit rates after every <interval> seconds.", ArgsManager::ALLOW_ANY, OptionsCategory::CONNECTION);
-    argsman.AddArg("-udpmulticastloginterval=<interval>", "Change periodicity of multicast bit rate logs that are activated by option debug=udpmulticast. Set <interval> in seconds.", ArgsManager::ALLOW_ANY, OptionsCategory::CONNECTION);
+    argsman.AddArg("-udpport=<port>,<group>[,<bw>]", "Accepts UDP connections on <port> (default: bw=1024 =1024Mbps)", ArgsManager::ALLOW_ANY, OptionsCategory::CONNECTION);                   
+    argsman.AddArg("-udpmulticast=<if>,<dst_ip>:<port>,<src_ip>[,<label>]", "Listen to multicast-addressed UDP messages sent by <src_ip> towards <dst_ip>:<port> using interface <if>. An optional <label> may be defined for the multicast group in order to facilitate inspection of logs.", ArgsManager::ALLOW_ANY, OptionsCategory::UDP);
+    argsman.AddArg("-udpmulticasttx=<if>,<ip/host>:<port>,<bw>[,<ttl>]", "Transmit multicast-addressed mesages to <ip/host>:<port> through interface <if> with bandwidth <bw> and TTL <ttl> (3 by default).", ArgsManager::ALLOW_ANY, OptionsCategory::UDP);
+    argsman.AddArg("-udpmulticastloginterval=<interval>", "Change periodicity of multicast bit rate logs that are activated by option debug=udpmulticast. Set <interval> in seconds.", ArgsManager::ALLOW_ANY, OptionsCategory::UDP);
 #ifdef USE_UPNP
 #if USE_UPNP
     argsman.AddArg("-upnp", "Use UPnP to map the listening port (default: 1 when listening and no -proxy)", ArgsManager::ALLOW_ANY, OptionsCategory::CONNECTION);
