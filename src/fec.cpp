@@ -107,8 +107,16 @@ bool FECDecoder::ProvideChunk(const unsigned char* chunk, uint32_t chunk_id) {
         cm256_blocks[chunks_recvd - 1].Index = (uint8_t)chunk_id;
         if (chunk_count == chunks_recvd)
             decodeComplete = true;
-    } else if (!wirehair_decode(state, chunk_id, (void*)chunk, FEC_CHUNK_SIZE))
-        decodeComplete = true;
+    } else {
+        const WirehairResult decode_res = wirehair_decode(state, chunk_id, (void*)chunk, FEC_CHUNK_SIZE);
+        if (decode_res == Wirehair_Success)
+            decodeComplete = true;
+        else {
+            if (decode_res != Wirehair_NeedMore) {
+                LogPrintf("wirehair_decode failed: %s\n", wirehair_result_string(decode_res));
+            }
+        }
+    }
 
     return true;
 }
@@ -242,8 +250,11 @@ bool FECEncoder::BuildChunk(size_t vector_idx) {
         cm256_encode_block(params, cm256_blocks, chunk_id, &fec_chunks->first[vector_idx]);
     } else {
         uint32_t chunk_bytes;
-        if (wirehair_encode(state, chunk_id, &fec_chunks->first[vector_idx], FEC_CHUNK_SIZE, &chunk_bytes))
+        const WirehairResult encode_res = wirehair_encode(state, chunk_id, &fec_chunks->first[vector_idx], FEC_CHUNK_SIZE, &chunk_bytes);
+        if (encode_res != Wirehair_Success) {
+            LogPrintf("wirehair_encode failed: %s\n", wirehair_result_string(encode_res));
             return false;
+        }
 
         if (chunk_bytes != FEC_CHUNK_SIZE)
             memset(((char*)&fec_chunks->first[vector_idx]) + chunk_bytes, 0, FEC_CHUNK_SIZE - chunk_bytes);
