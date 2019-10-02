@@ -15,6 +15,7 @@
 
 #include <condition_variable>
 #include <thread>
+#include <boost/optional.hpp>
 
 #include <boost/thread.hpp>
 
@@ -279,7 +280,7 @@ void UDPRelayBlock(const CBlock& block) {
         if (fBench)
             initd = std::chrono::steady_clock::now();
 
-        ChunkCodedBlock *codedBlock = (ChunkCodedBlock*) alloca(sizeof(ChunkCodedBlock));
+        boost::optional<ChunkCodedBlock> codedBlock;
         CBlockHeaderAndLengthShortTxIDs headerAndIDs(block, true);
         std::vector<unsigned char> data;
         data.reserve(2500 + 8 * block.vtx.size()); // Rather conservatively high estimate
@@ -292,7 +293,7 @@ void UDPRelayBlock(const CBlock& block) {
 
         DataFECer header_fecer(data, (min_per_node_mbps.load(std::memory_order_relaxed) * 1024 * 1024 / 8 / 1000 / PACKET_SIZE) + 10); // 1ms + 10 chunks of header FEC
 
-        DataFECer *block_fecer = (DataFECer*) alloca(sizeof(DataFECer));
+        boost::optional<DataFECer> block_fecer;
         size_t data_fec_chunks = 0;
         if (inUDPProcess) {
             // If we're actively receiving UDP packets, go ahead and spend the time to precalculate FEC now,
@@ -300,7 +301,7 @@ void UDPRelayBlock(const CBlock& block) {
             header_fecer.enc.PrefillChunks();
 
             if (!skipEncode) {
-                new (codedBlock) ChunkCodedBlock(block, headerAndIDs);
+                codedBlock.emplace(block, headerAndIDs);
                 block_chunks = &codedBlock->GetCodedBlock();
             }
             if (!block_chunks->empty()) {
@@ -312,9 +313,9 @@ void UDPRelayBlock(const CBlock& block) {
                     // was initialized and fed FEC/data, meaning even if no FEC
                     // chunks were used to reconstruct the FECDecoder object is
                     // fully primed to be converted to a FECEncoder!
-                    new (block_fecer) DataFECer(std::move(partial_block_ptr->decoder), *block_chunks, data_fec_chunks);
+                    block_fecer.emplace(std::move(partial_block_ptr->decoder), *block_chunks, data_fec_chunks);
                 } else {
-                    new (block_fecer) DataFECer(*block_chunks, data_fec_chunks);
+                    block_fecer.emplace(*block_chunks, data_fec_chunks);
                 }
                 block_fecer->enc.PrefillChunks();
             }
@@ -344,7 +345,7 @@ void UDPRelayBlock(const CBlock& block) {
 
         if (!inUDPProcess) { // We sent header before calculating any block stuff
             if (!skipEncode) {
-                new (codedBlock) ChunkCodedBlock(block, headerAndIDs);
+                codedBlock.emplace(block, headerAndIDs);
                 block_chunks = &codedBlock->GetCodedBlock();
             }
 
@@ -363,7 +364,7 @@ void UDPRelayBlock(const CBlock& block) {
 
         if (!inUDPProcess) { // We sent header before calculating any block stuff
             if (!block_chunks->empty()) {
-                new (block_fecer) DataFECer(*block_chunks, data_fec_chunks);
+                block_fecer.emplace(*block_chunks, data_fec_chunks);
             }
         }
 
@@ -382,12 +383,6 @@ void UDPRelayBlock(const CBlock& block) {
                 LogPrintf("UDP: Block %s had serialized size %lu\n", hashBlock.ToString(), GetSerializeSize(block, PROTOCOL_VERSION));
         } else
             LogPrintf("UDP: Built all FEC chunks for block %s\n", hashBlock.ToString());
-
-        if (!skipEncode)
-            codedBlock->~ChunkCodedBlock();
-
-        if (!block_chunks->empty())
-            block_fecer->~DataFECer();
 
         // Destroy partial_block_lock before we RemovePartialBlocks()
     }
