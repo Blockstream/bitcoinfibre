@@ -549,8 +549,10 @@ void StopUDPConnections() {
     std::unique_lock<std::recursive_mutex> lock(cs_mapUDPNodes);
     UDPMessage msg;
     msg.header.msg_type = MSG_TYPE_DISCONNECT;
-    for (std::map<CService, UDPConnectionState>::iterator it = mapUDPNodes.begin(); it != mapUDPNodes.end(); it++)
-        SendMessage(msg, sizeof(UDPMessageHeader), true, it);
+    for (std::map<CService, UDPConnectionState>::iterator it = mapUDPNodes.begin(); it != mapUDPNodes.end(); it++) {
+        if (it->second.connection.connection_type == UDP_CONNECTION_TYPE_NORMAL)
+            SendMessage(msg, sizeof(UDPMessageHeader), true, it);
+    }
     mapUDPNodes.clear();
 
     send_messages_flush_and_break();
