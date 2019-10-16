@@ -234,11 +234,13 @@ extern std::recursive_mutex cs_mapUDPNodes;
 extern std::map<CService, UDPConnectionState> mapUDPNodes;
 extern std::atomic<uint64_t> min_per_node_mbps; // Used to determine header FEC chunk count
 extern bool maybe_have_write_nodes;
+extern uint64_t const multicast_checksum_magic;
 
 void SendMessage(const UDPMessage& msg, const unsigned int length, bool high_prio, const CService& service, const uint64_t magic, size_t group);
 void SendMessage(const UDPMessage& msg, const unsigned int length, bool high_prio, const std::map<CService, UDPConnectionState>::const_iterator& node);
 void DisconnectNode(const std::map<CService, UDPConnectionState>::iterator& it);
 
+const std::map<std::tuple<CService, int, uint16_t>, UDPMulticastInfo>& multicast_nodes();
 bool IsMulticastRxNode(const CService&);
 
 #endif
