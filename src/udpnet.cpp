@@ -656,11 +656,6 @@ static void read_socket_func(evutil_socket_t fd, short event, void* arg) {
         } else
             LogPrintf("UDP: Unexpected message from %s!\n", it->first.ToString());
 
-        if (fBench) {
-            std::chrono::steady_clock::time_point finish(std::chrono::steady_clock::now());
-            if (to_millis_double(finish - start) > 1)
-                LogPrintf("UDP: Multicast packet took %lf ms to process\n", to_millis_double(finish - start));
-        }
         return;
     }
 
