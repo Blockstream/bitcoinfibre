@@ -77,8 +77,8 @@ namespace {
     std::map<size_t, std::string> mapMulticastGroupNames;
     char const* const multicast_pass = "multicast";
     uint64_t const multicast_magic = Hash(&multicast_pass[0], &multicast_pass[0] + strlen(multicast_pass)).GetUint64(0);
-    uint64_t const multicast_checksum_magic = htole64(multicast_magic);
 }
+uint64_t const multicast_checksum_magic = htole64(multicast_magic);
 
 //TODO: The checksum stuff is not endian-safe (esp the poly impl):
 static void FillChecksum(uint64_t magic, UDPMessage& msg, const unsigned int length) {
@@ -1491,6 +1491,12 @@ void CloseUDPConnectionTo(const CService& addr) {
     if (it2 == mapUDPNodes.end())
         return;
     DisconnectNode(it2);
+}
+
+
+const std::map<std::tuple<CService, int, uint16_t>, UDPMulticastInfo>& multicast_nodes()
+{
+    return mapMulticastNodes;
 }
 
 bool IsMulticastRxNode(const CService& node) {
