@@ -109,68 +109,34 @@ static void CopyMessageData(UDPMessage& msg, const std::vector<unsigned char>& d
         memset(&msg.msg.block.data[msg_size], 0, sizeof(msg.msg.block.data) - msg_size);
 }
 
-static bool SkipInboundOnlyNodes(std::map<CService, UDPConnectionState>::iterator& it) {
-    bool rolled_over = false;
-
-    while (it->second.connection.connection_type == UDP_CONNECTION_TYPE_INBOUND_ONLY) {
-        it++;
-        if (it == mapUDPNodes.end()) {
-            it = mapUDPNodes.begin();
-            /* Are we spinning on a map that contains solely inbound nodes? */
-            if (rolled_over)
-                break;
-            rolled_over = true;
-        }
-    }
-    return rolled_over;
-}
-
 /**
  * Send uncoded (non FEC-coded) data chunks to all peers
- *
- * Notes:
- * - Algorithm is broken if you use both high_prio_chunks_per_peer and
- *   chunk_limit!
- * - This implementation won't send to logically multiplexed multicast streams,
- *   since they don't exist in mapUDPNodes.
  */
 static void RelayUncodedChunks(UDPMessage& msg, const std::vector<unsigned char>& data, const size_t high_prio_chunks_per_peer, const uint64_t hash_prefix, const size_t chunk_limit) {
     const size_t msg_chunks = DIV_CEIL(data.size(), FEC_CHUNK_SIZE);
 
-    size_t chunks_sent_per_peer = 0;
     bool high_prio = high_prio_chunks_per_peer;
-    bool it_rolled_over;
-    for (auto it = mapUDPNodes.begin(); it != mapUDPNodes.end(); it++) {
-        auto send_it = it;
-        it_rolled_over = SkipInboundOnlyNodes(send_it);
 
-        /* The iterator should never roll-over here, unless we only have
-         * inbound-only nodes, in which case there is nothing else to do. */
-        if (it_rolled_over) {
-            LogPrintf("%s: nothing else to do - are all nodes inbound-only?\n",
-                      __func__);
-            break;
+    for (uint16_t i = 0; i < msg_chunks && i < chunk_limit; i++) {
+        /* Send the same uncoded chunk to all peers */
+        CopyMessageData(msg, data, msg_chunks, i);
+
+        for (auto it = mapUDPNodes.begin(); it != mapUDPNodes.end(); it++) {
+            if (it->second.connection.udp_mode == udp_mode_t::unicast)
+                SendMessageToNode(msg, sizeof(UDPMessageHeader) + sizeof(UDPBlockMessage), high_prio, hash_prefix, it);
         }
 
-        for (uint16_t i = 0; i < msg_chunks && i < chunk_limit; i++) {
-            CopyMessageData(msg, data, msg_chunks, i);
-            SendMessageToNode(msg, sizeof(UDPMessageHeader) + sizeof(UDPBlockMessage), high_prio, hash_prefix, send_it);
-
-            send_it++;
-            if (send_it == mapUDPNodes.end()) {
-                send_it = mapUDPNodes.begin();
-                it_rolled_over = true;
-            }
-
-            it_rolled_over |= SkipInboundOnlyNodes(send_it);
-            /* It should only roll over here if the last node of the map happens
-             * to be an inbound-only node */
-
-            if (it_rolled_over) {
-                chunks_sent_per_peer++;
-                if (high_prio && chunks_sent_per_peer >= high_prio_chunks_per_peer) high_prio = false;
+        for (const auto& node : multicast_nodes()) {
+            if (node.second.tx) {
+                SendMessage(msg,
+                            sizeof(UDPMessageHeader) + sizeof(UDPBlockMessage),
+                            high_prio, std::get<0>(node.first),
+                            multicast_checksum_magic, node.second.group);
             }
         }
+
+        if (high_prio && i >= high_prio_chunks_per_peer)
+            high_prio = false;
     }
 }
 
@@ -196,38 +162,38 @@ static void CopyFECData(UDPMessage& msg, DataFECer& fec, size_t array_idx, bool 
     memcpy(msg.msg.block.data, &fec.fec_data.first[array_idx], FEC_CHUNK_SIZE);
 }
 
-/* Send FEC-coded chunks to all peers */
+/**
+ * Send FEC-coded chunks to all peers
+ *
+ * For each chunk index, a different (random) chunk id is generated for each
+ * outbound service. This is useful for receive peers that are receiving from
+ * (combining) more than one service.
+ */
 static void RelayFECedChunks(UDPMessage& msg, DataFECer& fec, const size_t high_prio_chunks_per_peer, const uint64_t hash_prefix) {
     assert(fec.fec_chunks > 9);
 
-    size_t chunks_sent_per_peer = 0;
     bool high_prio = high_prio_chunks_per_peer;
-    bool it_rolled_over;
+    for (size_t i = 0; i < fec.fec_chunks; i++) {
+        /* Send over unicast services */
+        for (auto it = mapUDPNodes.begin(); it != mapUDPNodes.end(); it++) {
+            CopyFECData(msg, fec, i, true /*regenerate chunk on index i*/);
+            if (it->second.connection.udp_mode == udp_mode_t::unicast)
+                SendMessageToNode(msg, sizeof(UDPMessageHeader) + sizeof(UDPBlockMessage), high_prio, hash_prefix, it);
+        }
 
-    for (auto it = mapUDPNodes.begin(); it != mapUDPNodes.end(); it++) {
-        auto send_it = it;
-        it_rolled_over = SkipInboundOnlyNodes(send_it);
-
-        if (it_rolled_over)
-            break; // see comments on RelayUncodedChunks
-
-        for (size_t i = 0; i < fec.fec_chunks; i++) {
-            CopyFECData(msg, fec, i);
-            SendMessageToNode(msg, sizeof(UDPMessageHeader) + sizeof(UDPBlockMessage), high_prio, hash_prefix, send_it);
-
-            send_it++;
-            if (send_it == mapUDPNodes.end()) {
-                send_it = mapUDPNodes.begin();
-                it_rolled_over = true;
-            }
-
-            it_rolled_over |= SkipInboundOnlyNodes(send_it); // see comments on RelayUncodedChunks again
-
-            if (it_rolled_over) {
-                chunks_sent_per_peer++;
-                if (high_prio && chunks_sent_per_peer >= high_prio_chunks_per_peer) high_prio = false;
+        /* Send over each multicast Tx (outbound) service */
+        for (const auto& node : multicast_nodes()) {
+            CopyFECData(msg, fec, i, true /*regenerate chunk on index i*/);
+            if (node.second.tx) {
+                SendMessage(msg,
+                            sizeof(UDPMessageHeader) + sizeof(UDPBlockMessage),
+                            high_prio, std::get<0>(node.first),
+                            multicast_checksum_magic, node.second.group);
             }
         }
+
+        if (high_prio && (i >= high_prio_chunks_per_peer))
+            high_prio = false;
     }
 }
 
