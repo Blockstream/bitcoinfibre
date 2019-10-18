@@ -144,8 +144,8 @@ struct DataFECer {
         enc(std::move(decoder), &data, &fec_data) {}
 };
 
-static void CopyFECData(UDPMessage& msg, DataFECer& fec, size_t array_idx) {
-    assert(fec.enc.BuildChunk(array_idx)); // TODO: Handle errors?
+static void CopyFECData(UDPMessage& msg, DataFECer& fec, size_t array_idx, bool overwrite_chunk = false) {
+    assert(fec.enc.BuildChunk(array_idx, overwrite_chunk)); // TODO: Handle errors?
     assert(fec.fec_data.second[array_idx] < (1 << 24));
     msg.msg.block.chunk_id = htole32(fec.fec_data.second[array_idx]);
     memcpy(msg.msg.block.data, &fec.fec_data.first[array_idx], FEC_CHUNK_SIZE);
