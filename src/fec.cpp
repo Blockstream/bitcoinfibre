@@ -220,10 +220,37 @@ FECEncoder::~FECEncoder() {
         return_wirehair_codec(state);
 }
 
-bool FECEncoder::BuildChunk(size_t vector_idx) {
+/**
+ * Build FEC chunk
+ *
+ * Depending on the total number of chunks (of FEC_CHUNK_SIZE bytes) composing
+ * the data, one of the following coding schemes will be used:
+ *
+ * 1) Repetition coding: if data has a single chunk
+ * 2) cm256: if data has number of chunks up to CM256_MAX_CHUNKS
+ * 3) wirehair: if data has number of chunks greater than CM256_MAX_CHUNKS
+ *
+ * cm256 is a maximum distance separable (MDS), so it always recovers N original
+ * data chunks from N coded chunks. However, it supports up to 256 chunks only,
+ * so it works best with shorter data. In contrast, wirehair works better with
+ * longer data. Nevertheless, wirehair is not MDS. On average, it requires N +
+ * 0.02 coded chunks to recover N uncoded chunks.
+ *
+ * Parameter `vector_idx` is the index within the array of FEC chunks that are
+ * supposed to be produced. For each such chunk, a chunk id will be
+ * generated. For wirehair coding, the chunk id is random. The motivation is
+ * that we want receivers to get a different chunk id every time. For cm256, the
+ * chunk_id is determistic, more specifically `vector_idx` + a random
+ * offset. For repetition coding, it is also deterministic.
+ *
+ * Parameter `overwrite` allows regeneration of a FEC chunk on a given
+ * `vector_idx` even when another chunk already exists in this index.
+ *
+ */
+bool FECEncoder::BuildChunk(size_t vector_idx, bool overwrite) {
     assert(vector_idx < fec_chunks->second.size());
 
-    if (fec_chunks->second[vector_idx])
+    if (!overwrite && fec_chunks->second[vector_idx])
         return true;
 
     size_t data_chunks = DIV_CEIL(data->size(), FEC_CHUNK_SIZE);
@@ -244,6 +271,9 @@ bool FECEncoder::BuildChunk(size_t vector_idx) {
     } else
         fec_chunk_id = rand.randrange(FEC_CHUNK_COUNT_MAX - data_chunks);
     size_t chunk_id = fec_chunk_id + data_chunks;
+
+    if (overwrite && (fec_chunks->second[vector_idx] == chunk_id))
+        return true;
 
     if (CHUNK_COUNT_USES_CM256(data_chunks)) {
         cm256_encoder_params params { (int)data_chunks, uint8_t(256 - data_chunks - 1), FEC_CHUNK_SIZE };
