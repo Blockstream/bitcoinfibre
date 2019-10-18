@@ -91,7 +91,7 @@ public:
      * passed directly into FECDecoder::ProvideChunk or FECDecoder::HasChunk
      * (ie it will be offset by the data chunk count).
      */
-    bool BuildChunk(size_t vector_idx);
+    bool BuildChunk(size_t vector_idx, bool overwrite=false);
     bool PrefillChunks();
 };
 
