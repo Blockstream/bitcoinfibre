@@ -1046,6 +1046,7 @@ static void do_send_messages() {
 
 static void MulticastBackfillThread(const CService& mcastNode,
                                     const UDPMulticastInfo *info) {
+    const bool debugMcast = LogAcceptCategory(BCLog::UDPMCAST);
     /* Start only after the initial sync */
     while (::ChainstateActive().IsInitialBlockDownload() && !send_messages_break)
         std::this_thread::sleep_for(std::chrono::milliseconds(50));
@@ -1065,6 +1066,7 @@ static void MulticastBackfillThread(const CService& mcastNode,
     }
 
     std::chrono::steady_clock::time_point last_tx_time = std::chrono::steady_clock::now();
+    std::chrono::steady_clock::time_point t_cycle_start = last_tx_time;
 
     /* The txn transmission quota is based on the elapsed interval since
      * last time txns were sent, which is the "txn quota of seconds". */
@@ -1080,6 +1082,7 @@ static void MulticastBackfillThread(const CService& mcastNode,
 
         /* Define height of target block (to be transmitted) */
         int height;
+        bool wrapped_around = false;
         {
             LOCK(cs_main);
             height = lastBlock->nHeight + 1;
@@ -1087,10 +1090,21 @@ static void MulticastBackfillThread(const CService& mcastNode,
 
             if (height < chain_height - backfill_depth + 1)
                 height = chain_height - backfill_depth + 1;
-            else if (height > chain_height)
+            else if (height > chain_height) {
                 height = chain_height - backfill_depth + 1;
+                wrapped_around = true;
+            }
 
             lastBlock = ::ChainActive()[height];
+        }
+
+
+        if (debugMcast && wrapped_around) {
+            std::chrono::steady_clock::time_point t_cycle_end(std::chrono::steady_clock::now());
+            std::chrono::duration<float> backfill_cycle_duration = t_cycle_end - t_cycle_start;
+            t_cycle_start = t_cycle_end;
+            LogPrint(BCLog::UDPNET, "UDP: Multicast Tx %lu-%lu - cycle finished in %f secs\n",
+                     info->physical_idx, info->logical_idx, backfill_cycle_duration.count());
         }
 
         /* Txn transmission quota (number of txns to transmit now) */
