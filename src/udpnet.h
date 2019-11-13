@@ -69,6 +69,7 @@ struct __attribute__((packed)) UDPBlockMessage { // (also used for txn)
     unsigned char data[FEC_CHUNK_SIZE];
 };
 static_assert(sizeof(UDPBlockMessage) == MAX_UDP_MESSAGE_LENGTH, "Messages must be == MAX_UDP_MESSAGE_LENGTH");
+static const size_t udp_blk_msg_header_size = sizeof(UDPBlockMessage) - FEC_CHUNK_SIZE;
 
 struct __attribute__((packed)) UDPMessage {
     UDPMessageHeader header;
