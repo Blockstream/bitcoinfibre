@@ -98,14 +98,15 @@ static void SendMessageToAllNodes(const UDPMessage& msg, unsigned int length, bo
             SendMessageToNode(msg, length, high_prio, hash_prefix, it);
 }
 
-static void CopyMessageData(UDPMessage& msg, const std::vector<unsigned char>& data, size_t msg_chunks, uint16_t chunk_id) {
+static size_t CopyMessageData(UDPMessage& msg, const std::vector<unsigned char>& data, size_t msg_chunks, uint16_t chunk_id) {
     msg.msg.block.chunk_id = htole16(chunk_id);
 
-    size_t msg_size = chunk_id == msg_chunks - 1 ? (data.size() % FEC_CHUNK_SIZE) : sizeof(msg.msg.block.data);
+    size_t msg_size = (chunk_id == msg_chunks - 1) ? (data.size() % FEC_CHUNK_SIZE) : sizeof(msg.msg.block.data);
     if (msg_size == 0) msg_size = FEC_CHUNK_SIZE;
     memcpy(msg.msg.block.data, &data[chunk_id * FEC_CHUNK_SIZE], msg_size);
     if (msg_size != sizeof(msg.msg.block.data))
         memset(&msg.msg.block.data[msg_size], 0, sizeof(msg.msg.block.data) - msg_size);
+    return msg_size;
 }
 
 /**
@@ -449,10 +450,16 @@ void UDPRelayBlock(const CBlock& block) {
  *
  * All txns are sent uncoded (without FEC-coding). Yet, the txns with size
  * yielding more than a single data chunk are still treated as FEC-coded on the
- * receive-end. This is OK, since the coding scheme is systematic. Most likely,
- * such (larger) txns will be encoded by cm256.
+ * receive-end. This is OK, , since the coding schemes (cm256 or wirehair) are
+ * systematic. Most likely, such (larger) txns will be encoded by cm256.
+ *
+ * Also, txns are sent over variable-length UDP datagrams. If the txn size is
+ * greater than a FEC chunk size, it is split into multiple messages (UDP
+ * datagrams), each one (except the last) carrying a number of bytes equal to
+ * the FEC chunk size. Otherwise, the txn is sent over a shorter datagram. This
+ * function includes the size of each msg into the vector of msgs.
  */
-void UDPFillMessagesFromTx(const CTransaction& tx, std::vector<UDPMessage>& msgs) {
+void UDPFillMessagesFromTx(const CTransaction& tx, std::vector<std::pair<UDPMessage, size_t>>& msgs) {
     const uint256 hash(tx.GetWitnessHash());
     const uint64_t hash_prefix = hash.GetUint64(0);
 
@@ -464,8 +471,8 @@ void UDPFillMessagesFromTx(const CTransaction& tx, std::vector<UDPMessage>& msgs
     msgs.resize(data_chunks);
 
     for (size_t i = 0; i < data_chunks; i++) {
-        FillCommonMessageHeader(msgs[i], hash_prefix, MSG_TYPE_TX_CONTENTS, data.size());
-        CopyMessageData(msgs[i], data, data_chunks, i);
+        FillCommonMessageHeader(msgs[i].first, hash_prefix, MSG_TYPE_TX_CONTENTS, data.size());
+        msgs[i].second = CopyMessageData(msgs[i].first, data, data_chunks, i);
     }
 }
 
@@ -1029,7 +1036,7 @@ bool HandleBlockTxMessage(UDPMessage& msg, size_t length, const CService& node, 
     assert((msg.header.msg_type & UDP_MSG_TYPE_TYPE_MASK) == MSG_TYPE_BLOCK_HEADER || (msg.header.msg_type & UDP_MSG_TYPE_TYPE_MASK) == MSG_TYPE_BLOCK_CONTENTS || (msg.header.msg_type & UDP_MSG_TYPE_TYPE_MASK) == MSG_TYPE_TX_CONTENTS);
 
     if (length != sizeof(UDPMessageHeader) + sizeof(UDPBlockMessage)) {
-        LogPrintf("UDP: Got invalidly-sized block message from %s\n", node.ToString());
+        LogPrintf("UDP: Got invalidly-sized (%d bytes) message from %s\n", length, node.ToString());
         return false;
     }
 

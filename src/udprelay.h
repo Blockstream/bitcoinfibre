@@ -22,6 +22,6 @@ void ProcessDownloadTimerEvents();
 
 // Each UDPMessage must be of sizeof(UDPMessageHeader) + MAX_UDP_MESSAGE_LENGTH in length!
 void UDPFillMessagesFromBlock(const CBlock& block, std::vector<UDPMessage>& msgs);
-void UDPFillMessagesFromTx(const CTransaction& tx, std::vector<UDPMessage>& msgs);
+void UDPFillMessagesFromTx(const CTransaction& tx, std::vector<std::pair<UDPMessage, size_t>>& msgs);
 
 #endif
