@@ -659,7 +659,10 @@ static void read_socket_func(evutil_socket_t fd, short event, void* arg) {
     const bool fBench = LogAcceptCategory(BCLog::BENCH);
     std::chrono::steady_clock::time_point start(std::chrono::steady_clock::now());
 
-    UDPMessage msg;
+    UDPMessage msg{};
+    /* We will place the incoming UDP message payload into `msg`. However, not
+     * necessarily the incoming payload will fill the entire `UDPMessage`
+     * structure. Hence, zero-initialize `msg` here. */
     struct sockaddr_in6 remoteaddr;
     socklen_t remoteaddrlen = sizeof(remoteaddr);
 
@@ -1187,10 +1190,12 @@ static void MulticastBackfillThread(const CService& mcastNode,
             }
 
             for (const CTransactionRef& tx : txn_to_send) {
-                std::vector<UDPMessage> msgs;
+                std::vector<std::pair<UDPMessage, size_t>> msgs;
                 UDPFillMessagesFromTx(*tx, msgs);
-                for (UDPMessage& msg : msgs) {
-                    SendMessage(msg, sizeof(UDPMessageHeader) + MAX_UDP_MESSAGE_LENGTH, queue, queue.buffs[2], mcastNode, multicast_checksum_magic);
+                for (const auto& msg_info : msgs) {
+                    const UDPMessage& msg = msg_info.first;
+                    const size_t msg_size = msg_info.second;
+                    SendMessage(msg, sizeof(UDPMessageHeader) + udp_blk_msg_header_size + msg_size, queue, queue.buffs[2], mcastNode, multicast_checksum_magic);
                 }
             }
         }
