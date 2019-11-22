@@ -401,6 +401,13 @@ static bool InitializeUDPMulticast(std::vector<int> &udp_socks,
                 return false;
             }
 
+            /* DSCP */
+            char dscp = mcast_info.dscp; //IPTOS_THROUGHPUT;
+            if (setsockopt(udp_socks.back(), IPPROTO_IP, IP_TOS, &dscp, sizeof(dscp)) != 0) {
+                LogPrintf("UDP: setsockopt failed: %s\n", strerror(errno));
+                return false;
+            }
+
             /* CService identifier: destination multicast IP address */
             inet_pton(AF_INET, mcast_info.mcast_ip, &multicastaddr.sin_addr);
         } else {
@@ -1302,6 +1309,7 @@ static UDPMulticastInfo ParseUDPMulticastInfo(const std::string& s, const bool t
     info.bw          = 0;
     info.logical_idx = 0; // default for multicast Rx, overriden for Tx
     info.depth       = 144;
+    info.dscp        = 0; // IPv4 DSCP used for multicast Tx
 
     if (info.tx) {
         const size_t bw_end = s.find(',', mcastaddr_end + 1);
@@ -1323,7 +1331,14 @@ static UDPMulticastInfo ParseUDPMulticastInfo(const std::string& s, const bool t
                 info.ttl = atoi(s.substr(send_txns_end + 1));
             } else {
                 info.ttl   = atoi(s.substr(send_txns_end + 1, ttl_end - send_txns_end - 1));
-                info.depth = atoi(s.substr(ttl_end + 1));
+
+                const size_t depth_end = s.find(',', ttl_end + 1);
+                if (depth_end == std::string::npos) {
+                    info.depth = atoi(s.substr(ttl_end + 1));
+                } else {
+                    info.depth = atoi(s.substr(ttl_end + 1, depth_end - ttl_end - 1));
+                    info.dscp  = atoi(s.substr(depth_end + 1));
+                }
             }
         }
 
