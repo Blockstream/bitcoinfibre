@@ -74,7 +74,6 @@ static int mcastStatPrintInterval = 10;
  */
 namespace {
     std::map<std::tuple<CService, int, uint16_t>, UDPMulticastInfo> mapMulticastNodes;
-    std::map<size_t, std::string> mapMulticastGroupNames;
     char const* const multicast_pass = "multicast";
     uint64_t const multicast_magic = Hash(&multicast_pass[0], &multicast_pass[0] + strlen(multicast_pass)).GetUint64(0);
 }
@@ -307,6 +306,7 @@ static bool InitializeUDPMulticast(std::vector<int> &udp_socks,
     for (auto& mcast_info : multicast_list) {
         udp_socks.push_back(socket(AF_INET6, SOCK_DGRAM, 0));
         assert(udp_socks.back());
+        mcast_info.fd = udp_socks.back();
 
         int opt = 1;
         if (setsockopt(udp_socks.back(), SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt)) != 0) {
@@ -433,7 +433,9 @@ static bool InitializeUDPMulticast(std::vector<int> &udp_socks,
 
         group++;
         mcast_info.group = group;
-        CService addr{multicastaddr.sin_addr, multicast_port};
+        /* For multicast Rx, don't care about the UDP port of the Tx node */
+        const unsigned short cservice_port = mcast_info.tx ? multicast_port : 0;
+        const CService addr{multicastaddr.sin_addr, cservice_port};
 
         /* Each address-ifindex pair is associated to an unique physical
          * index. Tx streams sharing the same physical index are configured with
@@ -482,16 +484,9 @@ static bool InitializeUDPMulticast(std::vector<int> &udp_socks,
         }
         mapMulticastNodes[mcast_map_key] = mcast_info;
 
-        /* Map group number to an optional group name (label) */
-        if (mapMulticastGroupNames.count(group) > 0) {
-            LogPrintf("UDP: error - multicast group %d already exists\n", group);
-            return false;
-        }
-        mapMulticastGroupNames[group] = mcast_info.groupname;
-
         LogPrintf("UDP: Socket %d bound to port %hd for multicast group %d %s\n",
                   udp_socks.back(), multicast_port, group,
-                  mapMulticastGroupNames[group]);
+                  mcast_info.groupname);
     }
 
     return true;
@@ -668,12 +663,36 @@ static void read_socket_func(evutil_socket_t fd, short event, void* arg) {
         return;
     }
     assert(remoteaddrlen == sizeof(remoteaddr));
+    CService c_remoteaddr(remoteaddr);
 
     if (size_t(res) < sizeof(UDPMessageHeader) || size_t(res) >= sizeof(UDPMessage))
         return;
 
     std::unique_lock<std::recursive_mutex> lock(cs_mapUDPNodes);
-    std::map<CService, UDPConnectionState>::iterator it = mapUDPNodes.find(CService(remoteaddr));
+
+    /* Is this coming from a multicast Tx node and through a multicast Rx
+     * socket? */
+    bool from_mcast_tx = false;
+    std::map<std::tuple<CService, int, uint16_t>, UDPMulticastInfo>::iterator itm;
+    for (itm = mapMulticastNodes.begin(); itm != mapMulticastNodes.end(); ++itm) {
+        if ((CNetAddr)c_remoteaddr == (CNetAddr)(std::get<0>(itm->first))) {
+            if (fd == itm->second.fd) {
+                from_mcast_tx = true;
+                break;
+            }
+        }
+    }
+
+    /* If receiving from a multicast service, find node by IP only and not with
+     * the address brought by `recvfrom`, which includes the source port. This
+     * is because the source port of multicast Tx nodes can be random. */
+    std::map<CService, UDPConnectionState>::iterator it;
+    if (from_mcast_tx) {
+        const CService& mcasttx_addr = std::get<0>(itm->first);
+        it = mapUDPNodes.find(mcasttx_addr);
+    } else
+        it = mapUDPNodes.find(c_remoteaddr);
+
     if (it == mapUDPNodes.end())
         return;
     if (!CheckChecksum(it->second.connection.local_magic, msg, res))
@@ -686,6 +705,12 @@ static void read_socket_func(evutil_socket_t fd, short event, void* arg) {
     /* Handle multicast msgs first (no need to check connection state) */
     if (state.connection.udp_mode == udp_mode_t::multicast)
     {
+        if (itm == mapMulticastNodes.end()) {
+            LogPrintf("Couldn't find multicast node\n");
+            return;
+        }
+        const UDPMulticastInfo& mcast_info = itm->second;
+
         if (msg_type_masked == MSG_TYPE_BLOCK_HEADER ||
             msg_type_masked == MSG_TYPE_BLOCK_CONTENTS ||
             msg_type_masked == MSG_TYPE_TX_CONTENTS) {
@@ -693,22 +718,16 @@ static void read_socket_func(evutil_socket_t fd, short event, void* arg) {
                 send_and_disconnect(it);
             else {
                 if (LogAcceptCategory(BCLog::UDPMCAST)) {
-                    state.rcvdBytes += sizeof(UDPMessage) - 1;
+                    mcast_info.stats.rcvdBytes += sizeof(UDPMessage) - 1;
                     auto now = std::chrono::steady_clock::now();
-                    double timeDeltaMillis = to_millis_double(now - state.lastAvgTime);
+                    double timeDeltaMillis = to_millis_double(now - mcast_info.stats.lastRxTime);
                     if (timeDeltaMillis > 1000*mcastStatPrintInterval) {
-                        auto const itm = mapMulticastGroupNames.find(state.connection.group);
-                        std::string groupname;
-                        if (itm == mapMulticastGroupNames.end())
-                            groupname = "";
-                        else
-                            groupname = itm->second;
-
-                        LogPrint(BCLog::UDPMCAST, "UDP multicast group %d (%s): Average bit rate %.4f Mbit/sec\n",
-                                  state.connection.group, groupname,
-                                  (double)state.rcvdBytes*8/(1000*timeDeltaMillis));
-                        state.lastAvgTime = now;
-                        state.rcvdBytes = 0;
+                        LogPrint(BCLog::UDPMCAST, "UDP multicast group %d: Average bit rate %7.2f Mbit/sec (%s)\n",
+                                 mcast_info.group,
+                                 (double)mcast_info.stats.rcvdBytes*8/(1000*timeDeltaMillis),
+                                 mcast_info.groupname);
+                        mcast_info.stats.lastRxTime = now;
+                        mcast_info.stats.rcvdBytes = 0;
                     }
                 }
             }
@@ -1449,7 +1468,6 @@ static void OpenUDPConnectionTo(const CService& addr, const UDPConnectionInfo& i
     state.state = (info.udp_mode == udp_mode_t::multicast) ? STATE_INIT_COMPLETE : STATE_INIT;
     state.lastSendTime = 0;
     state.lastRecvTime = GetTimeMillis();
-    state.lastAvgTime  = std::chrono::steady_clock::now();
 
     if (info.udp_mode == udp_mode_t::unicast) {
         size_t group_count = 0;
@@ -1475,6 +1493,8 @@ void OpenPersistentUDPConnectionTo(const CService& addr, uint64_t local_magic, u
 
     if (mapPersistentNodes.count(addr))
         return;
+    /* NOTE: when multiple multicast services are defined on the same IP:port,
+     * only one persistent node is created */
 
     UDPConnectionInfo info = {htole64(local_magic), htole64(remote_magic), group, fUltimatelyTrusted, connection_type, udp_mode};
     OpenUDPConnectionTo(addr, info);
