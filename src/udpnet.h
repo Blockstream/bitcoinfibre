@@ -210,6 +210,7 @@ struct UDPMulticastInfo {
     uint16_t physical_idx; /** index of destination IP - net interface pair */
     uint16_t logical_idx;  /** logical idx for streams sharing physical idx */
     bool send_txns;        /** whether to send txns over this logical stream */
+    char dscp;             /** Differentiated Services Code Point (DSCP) */
 };
 
 struct UDPConnectionState {
