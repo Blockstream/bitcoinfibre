@@ -1116,10 +1116,13 @@ static void MulticastBackfillThread(const CService& mcastNode,
             height = lastBlock->nHeight + 1;
             const int chain_height = ::ChainActive().Height();
 
-            if (height < chain_height - backfill_depth + 1)
+            if ((height < chain_height - backfill_depth + 1) && (backfill_depth > 0))
                 height = chain_height - backfill_depth + 1;
             else if (height > chain_height) {
-                height = chain_height - backfill_depth + 1;
+                if (backfill_depth == 0)
+	                height = 0;
+                else
+	                height = chain_height - backfill_depth + 1;
                 wrapped_around = true;
             }
 
@@ -1339,6 +1342,11 @@ static UDPMulticastInfo ParseUDPMulticastInfo(const std::string& s, const bool t
                     info.dscp  = atoi(s.substr(depth_end + 1));
                 }
             }
+        }
+
+        if (info.depth < 0) {
+            LogPrintf("Failed to parse -udpmulticasttx option, depth must be >= 0\n");
+            return info;
         }
 
         if (info.bw == 0) {
