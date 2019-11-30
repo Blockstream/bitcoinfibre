@@ -1021,6 +1021,7 @@ static void do_send_messages() {
 
             PendingMessagesBuff* buff = &queue.buffs[send_state.buff_state.buff_id];
             size_t i = 0;
+            uint16_t bytes_sent = 0;
             for (; i < queue.write_objs_per_call + extra_writes && send_state.buff_state.buff_id != -1; i++) {
                 std::tuple<CService, UDPMessage, unsigned int, uint64_t>& msg = buff->messagesPendingRingBuff[send_state.buff_state.nextPendingMessage];
 
@@ -1043,6 +1044,8 @@ static void do_send_messages() {
                               group, strerror(errno));
                 }
 
+                bytes_sent += std::get<2>(msg);
+
                 send_state.buff_state.nextPendingMessage = (send_state.buff_state.nextPendingMessage + 1) % PENDING_MESSAGES_BUFF_SIZE;
                 if (send_state.buff_state.nextPendingMessage == send_state.buff_state.nextUndefinedMessage) {
                     buff->nextPendingMessage = send_state.buff_state.nextPendingMessage;
@@ -1055,8 +1058,7 @@ static void do_send_messages() {
             if (send_state.buff_state.buff_id != -1)
                 buff->nextPendingMessage = send_state.buff_state.nextPendingMessage;
 
-            size_t non_extra_messages_sent = std::max<ssize_t>(std::min(i, queue.write_objs_per_call), ssize_t(i) - extra_writes);
-            send_state.next_send = start + std::chrono::nanoseconds(1000ULL*1000*1000 * queue.bytes_per_obj * non_extra_messages_sent / queue.target_bytes_per_sec);
+            send_state.next_send = start + std::chrono::nanoseconds(1000ULL*1000*1000 * bytes_sent / queue.target_bytes_per_sec);
             send_state.buff_emptied = false;
             sleep_until = std::min(sleep_until, send_state.next_send);
         }
@@ -1272,6 +1274,17 @@ static std::map<size_t, PerGroupMessageQueue> init_tx_queues(const std::vector<s
         target_bytes_per_sec = it->second.bw * (it->second.multicast ? 1 : 1024 * 1024) / 8;
         bytes_per_obj        = it->second.multicast ? (sizeof(UDPMessageHeader) + MAX_UDP_MESSAGE_LENGTH) : PACKET_SIZE; // FIXME
         write_objs_per_call  = std::max<size_t>(1, target_bytes_per_sec / WRITES_PER_SEC / bytes_per_obj / mapQueues.size());
+        /* Try roughly WRITES_PER_SEC UDP datagram transmissions per second in
+         * total, including all queues. For each queue, in turn, try to allocate
+         * a piece of this total budget of "writes" (transmissions) that is
+         * proportional to the queue's target throughput.
+         *
+         * NOTE: this assumes that all datagrams have the same length. However,
+         * in the current implementation txns are variable length and their size
+         * is less than or equal to "bytes_per_obj". Hence,
+         * "write_objs_per_call" is only a rough approximation. This is OK,
+         * since in the end, the flow control is based on number of bytes sent.
+         */
     }
 
     return mapQueues;
