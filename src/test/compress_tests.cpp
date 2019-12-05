@@ -387,20 +387,20 @@ bool round_trip_compress_transaction(CMutableTransaction& tx)
     stream >> CTxCompressor(ret);
 
     stream << tx;
-    CSerializeData data1;
-    stream.GetAndClear(data1);
+    CSerializeData original;
+    stream.GetAndClear(original);
 
     stream << ret;
-    CSerializeData data2;
-    stream.GetAndClear(data2);
+    CSerializeData round_tripped;
+    stream.GetAndClear(round_tripped);
 
-    BOOST_CHECK(data2 == data1);
-    if (data2 != data1) {
-        printf("=== round-tripped:\n%s\n\n=== original:\n%s\n\n"
-            , CTransaction(ret).ToString().c_str()
-            , CTransaction(tx).ToString().c_str());
+    BOOST_CHECK(round_tripped == original);
+    if (round_tripped != original) {
+        printf("=== round-tripped:\nlen=%d\n%s\n\n=== original:\nlen=%d\n%s\n\n"
+            , int(round_tripped.size()), CTransaction(ret).ToString().c_str()
+            , int(original.size()), CTransaction(tx).ToString().c_str());
     }
-    return data2 == data1;
+    return round_tripped == original;
 }
 }
 
@@ -420,14 +420,20 @@ BOOST_AUTO_TEST_CASE(compress_transaction_basic)
 /*
 BOOST_AUTO_TEST_CASE(compress_transaction_corpus)
 {
-    DIR* d = opendir("test-tx");
     int counter = 0;
     int success = 0;
+    int factor = 15;
+    CSerializeData data;
+
+    DIR* d = opendir("test-tx");
     for (struct dirent* ent = readdir(d); ent; ent = readdir(d)) {
 
-        CSerializeData data;
         data.resize(1000000);
 
+        if ((counter & factor) == 0) {
+            std::cout << counter << '\n';
+            factor = (factor + 1) * 2 - 1;
+        }
         std::string filename = "test-tx/";
         filename += ent->d_name;
 
@@ -461,8 +467,46 @@ BOOST_AUTO_TEST_CASE(compress_transaction_corpus)
     closedir(d);
     std::cout << "ran " << counter << " tests. " << success << " passed\n";
 }
-*/
 
+BOOST_AUTO_TEST_CASE(compress_transaction_roundtrip)
+{
+    CSerializeData data;
+    data.resize(1000000);
+
+    char const* filename = "test-tx/tx-00000";
+    FILE* f = fopen(filename, "rb");
+    if (f == nullptr) {
+        std::cout << "failed to open file: " << filename << "\n";
+        return;
+    }
+    auto const len = fread(data.data(), 1, data.size(), f);
+    if (len <= 0) {
+        fclose(f);
+        std::cout << "failed to read file: " << filename << "\n";
+        return;
+    }
+    data.resize(len);
+    CDataStream str(data.begin(), data.end(), SER_NETWORK, PROTOCOL_VERSION);
+
+    try {
+        CMutableTransaction tx;
+        str >> tx;
+
+        printf("=== original:\n%s\n\n", CTransaction(tx).ToString().c_str());
+
+        bool const ret = round_trip_compress_transaction(tx);
+        if (!ret) {
+            std::cout << "\nround-trip transaction: " << filename << '\n';
+            return;
+        }
+    } catch (std::exception const& e) {
+        std::cout << "\nround-trip transaction: " << filename << '\n';
+        std::cerr << "failed with exception: " << e.what() << '\n';
+        return;
+    }
+    fclose(f);
+}
+*/
 namespace
 {
 const unsigned char vchKey0[32] = {0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1};
