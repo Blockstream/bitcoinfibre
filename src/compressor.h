@@ -151,7 +151,7 @@ enum class LockTimeCode : uint8_t { zero, varint, raw };
 enum class SequenceCode : uint8_t { zero, final_seq, final_less_one, last_encoded, raw};
 
 std::pair<LockTimeCode, uint8_t> ParseTxHeader(uint8_t TxHeader);
-uint8_t GenerateTxHeader(uint32_t const lock_time, int32_t const version);
+uint8_t GenerateTxHeader(uint32_t lock_time, uint32_t version);
 
 std::tuple<bool, uint8_t, SequenceCode> ParseTxInHeader(uint8_t TxInHeader);
 uint8_t GenerateTxInHeader(bool last, CTxIn const& in, std::vector<uint32_t>& SequenceCache);

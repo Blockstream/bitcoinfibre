@@ -10,6 +10,7 @@
 #include <pubkey.h>
 #include <script/standard.h>
 #include <script/interpreter.h>
+#include <serialize.h>
 #include <util/strencodings.h>
 
 #include <iostream>
@@ -290,6 +291,9 @@ void decompressTransaction(Stream& s, CMutableTransaction& tx)
         case scriptSigTemplate::WIT_OTHER:
             s >> txin.scriptWitness.stack;
             if (TemplateType == scriptSigTemplate::P2SH_P2WSH_OTHER) {
+                if (txin.scriptWitness.stack.empty()) {
+                    throw std::runtime_error("invalid compressed transaction. empty scriptwitness stack");
+                }
                 std::vector<valtype> const scriptsigstack{ PadHash(MakeSpan(txin.scriptWitness.stack.back()), iswitnesshash) };
                 txin.scriptSig = decode_push_only(MakeSpan(scriptsigstack));
             }
@@ -326,6 +330,9 @@ void decompressTransaction(Stream& s, CMutableTransaction& tx)
 
             valtype temp;
             if (TemplateType == scriptSigTemplate::P2SH_P2WSH_P2PKH) {
+                if (scriptsigstack.empty()) {
+                    throw std::runtime_error("invalid compressed transaction. empty TxIn scriptsigstack");
+                }
                 auto const temp = scriptsigstack.back();
                 scriptsigstack.pop_back();
                 txin.scriptWitness.stack = scriptsigstack;
@@ -334,6 +341,9 @@ void decompressTransaction(Stream& s, CMutableTransaction& tx)
                 txin.scriptSig = decode_push_only(MakeSpan(scriptsigstack));
             }
             else if (TemplateType == scriptSigTemplate::P2SH_P2WPKH) {
+                if (scriptsigstack.empty()) {
+                    throw std::runtime_error("invalid compressed transaction. empty TxIn scriptsigstack");
+                }
                 scriptsigstack.pop_back();
                 txin.scriptWitness.stack = scriptsigstack;
                 CScript const h = GetScriptForDestination(WitnessV0KeyHash(CPubKey(scriptsigstack[1]).GetID()));
@@ -359,6 +369,9 @@ void decompressTransaction(Stream& s, CMutableTransaction& tx)
             } else {
                 txin.scriptWitness.stack = scriptsigstack;
                 if (TemplateType == scriptSigTemplate::P2SH_P2WSH_MS) {
+                    if (txin.scriptWitness.stack.empty()) {
+                        throw std::runtime_error("invalid compressed transaction. empty scriptwitness stack");
+                    }
                     scriptsigstack.push_back(PadHash(MakeSpan(txin.scriptWitness.stack.back()), iswitnesshash));
                     txin.scriptSig = decode_push_only(MakeSpan(scriptsigstack));
                 }
@@ -378,13 +391,14 @@ void decompressTransaction(Stream& s, CMutableTransaction& tx)
         tx.vout.push_back(CTxOut());
         CTxOut& txout = tx.vout.back();
 
-        uint64_t scriptlength = 0;
         if (TxOutCode == 100) {
+            uint64_t scriptlength;
             s >> VARINT(scriptlength);
             txout.scriptPubKey.resize(scriptlength + 76);
         } else if (TxOutCode >= 24) {
             txout.scriptPubKey.resize(TxOutCode - 24);
         } else if (TxOutCode >= 8) {
+            uint8_t scriptlength;
             s >> scriptlength;
             txout.scriptPubKey.resize(scriptlength);
         } else if (TxOutCode >= 3) {
@@ -491,7 +505,7 @@ void compressTransaction(Stream& s, CTransaction const& tx)
 template void compressTransaction<CDataStream>(CDataStream&, CTransaction const&);
 template void decompressTransaction<CDataStream>(CDataStream&, CMutableTransaction&);
 
-uint8_t GenerateTxHeader(uint32_t const lock_time, int32_t const version)
+uint8_t GenerateTxHeader(uint32_t const lock_time, uint32_t const version)
 {
     uint32_t const VarIntThreshold = 2113663;
 
@@ -1423,8 +1437,8 @@ void PadScriptPubKey(uint8_t const TxOutCode, CScript &scriptPubKey)
             scriptPubKey.insert(scriptPubKey.begin(), TxOutCode - 4);
             CPubKey pubkey(&scriptPubKey[0], &scriptPubKey[33]);
             pubkey.Decompress();
-            scriptPubKey.reserve(67);
-            scriptPubKey.insert(scriptPubKey.begin(), 65);
+            scriptPubKey.resize(66);
+            scriptPubKey[0] = 65;
             memcpy(&scriptPubKey[1], pubkey.begin(), 65);
         } else {
             fixcache.push_back(33);
