@@ -190,6 +190,10 @@ BOOST_AUTO_TEST_CASE(generate_tx_header)
     BOOST_CHECK(GenerateTxHeader(2, 3) == 10);
     BOOST_CHECK(GenerateTxHeader(2113663, 3) == 10);
     BOOST_CHECK(GenerateTxHeader(2113664, 3) == 11);
+
+    // out-of-bound version
+    BOOST_CHECK(GenerateTxHeader(1, 9999) == 1 + 3 * 15);
+    BOOST_CHECK(GenerateTxHeader(1, -9999) == 1 + 3 * 15);
 }
 
 BOOST_AUTO_TEST_CASE(generate_tx_in_header)
