@@ -504,7 +504,11 @@ void compressTransaction(Stream& s, CTransaction const& tx)
 }
 
 template void compressTransaction<CDataStream>(CDataStream&, CTransaction const&);
+template void compressTransaction<VectorOutputStream>(VectorOutputStream&, CTransaction const&);
+template void compressTransaction<CVectorWriter>(CVectorWriter&, CTransaction const&);
+template void compressTransaction<CSizeComputer>(CSizeComputer&, CTransaction const&);
 template void decompressTransaction<CDataStream>(CDataStream&, CMutableTransaction&);
+template void decompressTransaction<VectorInputStream>(VectorInputStream&, CMutableTransaction&);
 
 uint8_t GenerateTxHeader(uint32_t const lock_time, uint32_t const version)
 {
