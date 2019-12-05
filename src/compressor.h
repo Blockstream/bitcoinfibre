@@ -9,6 +9,7 @@
 #include <primitives/transaction.h>
 #include <script/script.h>
 #include <serialize.h>
+#include <streams.h>
 #include <span.h>
 #include <hash.h>
 #include <array>
@@ -212,16 +213,27 @@ void PadScriptPubKey(uint8_t TxOutCode, CScript &scriptPubKey);
 template <typename Stream>
 void decompressTransaction(Stream& s, CMutableTransaction& tx);
 
+inline void decompressTransaction(CVectorWriter&, CMutableTransaction&)
+{ assert(false); }
+
+inline void decompressTransaction(VectorOutputStream&, CMutableTransaction&)
+{ assert(false); }
+
+inline void decompressTransaction(CSizeComputer&, CMutableTransaction&)
+{ assert(false); }
+
 template <typename Stream>
 void compressTransaction(Stream& s, CTransaction const& tx);
 
-/* Non-consensus wrapper for transactions that provides a more compact serialization */
-class CTxCompressor
+inline void compressTransaction(VectorInputStream&, CTransaction const&)
+{ assert(false); }
+
+struct CTxCompressor
 {
-    boost::variant<CMutableTransaction*, CTransaction const*> tx;
+    boost::variant<CMutableTransaction*, CTransaction const*, CTransactionRef*> tx;
 
 public:
-    explicit CTxCompressor(CTransactionRef const& txin) : tx(txin.get()) {}
+    explicit CTxCompressor(CTransactionRef& txin) : tx(&txin) {}
     explicit CTxCompressor(CTransaction const& txin) : tx(&txin) {}
     explicit CTxCompressor(CMutableTransaction &txin) : tx(&txin) {}
 
@@ -231,10 +243,22 @@ public:
     void SerializationOp(Stream& s, Operation ser_action)
     {
         if (ser_action.ForRead()) {
-            decompressTransaction(s, *boost::get<CMutableTransaction*>(tx));
+            if (boost::get<CTransactionRef*>(&tx) != nullptr) {
+                CMutableTransaction local_tx;
+                decompressTransaction(s, local_tx);
+                *boost::get<CTransactionRef*>(tx) = MakeTransactionRef(local_tx);
+            }
+            else {
+                decompressTransaction(s, *boost::get<CMutableTransaction*>(tx));
+            }
         }
         else {
-            compressTransaction(s, *boost::get<CTransaction const*>(tx));
+            if (boost::get<CTransactionRef*>(&tx) != nullptr) {
+               compressTransaction(s, **boost::get<CTransactionRef*>(tx));
+            }
+            else {
+               compressTransaction(s, *boost::get<CTransaction const*>(tx));
+            }
         }
     }
 };
