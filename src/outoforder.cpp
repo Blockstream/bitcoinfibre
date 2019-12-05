@@ -46,9 +46,8 @@ static CCriticalSection cs_ooob;
 
 static CDBWrapper* GetOoOBlockDB() EXCLUSIVE_LOCKS_REQUIRED(cs_ooob)
 {
-    static CDBWrapper *ooob_db = nullptr;
-    if (!ooob_db) ooob_db = new CDBWrapper(GetDataDir() / "future_blocks", /*cache size=*/1024);
-    return ooob_db;
+    static CDBWrapper ooob_db(GetDataDir() / "future_blocks", /*cache size=*/1024);
+    return &ooob_db;
 }
 
 bool StoreOoOBlock(const CChainParams& chainparams, const std::shared_ptr<const CBlock> pblock) EXCLUSIVE_LOCKS_REQUIRED(cs_main)
@@ -73,7 +72,7 @@ bool StoreOoOBlock(const CChainParams& chainparams, const std::shared_ptr<const 
     if (height > int(::ChainActive().Height() + MIN_BLOCKS_TO_KEEP)) return false;
 
     LogPrintf("Adding block %s (height %u) to out-of-order disk cache\n", pblock->GetHash().GetHex(), height);
-    FlatFilePos diskpos = SaveBlockToDisk(*pblock, height, chainparams, nullptr);
+    const FlatFilePos diskpos = SaveBlockToDisk(*pblock, height, chainparams, nullptr);
     successors.emplace(pblock->GetHash(), diskpos);
     if (!ooob_db->Write(key, successors)) {
         LogPrintf("ERROR adding block %s to out-of-order disk cache\n", pblock->GetHash().GetHex());
