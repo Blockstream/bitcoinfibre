@@ -338,14 +338,14 @@ static bool InitializeUDPMulticast(std::vector<int> &udp_socks,
             /* Don't loop messages that we send back to us */
             int no_loop = 0;
             if (setsockopt(udp_socks.back(), IPPROTO_IP, IP_MULTICAST_LOOP, &no_loop, sizeof(no_loop)) != 0) {
-                LogPrintf("UDP: setsockopt failed: %s\n", strerror(errno));
+                LogPrintf("UDP: setsockopt(IP_MULTICAST_LOOP) failed: %s\n", strerror(errno));
                 return false;
             }
 
             /* Set TTL of multicast messages */
             int ttl = mcast_info.ttl;
             if (setsockopt(udp_socks.back(), IPPROTO_IP, IP_MULTICAST_TTL, &ttl, sizeof(ttl)) != 0) {
-                LogPrintf("UDP: setsockopt failed: %s\n", strerror(errno));
+                LogPrintf("UDP: setsockopt(IP_MULTICAST_TTL) failed: %s\n", strerror(errno));
                 return false;
             }
 
@@ -354,8 +354,12 @@ static bool InitializeUDPMulticast(std::vector<int> &udp_socks,
             memset(&ifr, 0, sizeof(ifr));
             strncpy(ifr.ifr_name, mcast_info.ifname, IFNAMSIZ);
             if (setsockopt(udp_socks.back(), SOL_SOCKET, SO_BINDTODEVICE, (void *)&ifr, sizeof(ifr)) != 0) {
-                LogPrintf("UDP: setsockopt failed: %s\n", strerror(errno));
-                return false;
+                LogPrintf("UDP: setsockopt(SO_BINDTODEVICE) failed: %s\n", strerror(errno));
+                // SO_BINDTODEVICE requires CAP_NET_RAW, which means it normally
+				// fails when run as non-root. We really only care about
+				// outgoing packets going over the right interface, which is
+				// set below, in IP_MULTICAST_IF, so this is not critical. It's
+				// not a fatal error.
             }
 
             /* Ensure multicast packets are tx'ed by the chosen interface
@@ -367,7 +371,7 @@ static bool InitializeUDPMulticast(std::vector<int> &udp_socks,
             memset(&req, 0, sizeof(req));
             req.imr_ifindex = ifindex;
             if (setsockopt(udp_socks.back(), IPPROTO_IP, IP_MULTICAST_IF, &req, sizeof(req)) != 0) {
-                LogPrintf("UDP: setsockopt failed: %s\n", strerror(errno));
+                LogPrintf("UDP: setsockopt(IP_MULTICAST_IF) failed: %s\n", strerror(errno));
                 return false;
             }
 
@@ -392,7 +396,7 @@ static bool InitializeUDPMulticast(std::vector<int> &udp_socks,
                       mcast_info.tx_ip);
 
             if (setsockopt(udp_socks.back(), IPPROTO_IP, IP_ADD_SOURCE_MEMBERSHIP, &req, sizeof(req)) != 0) {
-                LogPrintf("UDP: setsockopt failed: %s\n", strerror(errno));
+                LogPrintf("UDP: setsockopt(IP_ADD_SOURCE_MEMBERSHIP) failed: %s\n", strerror(errno));
                 return false;
             }
 
