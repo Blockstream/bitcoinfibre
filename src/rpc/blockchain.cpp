@@ -1066,7 +1066,6 @@ void blockAnalyzer(const CBlock& block, std::vector<std::array<uint64_t, 3>>& st
     std::array<uint64_t, 5> statistic = {0, 0, 0, 0, 0};
     for (size_t i = 1; i < block.vtx.size(); ++i)
     {
-        CTxCompressor ctx (*block.vtx[i]);
         for (size_t j = 0; j < block.vtx[i]->vin.size(); ++j)
         {
             auto const scriptSigType = AnalyzeScriptSig(j, block.vtx[i]->vin[j], MakeSpan(statistic));
@@ -1218,12 +1217,13 @@ UniValue testcompression(const JSONRPCRequest& request)
             stream >> CTxCompressor(identity);
 
             if (ctx.nVersion != identity.nVersion
-                || ctx.vin == identity.vin
-                || ctx.vout == identity.vout
-                || ctx.nLockTime == identity.nLockTime)
+                || ctx.vin != identity.vin
+                || ctx.vout != identity.vout
+                || ctx.nLockTime != identity.nLockTime)
             {
                 fprintf(stderr, "failure to compress/decompress transaction %d in block %d\n"
                     , int(i), index);
+                throw std::runtime_error("round-trip failed");
             }
         }
         catch (std::exception const& e)
@@ -1240,17 +1240,6 @@ UniValue testcompression(const JSONRPCRequest& request)
                 std::ofstream f(name.data());
                 f.write(data.data(), data.size());
             }
-
-            str.clear();
-            str << CTxCompressor(ctx);
-            snprintf(name.data(), name.size(), "./corpus-tx/tx-%05d", txcount);
-            {
-                CSerializeData data;
-                str.GetAndClear(data);
-                std::ofstream f(name.data());
-                f.write(data.data(), data.size());
-            }
-
             ++txcount;
         }
     }
