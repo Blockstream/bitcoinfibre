@@ -50,9 +50,10 @@ static CDBWrapper* GetOoOBlockDB() EXCLUSIVE_LOCKS_REQUIRED(cs_ooob)
     return &ooob_db;
 }
 
-bool StoreOoOBlock(const CChainParams& chainparams, const std::shared_ptr<const CBlock> pblock) EXCLUSIVE_LOCKS_REQUIRED(cs_main)
+bool StoreOoOBlock(const CChainParams& chainparams, const std::shared_ptr<const CBlock> pblock)
 {
     LOCK(cs_ooob);
+    LOCK(cs_main);
     CDBWrapper * const ooob_db = GetOoOBlockDB();
     auto key = std::make_pair(DB_SUBSEQUENT_BLOCK, pblock->hashPrevBlock);
     std::map<uint256, FlatFilePos> successors;
@@ -83,7 +84,6 @@ bool StoreOoOBlock(const CChainParams& chainparams, const std::shared_ptr<const 
 
 void ProcessSuccessorOoOBlocks(const CChainParams& chainparams, const uint256& prev_block_hash)
 {
-    CDBWrapper *ooob_db = nullptr;
     std::deque<uint256> queue;
     queue.push_back(prev_block_hash);
     for ( ; !queue.empty(); queue.pop_front()) {
@@ -92,12 +92,9 @@ void ProcessSuccessorOoOBlocks(const CChainParams& chainparams, const uint256& p
 
         LOCK(cs_ooob);
         std::map<uint256, FlatFilePos> successors;
-        {
-            LOCK(cs_main);
-            if (!ooob_db) ooob_db = GetOoOBlockDB();
 
-            ooob_db->Read(key, successors);
-        }
+        CDBWrapper *ooob_db = GetOoOBlockDB();
+        ooob_db->Read(key, successors);
 
         if (successors.empty()) continue;
 
