@@ -662,18 +662,16 @@ static void ProcessBlockThread() {
                             if (have_prev) {
                                 save_block_for_later = false;
                             } else {
-	                            /* Only save out-of-order blocks received
-	                             * through a one-way multicast service */
-                                save_block_for_later = IsMulticastRxNode(node);
-                            }
-                            if (save_block_for_later) {
-                                // Only save blocks that are at least minimally valid
+                               /* Only save out-of-order blocks received
+                                * through a one-way multicast service
+                                * Only save blocks that are at least minimally valid */
                                 CValidationState state;
-                                save_block_for_later = CheckBlock(*pdecoded_block, state, Params().GetConsensus());
+                                save_block_for_later = IsMulticastRxNode(node)
+                                    && CheckBlock(*pdecoded_block, state, Params().GetConsensus());
                             }
-                            if (save_block_for_later) {
-                                save_block_for_later = StoreOoOBlock(Params(), pdecoded_block);
-                            }
+                        }
+                        if (save_block_for_later) {
+                            save_block_for_later = StoreOoOBlock(Params(), pdecoded_block);
                         }
                         LogPrintf("UDP: Failed to decode block %s\n", decoded_block.GetHash().ToString());
                         std::lock_guard<std::recursive_mutex> udpNodesLock(cs_mapUDPNodes);
