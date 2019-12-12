@@ -910,10 +910,10 @@ float blockMetrics(const CBlock& block)
     for (const auto& tx : block.vtx)
     {
         statistics[0] += (uint64_t)tx->GetTotalSize();
-        txstream << CTxCompressor(*tx);
+        txstream << CTxCompressor(*tx, codec_version_t::default_version);
         statistics[1] += txstream.size();
         CMutableTransaction baretx;
-        txstream >> CTxCompressor(baretx);
+        txstream >> CTxCompressor(baretx, codec_version_t::default_version);
         txstream.clear();
     }
     float txsavings = (float)1 - ((float)statistics[1] / (float)statistics[0]);
@@ -1135,9 +1135,9 @@ UniValue testcompression(const JSONRPCRequest& request)
         {
             stream.clear();
             auto const& ctx = *block.vtx[i];
-            stream << CTxCompressor(ctx);
+            stream << CTxCompressor(ctx, codec_version_t::default_version);
             CMutableTransaction identity;
-            stream >> CTxCompressor(identity);
+            stream >> CTxCompressor(identity, codec_version_t::default_version);
 
             if (ctx.nVersion != identity.nVersion
                 || ctx.vin != identity.vin

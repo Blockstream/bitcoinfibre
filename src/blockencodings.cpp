@@ -276,8 +276,12 @@ ReadStatus PartiallyDownloadedBlock::FillBlock(CBlock& block, const std::vector<
 }
 
 
-CBlockHeaderAndLengthShortTxIDs::CBlockHeaderAndLengthShortTxIDs(const CBlock& block, bool fDeterministic) :
-        CBlockHeaderAndShortTxIDs(block, true, fDeterministic), txlens(shorttxids.size()) {
+CBlockHeaderAndLengthShortTxIDs::CBlockHeaderAndLengthShortTxIDs(const CBlock& block,
+        codec_version_t const cv, bool const fDeterministic) :
+    CBlockHeaderAndShortTxIDs(block, true, fDeterministic),
+    codec_version(cv),
+    txlens(shorttxids.size())
+{
     int32_t lastprefilledindex = -1;
     uint16_t index_offset = 0;
     auto prefilledit = prefilledtxn.cbegin();
@@ -288,7 +292,7 @@ CBlockHeaderAndLengthShortTxIDs::CBlockHeaderAndLengthShortTxIDs(const CBlock& b
             index_offset++;
         } else {
 	    const CTransactionRef& tx = block.vtx[i];
-            txlens[i - index_offset] = GetSerializeSize(CTxCompressor(*tx), PROTOCOL_VERSION);
+            txlens[i - index_offset] = GetSerializeSize(CTxCompressor(*tx, codec_version), PROTOCOL_VERSION);
     	}
     }
 }
@@ -369,12 +373,13 @@ ReadStatus CBlockHeaderAndLengthShortTxIDs::FillIndexOffsetMap(F& callback) cons
 struct FillIndexOffsetMapSerializer {
     VectorOutputStream& stream;
     const CBlock& block;
+    codec_version_t codec_version;
     void operator()(size_t offset, size_t index) {
         if (stream.pos() < offset)
             stream.skip_bytes(offset - stream.pos());
         assert(stream.pos() == offset);
 	const CTransactionRef& tx = block.vtx[index];
-	stream << CTxCompressor(*tx);
+	stream << CTxCompressor(*tx, codec_version);
     }
 };
 
@@ -383,7 +388,7 @@ ChunkCodedBlock::ChunkCodedBlock(const CBlock& block, const CBlockHeaderAndLengt
     VectorOutputStream stream(&codedBlock, SER_NETWORK, PROTOCOL_VERSION);
 
     {
-        FillIndexOffsetMapSerializer ser{stream, block};
+        FillIndexOffsetMapSerializer ser{stream, block, headerAndIDs.codec_ver()};
         auto const ret = headerAndIDs.FillIndexOffsetMap(ser);
         assert(ret == READ_STATUS_OK);
     }
@@ -417,6 +422,8 @@ ReadStatus PartiallyDownloadedChunkBlock::InitData(const CBlockHeaderAndLengthSh
     std::chrono::steady_clock::time_point start;
     if (fBench)
         start = std::chrono::steady_clock::now();
+
+    codec_version = comprblock.codec_version;
 
     if (comprblock.txlens.size() != comprblock.shorttxids.size())
         return READ_STATUS_INVALID;
@@ -483,7 +490,12 @@ bool PartiallyDownloadedChunkBlock::SerializeTransaction(VectorOutputStream& str
     // We're fine blindly serializing tx -> either it came from mempool and is fully valid,
     // or it was received over the wire, so it shouldn't be able to eat all our memory.
     const CTransactionRef& tx = PartiallyDownloadedBlock::txn_available[it->second];
-    stream << CTxCompressor(*tx);
+
+    /* We're serializing txns in order to form the chunk-coded block in advance
+     * of actually receiving it from the UDP peer. Hence, we must compress txns
+     * with the same codec that is going to be used by tx peer. The codec has
+     * been advertised within the CBlockHeaderAndLengthShortTxIDs structure. */
+    stream << CTxCompressor(*tx, codec_version);
 
     it++;
     if (it == index_offsets.end())
@@ -617,7 +629,7 @@ ReadStatus PartiallyDownloadedChunkBlock::FinalizeBlock() {
             if (it->first < stream.pos()) // Last transaction was longer than expected
                 return READ_STATUS_FAILED; // Could be a shorttxid collision
             stream.seek(it->first);
-            stream >> REF(CTxCompressor(block.vtx[it->second]));
+            stream >> REF(CTxCompressor(block.vtx[it->second], codec_version));
         } catch (const std::ios_base::failure& e) {
             return READ_STATUS_FAILED; // Could be a shorttxid collision
         }

@@ -327,7 +327,7 @@ BOOST_AUTO_TEST_CASE(EmptyBlockRoundTripTest)
     // Do a FEC-coded-block RT
     {
         CDataStream stream(SER_NETWORK, PROTOCOL_VERSION);
-        CBlockHeaderAndLengthShortTxIDs headerAndIDs(block);
+        CBlockHeaderAndLengthShortTxIDs headerAndIDs(block, codec_version_t::v1);
         stream << headerAndIDs;
 
         ChunkCodedBlock fecBlock(block, headerAndIDs);
@@ -365,7 +365,7 @@ BOOST_AUTO_TEST_CASE(SimpleBlockFECRoundTripTest)
     // Do a FEC-coded-block RT
     {
         CDataStream stream(SER_NETWORK, PROTOCOL_VERSION);
-        CBlockHeaderAndLengthShortTxIDs headerAndIDs(block);
+        CBlockHeaderAndLengthShortTxIDs headerAndIDs(block, codec_version_t::v1);
         stream << headerAndIDs;
 
         ChunkCodedBlock fecBlock(block, headerAndIDs);
@@ -420,7 +420,7 @@ BOOST_AUTO_TEST_CASE(FECedBlockFECRoundTripTest)
         std::pair<std::unique_ptr<FECChunkType[]>, std::vector<uint32_t>> block_fec_chunks(std::piecewise_construct, std::forward_as_tuple(new FECChunkType[5]), std::forward_as_tuple(5));
 
         {
-            CBlockHeaderAndLengthShortTxIDs headerAndIDs(block);
+            CBlockHeaderAndLengthShortTxIDs headerAndIDs(block, codec_version_t::v1);
             ChunkCodedBlock fecBlock(block, headerAndIDs);
 
             std::vector<unsigned char> header_data;
@@ -517,7 +517,7 @@ static void TestBlockWithMempool(const CBlock& block, CTxMemPool& pool) {
     std::vector<std::pair<size_t, std::vector<unsigned char> > > block_chunks;
 
     {
-        CBlockHeaderAndLengthShortTxIDs headerAndIDs(block);
+        CBlockHeaderAndLengthShortTxIDs headerAndIDs(block, codec_version_t::v1);
         ChunkCodedBlock fecBlock(block, headerAndIDs);
 
         std::vector<unsigned char> header_data;

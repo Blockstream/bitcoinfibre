@@ -336,7 +336,7 @@ void UDPRelayBlock(const CBlock& block) {
             initd = std::chrono::steady_clock::now();
 
         boost::optional<ChunkCodedBlock> codedBlock;
-        CBlockHeaderAndLengthShortTxIDs headerAndIDs(block, true);
+        CBlockHeaderAndLengthShortTxIDs headerAndIDs(block, codec_version_t::default_version, true);
         std::vector<unsigned char> header_data;
         header_data.reserve(2500 + 8 * block.vtx.size()); // Rather conservatively high estimate
         VectorOutputStream stream(&header_data, SER_NETWORK, SERIALIZE_TRANSACTION_COMPRESSED | PROTOCOL_VERSION);
@@ -467,7 +467,10 @@ void UDPFillMessagesFromTx(const CTransaction& tx, std::vector<std::pair<UDPMess
 
     std::vector<unsigned char> data;
     VectorOutputStream stream(&data, SER_NETWORK, SERIALIZE_TRANSACTION_COMPRESSED | PROTOCOL_VERSION);
-    stream << CTxCompressor(tx);
+
+    codec_version_t const codec_version = codec_version_t::default_version;
+    stream << static_cast<std::uint8_t>(codec_version);
+    stream << CTxCompressor(tx, codec_version);
 
     const size_t data_chunks = DIV_CEIL(data.size(), FEC_CHUNK_SIZE);
     msgs.resize(data_chunks);
@@ -537,7 +540,7 @@ void UDPFillMessagesFromBlock(const CBlock& block, std::vector<UDPMessage>& msgs
     const uint64_t hash_prefix = hashBlock.GetUint64(0);
 
     /* FIBRE block header */
-    CBlockHeaderAndLengthShortTxIDs headerAndIDs(block, true);
+    CBlockHeaderAndLengthShortTxIDs headerAndIDs(block, codec_version_t::default_version, true);
 
     std::vector<unsigned char> header_data;
     header_data.reserve(2500 + 8 * block.vtx.size()); // Rather conservatively high estimate
@@ -958,8 +961,10 @@ static bool HandleTx(UDPMessage& msg, size_t length, const CService& node, UDPCo
 
         try {
             VectorInputStream stream(&tx_data, SER_NETWORK, SERIALIZE_TRANSACTION_COMPRESSED | PROTOCOL_VERSION);
+            codec_version_t codec_version;
+            stream >> *reinterpret_cast<std::uint8_t*>(&codec_version);
             CTransactionRef tx;
-            stream >> CTxCompressor(tx);
+            stream >> CTxCompressor(tx, codec_version);
             LOCK(cs_main);
             CValidationState state;
             AcceptToMemoryPool(mempool, state, tx, nullptr, nullptr, false, 0);
