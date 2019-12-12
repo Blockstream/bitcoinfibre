@@ -77,22 +77,12 @@ public:
             while (txn.size() < txn_size) {
                 txn.resize(std::min((uint64_t)(1000 + txn.size()), txn_size));
                 for (; i < txn.size(); i++) {
-                    if (s.GetVersion() & SERIALIZE_TRANSACTION_COMPRESSED) {
-                        READWRITE(CTxCompressor(txn[i]));
-                    }
-                    else {
-                        READWRITE(txn[i]);
-                    }
+                    READWRITE(txn[i]);
                 }
             }
         } else {
             for (size_t i = 0; i < txn.size(); i++) {
-                if (s.GetVersion() & SERIALIZE_TRANSACTION_COMPRESSED) {
-                    READWRITE(CTxCompressor(txn[i]));
-                }
-                else {
-                    READWRITE(txn[i]);
-                }
+                READWRITE(txn[i]);
             }
         }
     }
@@ -114,12 +104,7 @@ struct PrefilledTransaction {
         if (idx > std::numeric_limits<uint16_t>::max())
             throw std::ios_base::failure("index overflowed 16-bits");
         index = idx;
-        if (s.GetVersion() & SERIALIZE_TRANSACTION_COMPRESSED) {
-            READWRITE(CTxCompressor(tx));
-        }
-        else {
-            READWRITE(tx);
-        }
+        READWRITE(tx);
     }
 };
 
@@ -217,13 +202,21 @@ public:
 
 
 // FEC-Supporting extensions
-
+// The prefilled transactions that's part of the base class are not compressed
+// since it requires an out-of-band channel to communicate compression version
+// down to the base class. Note that CBlockHeadersAnsShortTxIDs is used in the
+// normal bitcoin peer protocol as well, where transactions are not compressed
 class CBlockHeaderAndLengthShortTxIDs : public CBlockHeaderAndShortTxIDs {
 private:
+    codec_version_t codec_version; // Compression/decompression scheme's version
     std::vector<uint32_t> txlens; // size by CTxCompressor
     friend class PartiallyDownloadedChunkBlock;
 public:
-    CBlockHeaderAndLengthShortTxIDs(const CBlock& block, bool fDeterministic = false);
+
+    codec_version_t codec_ver() const { return codec_version; }
+
+    CBlockHeaderAndLengthShortTxIDs(const CBlock& block, codec_version_t const cv,
+        bool fDeterministic = false);
 
     // Dummy for deserialization
     CBlockHeaderAndLengthShortTxIDs() {}
@@ -237,6 +230,8 @@ public:
 
     template <typename Stream, typename Operation>
     inline void SerializationOp(Stream& s, Operation ser_action) {
+        READWRITE(*reinterpret_cast<std::uint8_t*>(&codec_version));
+
         READWRITE(*(CBlockHeaderAndShortTxIDs*)this);
         if (ser_action.ForRead()) {
             txlens.clear();
@@ -275,6 +270,9 @@ private:
     bool allTxnFromMempool;
     bool block_finalized = false;
     std::shared_ptr<CBlock> decoded_block;
+
+    // this is initialied to what we read off the network in InitData()
+    codec_version_t codec_version = codec_version_t::default_version;
 
     // Things used in the iterative fill-from-mempool:
     std::map<size_t, size_t>::iterator fill_coding_index_offsets_it;

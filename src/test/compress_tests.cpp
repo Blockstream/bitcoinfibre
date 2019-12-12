@@ -308,10 +308,10 @@ namespace {
 bool round_trip_compress_transaction(CMutableTransaction& tx)
 {
     CDataStream stream(SER_NETWORK, PROTOCOL_VERSION);
-    stream << CTxCompressor(CTransaction(tx));
+    stream << CTxCompressor(CTransaction(tx), codec_version_t::v1);
 
     CMutableTransaction ret;
-    stream >> CTxCompressor(ret);
+    stream >> CTxCompressor(ret, codec_version_t::v1);
 
     stream << tx;
     CSerializeData original;
