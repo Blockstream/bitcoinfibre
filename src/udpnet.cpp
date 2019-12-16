@@ -1022,9 +1022,6 @@ static void MulticastBackfillThread() {
 
         PerGroupMessageQueue& queue = txQueues[i_mcast_tx];
 
-        int tx_height       = ::ChainActive().Height(); // most recent block tx'ed
-        int return_height   = 0; // for "context" switching on new block
-
         while (!send_messages_break) {
             while (!send_messages_break && queue.buffs[2].nextUndefinedMessage.load(std::memory_order_acquire) != queue.buffs[2].nextPendingMessage.load(std::memory_order_acquire))
                 std::this_thread::sleep_for(std::chrono::milliseconds(5));
@@ -1034,21 +1031,6 @@ static void MulticastBackfillThread() {
             {
                 LOCK(cs_main);
                 height = lastBlock->nHeight + 1;
-
-                /* If the chain has a new block, prioritize its
-                 * transmission. Return to the previous height from the backfill
-                 * when caught up with latest block(s). */
-                if (return_height != 0 && ::ChainActive().Height() == tx_height) {
-                    height          = return_height;
-                    return_height   = 0;
-                } else if (::ChainActive().Height() > tx_height) {
-                    if (return_height == 0)
-                        return_height = height;
-                    /* If two or more consecutive new blocks arise, the return
-                     * height will only be set for the first block */
-                    height = tx_height + 1;
-                    tx_height++;
-                }
 
                 if (height < ::ChainActive().Height() - 24 * 6) {
                     height = ::ChainActive().Height() - 24 * 6;
