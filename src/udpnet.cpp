@@ -336,15 +336,12 @@ static bool InitializeUDPMulticast(std::vector<int> &udp_socks,
         }
 
         /* Get index of network interface */
-        struct ifreq ifr;
-        memset(&ifr, 0, sizeof(ifr));
-        strncpy(ifr.ifr_name, mcast_info.ifname, IFNAMSIZ);
-        if (ioctl(udp_socks.back(), SIOCGIFINDEX, (void *)&ifr) != 0) {
+        const int ifindex = if_nametoindex(mcast_info.ifname);
+        if (ifindex == 0) {
             LogPrintf("Error: couldn't find an index for interface %s: %s\n",
                       mcast_info.ifname, strerror(errno));
             return false;
         }
-        int ifindex = ifr.ifr_ifindex;
 
         /* Get network interface IPv4 address */
         struct in_addr imr_interface = GetIfIpAddr(mcast_info.ifname);
