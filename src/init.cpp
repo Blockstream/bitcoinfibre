@@ -476,7 +476,7 @@ void SetupServerArgs(NodeContext& node)
     argsman.AddArg("-torpassword=<pass>", "Tor control port password (default: empty)", ArgsManager::ALLOW_ANY | ArgsManager::SENSITIVE, OptionsCategory::CONNECTION);
     argsman.AddArg("-udpport=<port>,<group>[,<bw>]", "Accepts UDP connections on <port> (default: bw=1024 =1024Mbps)", ArgsManager::ALLOW_ANY, OptionsCategory::CONNECTION);                   
     argsman.AddArg("-udpmulticast=<if>,<dst_ip>:<port>,<src_ip>[,<label>]", "Listen to multicast-addressed UDP messages sent by <src_ip> towards <dst_ip>:<port> using interface <if>. An optional <label> may be defined for the multicast group in order to facilitate inspection of logs.", ArgsManager::ALLOW_ANY, OptionsCategory::UDP);
-    argsman.AddArg("-udpmulticasttx=<if>,<ip/host>:<port>,<bw>[,<ttl>]", "Transmit multicast-addressed mesages to <ip/host>:<port> through interface <if> with bandwidth <bw> and TTL <ttl> (3 by default).", ArgsManager::ALLOW_ANY, OptionsCategory::UDP);
+    argsman.AddArg("-udpmulticasttx=<if>,<ip/host>:<port>,<bw>,<send_txns>[,<ttl>,<depth>]", "Transmit multicast-addressed mesages to <ip/host>:<port> through interface <if> with bandwidth <bw> and TTL <ttl> (3 by default). Iteratively transmit the past <depth> blocks. If <send_txns> is 1, send txns in addition to blocks.", ArgsManager::ALLOW_ANY, OptionsCategory::UDP);
     argsman.AddArg("-udpmulticastloginterval=<interval>", "Change periodicity of multicast bit rate logs that are activated by option debug=udpmulticast. Set <interval> in seconds.", ArgsManager::ALLOW_ANY, OptionsCategory::UDP);
 #ifdef USE_UPNP
 #if USE_UPNP
