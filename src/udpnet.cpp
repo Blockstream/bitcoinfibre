@@ -372,19 +372,6 @@ static bool InitializeUDPMulticast(std::vector<int> &udp_socks,
                 return false;
             }
 
-            /* Bind socket to chosen network interface (device) */
-            struct ifreq ifr;
-            memset(&ifr, 0, sizeof(ifr));
-            strncpy(ifr.ifr_name, mcast_info.ifname, IFNAMSIZ);
-            if (setsockopt(udp_socks.back(), SOL_SOCKET, SO_BINDTODEVICE, (void *)&ifr, sizeof(ifr)) != 0) {
-                LogPrintf("UDP: setsockopt(SO_BINDTODEVICE) failed: %s\n", strerror(errno));
-                // SO_BINDTODEVICE requires CAP_NET_RAW, which means it normally
-				// fails when run as non-root. We really only care about
-				// outgoing packets going over the right interface, which is
-				// set below, in IP_MULTICAST_IF, so this is not critical. It's
-				// not a fatal error.
-            }
-
             /* Ensure multicast packets are tx'ed by the chosen interface
              *
              * NOTE: the preceding binding restricts the device used for
