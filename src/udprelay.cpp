@@ -83,7 +83,7 @@ static inline void SendMessageToNode(const UDPMessage& msg, unsigned int length,
         }
     }
 
-    SendMessage(msg, length, high_prio, it);
+    SendMessage(msg, length, high_prio, *it);
 
     if (use_chunks_avail) {
         if ((msg.header.msg_type & UDP_MSG_TYPE_TYPE_MASK) == MSG_TYPE_BLOCK_HEADER)

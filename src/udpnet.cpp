@@ -586,9 +586,9 @@ void StopUDPConnections() {
     std::unique_lock<std::recursive_mutex> lock(cs_mapUDPNodes);
     UDPMessage msg;
     msg.header.msg_type = MSG_TYPE_DISCONNECT;
-    for (std::map<CService, UDPConnectionState>::iterator it = mapUDPNodes.begin(); it != mapUDPNodes.end(); it++) {
-        if (it->second.connection.connection_type == UDP_CONNECTION_TYPE_NORMAL)
-            SendMessage(msg, sizeof(UDPMessageHeader), true, it);
+    for (auto const& s : mapUDPNodes) {
+        if (s.second.connection.connection_type == UDP_CONNECTION_TYPE_NORMAL)
+            SendMessage(msg, sizeof(UDPMessageHeader), true, s);
     }
     mapUDPNodes.clear();
 
@@ -621,7 +621,7 @@ static std::map<CService, UDPConnectionState>::iterator silent_disconnect(const 
 static std::map<CService, UDPConnectionState>::iterator send_and_disconnect(const std::map<CService, UDPConnectionState>::iterator& it) {
     UDPMessage msg;
     msg.header.msg_type = MSG_TYPE_DISCONNECT;
-    SendMessage(msg, sizeof(UDPMessageHeader), false, it);
+    SendMessage(msg, sizeof(UDPMessageHeader), false, *it);
 
     int64_t now = GetTimeMillis();
     while (!nodesToRepeatDisconnect.insert(std::make_pair(now + 1000, std::make_tuple(it->first, it->second.connection.remote_magic, it->second.connection.group))).second)
@@ -783,7 +783,7 @@ static void read_socket_func(evutil_socket_t fd, short event, void* arg) {
         }
 
         msg.header.msg_type = MSG_TYPE_PONG;
-        SendMessage(msg, sizeof(UDPMessageHeader) + 8, false, it);
+        SendMessage(msg, sizeof(UDPMessageHeader) + 8, false, *it);
     } else if (msg_type_masked == MSG_TYPE_PONG) {
         if (res != sizeof(UDPMessageHeader) + 8) {
             LogPrintf("UDP: Got invalidly-sized PONG message from %s\n", it->first.ToString());
@@ -849,13 +849,13 @@ static void timer_func(evutil_socket_t fd, short event, void* arg) {
         if (!(state.state & STATE_GOT_SYN_ACK) && origLastSendTime < now - 1000) {
             msg.header.msg_type = MSG_TYPE_SYN;
             msg.msg.longint = htole64(UDP_PROTOCOL_VERSION);
-            SendMessage(msg, sizeof(UDPMessageHeader) + 8, false, it);
+            SendMessage(msg, sizeof(UDPMessageHeader) + 8, false, *it);
             state.lastSendTime = now;
         }
 
         if ((state.state & STATE_GOT_SYN) && origLastSendTime < now - 1000 * ((state.state & STATE_GOT_SYN_ACK) ? 10 : 1)) {
             msg.header.msg_type = MSG_TYPE_KEEPALIVE;
-            SendMessage(msg, sizeof(UDPMessageHeader), false, it);
+            SendMessage(msg, sizeof(UDPMessageHeader), false, *it);
             state.lastSendTime = now;
         }
 
@@ -863,7 +863,7 @@ static void timer_func(evutil_socket_t fd, short event, void* arg) {
             uint64_t pingnonce = GetRand(std::numeric_limits<uint64_t>::max());
             msg.header.msg_type = MSG_TYPE_PING;
             msg.msg.longint = htole64(pingnonce);
-            SendMessage(msg, sizeof(UDPMessageHeader) + 8, false, it);
+            SendMessage(msg, sizeof(UDPMessageHeader) + 8, false, *it);
             state.ping_times[pingnonce] = GetTimeMicros();
             state.lastPingTime = now;
         }
@@ -922,8 +922,8 @@ void SendMessage(const UDPMessage& msg, const unsigned int length, bool high_pri
     SendMessage(msg, length, queue, buff, service, magic);
 }
 
-void SendMessage(const UDPMessage& msg, const unsigned int length, bool high_prio, const std::map<CService, UDPConnectionState>::const_iterator& node) {
-    SendMessage(msg, length, high_prio, node->first, node->second.connection.remote_magic, node->second.connection.group);
+void SendMessage(const UDPMessage& msg, const unsigned int length, bool high_prio, const std::pair<const CService, UDPConnectionState>& node) {
+    SendMessage(msg, length, high_prio, node.first, node.second.connection.remote_magic, node.second.connection.group);
 }
 
 static inline bool fill_cache(const std::chrono::steady_clock::time_point& now) {
@@ -1190,7 +1190,7 @@ static void MulticastBackfillThread(const CService& mcastNode,
                  info->physical_idx, info->logical_idx,
                  lastBlock->phashBlock->ToString(), height, msgs.size());
 
-        for (UDPMessage& msg : msgs) {
+        for (UDPMessage const& msg : msgs) {
             SendMessage(msg, sizeof(UDPMessageHeader) + MAX_UDP_MESSAGE_LENGTH, queue, queue.buffs[2], mcastNode, multicast_checksum_magic);
         }
     }
