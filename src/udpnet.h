@@ -11,6 +11,7 @@
 #include <vector>
 #include <mutex>
 #include <assert.h>
+#include <chain.h>
 
 #include <udpapi.h>
 #include <netaddress.h>
@@ -200,6 +201,9 @@ struct UDPMulticastInfo {
     int ttl;               /** time-to-live desired for multicast packets */
     uint64_t bw;           /** target throughput in bps */
     int depth;             /** backfill depth - no. of blocks to iterate over */
+    uint16_t physical_idx; /** index of destination IP - net interface pair */
+    uint16_t logical_idx;  /** logical idx for streams sharing physical idx */
+    bool send_txns;        /** whether to send txns over this logical stream */
 };
 
 struct UDPConnectionState {
