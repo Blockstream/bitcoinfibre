@@ -1050,6 +1050,10 @@ static void MulticastBackfillThread(const CService& mcastNode,
     while (::ChainstateActive().IsInitialBlockDownload() && !send_messages_break)
         std::this_thread::sleep_for(std::chrono::milliseconds(50));
 
+    // if IsInitialBlockDownload() is false, chainActive.Tip()->pprev will
+    // return nullptr and trip the assert below
+    if (send_messages_break) return;
+
     const int backfill_depth = info->depth;
 
     /* Use a bloom filter to keep track of txns already sent */
