@@ -257,7 +257,7 @@ bool FECEncoder::BuildChunk(size_t vector_idx, bool overwrite) {
     if (data_chunks < 2) { // For 1-packet data, just send it repeatedly...
         memcpy(&fec_chunks->first[vector_idx], &(*data)[0], data->size());
         memset(((char*)&fec_chunks->first[vector_idx]) + data->size(), 0, FEC_CHUNK_SIZE - data->size());
-        fec_chunks->second[vector_idx] = vector_idx + 1;
+        fec_chunks->second[vector_idx] = vector_idx + 1; // chunk_id
         return true;
     }
 
