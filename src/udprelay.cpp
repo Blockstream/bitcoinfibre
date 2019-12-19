@@ -201,6 +201,11 @@ static void RelayChunks(const uint256& blockhash, UDPMessageType type, const std
     uint64_t hash_prefix = blockhash.GetUint64(0);
     FillBlockMessageHeader(msg, hash_prefix, type, data.size());
 
+    const bool fBench = LogAcceptCategory(BCLog::BENCH);
+    std::chrono::steady_clock::time_point t_start, t_uncoded, t_coded;
+    if (fBench)
+        t_start = std::chrono::steady_clock::now();
+
     // For header messages, the actual data is more useful.
     // For block contents, the probably generated most chunks from the header + mempool.
     // We send in usefulness-first order
@@ -209,24 +214,45 @@ static void RelayChunks(const uint256& blockhash, UDPMessageType type, const std
         // and 3 packets of high priority for the FEC, after that if
         // we have block data available it should be sent.
         RelayUncodedChunks(msg, data, std::numeric_limits<size_t>::max(), hash_prefix, std::numeric_limits<size_t>::max());
+        if (fBench)
+            t_uncoded = std::chrono::steady_clock::now();
+
         RelayFECedChunks(msg, fec, 3, hash_prefix);
+        if (fBench)
+            t_coded = std::chrono::steady_clock::now();
     } else {
         // First 10 FEC chunks are high priority, then everything is
         // low. This should be sufficient to reconstruct many blocks
         // that only missed a handful of chunks, then revert to
         // sending header chunks until we've sent them all.
         RelayFECedChunks(msg, fec, 10, hash_prefix);
-
-        // We also benchmark sending pre-calced data here to ensure there
-        // isn't a lot of overhead here...
-        const bool fBench = LogAcceptCategory(BCLog::BENCH);
-        std::chrono::steady_clock::time_point start;
         if (fBench)
-            start = std::chrono::steady_clock::now();
+            t_coded = std::chrono::steady_clock::now();
+
         RelayUncodedChunks(msg, data, 0, hash_prefix, std::numeric_limits<size_t>::max());
-        if (fBench) {
-            std::chrono::steady_clock::time_point finished(std::chrono::steady_clock::now());
-            LogPrintf("UDP: Sent block data chunks in %lf ms\n", to_millis_double(finished - start));
+        if (fBench)
+            t_uncoded = std::chrono::steady_clock::now();
+    }
+
+    if (fBench) {
+        const size_t msg_chunks = DIV_CEIL(data.size(), FEC_CHUNK_SIZE);
+
+        if (type == MSG_TYPE_BLOCK_HEADER) {
+            LogPrintf("UDP: %s: Finished queuing of %lu header chunks for tx - took %lf ms\n",
+                      __func__, (msg_chunks + fec.fec_chunks),
+                      to_millis_double(t_coded - t_start));
+            LogPrintf("UDP: %s:     %lu Uncoded chunks took %lf ms\n", __func__,
+                      msg_chunks, to_millis_double(t_uncoded - t_start));
+            LogPrintf("UDP: %s:     %lu Coded chunks took %lf ms\n", __func__,
+                      fec.fec_chunks, to_millis_double(t_coded - t_uncoded));
+        } else {
+            LogPrintf("UDP: %s: Finished queuing of %lu block chunks for tx - took %lf ms\n",
+                      __func__, (msg_chunks + fec.fec_chunks),
+                      to_millis_double(t_uncoded - t_start));
+            LogPrintf("UDP: %s:     %lu Uncoded chunks took %lf ms\n", __func__,
+                      msg_chunks, to_millis_double(t_uncoded - t_coded));
+            LogPrintf("UDP: %s:     %lu Coded chunks took %lf ms\n", __func__,
+                      fec.fec_chunks, to_millis_double(t_coded - t_start));
         }
     }
 }
