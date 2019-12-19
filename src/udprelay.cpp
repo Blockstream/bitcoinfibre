@@ -179,15 +179,15 @@ static void RelayFECedChunks(UDPMessage& msg, DataFECer& fec, const size_t msg_c
     }
 }
 
-static inline void FillCommonMessageHeader(UDPMessage& msg, const uint64_t hash_prefix, uint8_t type, const std::vector<unsigned char>& data) {
+static inline void FillCommonMessageHeader(UDPMessage& msg, const uint64_t hash_prefix, uint8_t type, const size_t obj_size) {
     msg.header.msg_type        = type;
     msg.msg.block.hash_prefix  = htole64(hash_prefix);
-    msg.msg.block.obj_length   = htole32(data.size());
+    msg.msg.block.obj_length   = htole32(obj_size);
 }
 
-static inline void FillBlockMessageHeader(UDPMessage& msg, const uint64_t hash_prefix, UDPMessageType type, const std::vector<unsigned char>& data) {
+static inline void FillBlockMessageHeader(UDPMessage& msg, const uint64_t hash_prefix, UDPMessageType type, const size_t obj_size) {
     // First fill in common message elements
-    FillCommonMessageHeader(msg, hash_prefix, type | HAVE_BLOCK, data);
+    FillCommonMessageHeader(msg, hash_prefix, type | HAVE_BLOCK, obj_size);
 }
 
 /**
@@ -201,7 +201,7 @@ static void RelayChunks(const uint256& blockhash, UDPMessageType type, const std
     UDPMessage msg;
     uint64_t hash_prefix = blockhash.GetUint64(0);
     const size_t msg_chunks = DIV_CEIL(data.size(), FEC_CHUNK_SIZE);
-    FillBlockMessageHeader(msg, hash_prefix, type, data);
+    FillBlockMessageHeader(msg, hash_prefix, type, data.size());
 
     // For header messages, the actual data is more useful.
     // For block contents, the probably generated most chunks from the header + mempool.
@@ -236,7 +236,7 @@ static void RelayChunks(const uint256& blockhash, UDPMessageType type, const std
 static void SendLimitedDataChunks(const uint256& blockhash, UDPMessageType type, const std::vector<unsigned char>& data) {
     UDPMessage msg;
     uint64_t hash_prefix = blockhash.GetUint64(0);
-    FillBlockMessageHeader(msg, hash_prefix, type, data);
+    FillBlockMessageHeader(msg, hash_prefix, type, data.size());
 
     RelayUncodedChunks(msg, data, std::numeric_limits<size_t>::max(), hash_prefix, 3); // Send 3 packets to each peer, in RR
 }
@@ -424,7 +424,7 @@ void UDPFillMessagesFromTx(const CTransaction& tx, std::vector<UDPMessage>& msgs
     msgs.resize(data_chunks);
 
     for (size_t i = 0; i < data_chunks; i++) {
-        FillCommonMessageHeader(msgs[i], hash_prefix, MSG_TYPE_TX_CONTENTS, data);
+        FillCommonMessageHeader(msgs[i], hash_prefix, MSG_TYPE_TX_CONTENTS, data.size());
         CopyMessageData(msgs[i], data, data_chunks, i);
     }
 }
@@ -510,13 +510,13 @@ void UDPFillMessagesFromBlock(const CBlock& block, std::vector<UDPMessage>& msgs
 
     /* Header chunks */
     for (size_t i = 0; i < header_fec_chunks; i++) {
-        FillBlockMessageHeader(msgs[i], hash_prefix, MSG_TYPE_BLOCK_HEADER, header_data);
+        FillBlockMessageHeader(msgs[i], hash_prefix, MSG_TYPE_BLOCK_HEADER, header_data.size());
         CopyFECData(msgs[i], header_fecer, i);
     }
 
     /* Block chunks */
     for (size_t i = 0; i < block_fec_chunks; i++) {
-        FillBlockMessageHeader(msgs[i + header_fec_chunks], hash_prefix, MSG_TYPE_BLOCK_CONTENTS, chunk_coded_block);
+        FillBlockMessageHeader(msgs[i + header_fec_chunks], hash_prefix, MSG_TYPE_BLOCK_CONTENTS, chunk_coded_block.size());
         CopyFECData(msgs[i + header_fec_chunks], block_fecer, i);
     }
 }
