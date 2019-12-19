@@ -157,7 +157,7 @@ static void CopyFECData(UDPMessage& msg, DataFECer& fec, size_t array_idx, bool 
 }
 
 /* Send FEC-coded chunks to all peers */
-static void RelayFECedChunks(UDPMessage& msg, DataFECer& fec, const size_t msg_chunks, const size_t high_prio_chunks_per_peer, const uint64_t hash_prefix) {
+static void RelayFECedChunks(UDPMessage& msg, DataFECer& fec, const size_t high_prio_chunks_per_peer, const uint64_t hash_prefix) {
     assert(fec.fec_chunks > 9);
 
     size_t chunks_sent_per_peer = 0;
@@ -199,7 +199,6 @@ static inline void FillBlockMessageHeader(UDPMessage& msg, const uint64_t hash_p
 static void RelayChunks(const uint256& blockhash, UDPMessageType type, const std::vector<unsigned char>& data, DataFECer& fec) {
     UDPMessage msg;
     uint64_t hash_prefix = blockhash.GetUint64(0);
-    const size_t msg_chunks = DIV_CEIL(data.size(), FEC_CHUNK_SIZE);
     FillBlockMessageHeader(msg, hash_prefix, type, data.size());
 
     // For header messages, the actual data is more useful.
@@ -210,13 +209,13 @@ static void RelayChunks(const uint256& blockhash, UDPMessageType type, const std
         // and 3 packets of high priority for the FEC, after that if
         // we have block data available it should be sent.
         RelayUncodedChunks(msg, data, std::numeric_limits<size_t>::max(), hash_prefix, std::numeric_limits<size_t>::max());
-        RelayFECedChunks(msg, fec, msg_chunks, 3, hash_prefix);
+        RelayFECedChunks(msg, fec, 3, hash_prefix);
     } else {
         // First 10 FEC chunks are high priority, then everything is
         // low. This should be sufficient to reconstruct many blocks
         // that only missed a handful of chunks, then revert to
         // sending header chunks until we've sent them all.
-        RelayFECedChunks(msg, fec, msg_chunks, 10, hash_prefix);
+        RelayFECedChunks(msg, fec, 10, hash_prefix);
 
         // We also benchmark sending pre-calced data here to ensure there
         // isn't a lot of overhead here...
