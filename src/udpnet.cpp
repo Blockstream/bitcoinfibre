@@ -154,6 +154,11 @@ struct PerQueueSendState {
 };
 struct PerGroupMessageQueue {
     std::array<PendingMessagesBuff, 3> buffs;
+    /* Three message queues (buffers) per group:
+     * 0) high priority
+     * 1) best-effort (non priority)
+     * 2) background (used by backfill thread)
+     */
     inline MessageStateCache NextBuff(std::memory_order order) {
         for (size_t i = 0; i < buffs.size(); i++) {
             uint16_t next_undefined_message = buffs[i].nextUndefinedMessage.load(order);
@@ -905,16 +910,10 @@ void SendMessage(const UDPMessage& msg, const unsigned int length, bool high_pri
     assert(length <= sizeof(UDPMessage));
     assert(mapTxQueues.count(group));
     PerGroupMessageQueue& queue = mapTxQueues[group];
-
-    /* Only the backfill thread sends to the multicast group. Since it uses the
-     * above SendMessage definition directly, prevent transmission here: */
-    if (queue.multicast)
-        return;
-
-    PendingMessagesBuff& buff = high_prio ? queue.buffs[0] : queue.buffs[1];
-
+    PendingMessagesBuff& buff   = high_prio ? queue.buffs[0] : queue.buffs[1];
     SendMessage(msg, length, queue, buff, service, magic);
 }
+
 void SendMessage(const UDPMessage& msg, const unsigned int length, bool high_prio, const std::map<CService, UDPConnectionState>::const_iterator& node) {
     SendMessage(msg, length, high_prio, node->first, node->second.connection.remote_magic, node->second.connection.group);
 }
