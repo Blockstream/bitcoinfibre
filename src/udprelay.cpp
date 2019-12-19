@@ -94,7 +94,8 @@ static inline void SendMessageToNode(const UDPMessage& msg, unsigned int length,
 
 static void SendMessageToAllNodes(const UDPMessage& msg, unsigned int length, bool high_prio, uint64_t hash_prefix) {
     for (std::map<CService, UDPConnectionState>::iterator it = mapUDPNodes.begin(); it != mapUDPNodes.end(); it++)
-        SendMessageToNode(msg, length, high_prio, hash_prefix, it);
+        if (it->second.connection.connection_type != UDP_CONNECTION_TYPE_INBOUND_ONLY)
+            SendMessageToNode(msg, length, high_prio, hash_prefix, it);
 }
 
 static void CopyMessageData(UDPMessage& msg, const std::vector<unsigned char>& data, size_t msg_chunks, uint16_t chunk_id) {
@@ -107,26 +108,64 @@ static void CopyMessageData(UDPMessage& msg, const std::vector<unsigned char>& d
         memset(&msg.msg.block.data[msg_size], 0, sizeof(msg.msg.block.data) - msg_size);
 }
 
+static bool SkipInboundOnlyNodes(std::map<CService, UDPConnectionState>::iterator& it) {
+    bool rolled_over = false;
+
+    while (it->second.connection.connection_type == UDP_CONNECTION_TYPE_INBOUND_ONLY) {
+        it++;
+        if (it == mapUDPNodes.end()) {
+            it = mapUDPNodes.begin();
+            /* Are we spinning on a map that contains solely inbound nodes? */
+            if (rolled_over)
+                break;
+            rolled_over = true;
+        }
+    }
+    return rolled_over;
+}
+
 /**
  * Send uncoded (non FEC-coded) data chunks to all peers
  *
- * NOTE: algorithm is broken if you use both high_prio_chunks_per_peer and
- * chunk_limit!
+ * Notes:
+ * - Algorithm is broken if you use both high_prio_chunks_per_peer and
+ *   chunk_limit!
+ * - This implementation won't send to logically multiplexed multicast streams,
+ *   since they don't exist in mapUDPNodes.
  */
 static void RelayUncodedChunks(UDPMessage& msg, const std::vector<unsigned char>& data, const size_t high_prio_chunks_per_peer, const uint64_t hash_prefix, const size_t chunk_limit) {
     const size_t msg_chunks = DIV_CEIL(data.size(), FEC_CHUNK_SIZE);
 
     size_t chunks_sent_per_peer = 0;
     bool high_prio = high_prio_chunks_per_peer;
+    bool it_rolled_over;
     for (auto it = mapUDPNodes.begin(); it != mapUDPNodes.end(); it++) {
         auto send_it = it;
+        it_rolled_over = SkipInboundOnlyNodes(send_it);
+
+        /* The iterator should never roll-over here, unless we only have
+         * inbound-only nodes, in which case there is nothing else to do. */
+        if (it_rolled_over) {
+            LogPrintf("%s: nothing else to do - are all nodes inbound-only?\n",
+                      __func__);
+            break;
+        }
+
         for (uint16_t i = 0; i < msg_chunks && i < chunk_limit; i++) {
             CopyMessageData(msg, data, msg_chunks, i);
-
             SendMessageToNode(msg, sizeof(UDPMessageHeader) + sizeof(UDPBlockMessage), high_prio, hash_prefix, send_it);
+
             send_it++;
             if (send_it == mapUDPNodes.end()) {
                 send_it = mapUDPNodes.begin();
+                it_rolled_over = true;
+            }
+
+            it_rolled_over |= SkipInboundOnlyNodes(send_it);
+            /* It should only roll over here if the last node of the map happens
+             * to be an inbound-only node */
+
+            if (it_rolled_over) {
                 chunks_sent_per_peer++;
                 if (high_prio && chunks_sent_per_peer >= high_prio_chunks_per_peer) high_prio = false;
             }
@@ -162,15 +201,28 @@ static void RelayFECedChunks(UDPMessage& msg, DataFECer& fec, const size_t high_
 
     size_t chunks_sent_per_peer = 0;
     bool high_prio = high_prio_chunks_per_peer;
+    bool it_rolled_over;
+
     for (auto it = mapUDPNodes.begin(); it != mapUDPNodes.end(); it++) {
         auto send_it = it;
+        it_rolled_over = SkipInboundOnlyNodes(send_it);
+
+        if (it_rolled_over)
+            break; // see comments on RelayUncodedChunks
+
         for (size_t i = 0; i < fec.fec_chunks; i++) {
             CopyFECData(msg, fec, i);
-
             SendMessageToNode(msg, sizeof(UDPMessageHeader) + sizeof(UDPBlockMessage), high_prio, hash_prefix, send_it);
+
             send_it++;
             if (send_it == mapUDPNodes.end()) {
                 send_it = mapUDPNodes.begin();
+                it_rolled_over = true;
+            }
+
+            it_rolled_over |= SkipInboundOnlyNodes(send_it); // see comments on RelayUncodedChunks again
+
+            if (it_rolled_over) {
                 chunks_sent_per_peer++;
                 if (high_prio && chunks_sent_per_peer >= high_prio_chunks_per_peer) high_prio = false;
             }
@@ -266,6 +318,7 @@ static void SendLimitedDataChunks(const uint256& blockhash, UDPMessageType type,
 }
 
 static boost::thread *process_block_thread = NULL;
+
 void UDPRelayBlock(const CBlock& block) {
     std::chrono::steady_clock::time_point start;
     const bool fBench = LogAcceptCategory(BCLog::BENCH);
@@ -328,7 +381,8 @@ void UDPRelayBlock(const CBlock& block) {
         if (fBench)
             coded = std::chrono::steady_clock::now();
 
-        DataFECer header_fecer(header_data, (min_per_node_mbps.load(std::memory_order_relaxed) * 1024 * 1024 / 8 / 1000 / PACKET_SIZE) + 10); // 1ms + 10 chunks of header FEC
+        const size_t header_fec_chunks = (min_per_node_mbps.load(std::memory_order_relaxed) * 1024 * 1024 / 8 / 1000 / PACKET_SIZE) + 10; // 1ms + 10 chunks of header FEC
+        DataFECer header_fecer(header_data, header_fec_chunks);
 
         boost::optional<DataFECer> block_fecer;
         size_t data_fec_chunks = 0;
@@ -456,10 +510,15 @@ void UDPFillMessagesFromTx(const CTransaction& tx, std::vector<UDPMessage>& msgs
 /**
  * Send block through a composition of block header and block data messages
  *
+ * This is used by the multicast Tx (backfill) thread only, specifically to send
+ * "past blocks", i.e. blocks that are already in the chain. When a new block
+ * arises and before it is added to the chain, it is instead relayed to UDP
+ * peers through function `UDPRelayBlock`.
+ *
  * Unlike txns, only FEC-coded chunks are sent for block data. The same strategy
  * is applied also for transmission of the block header, although based on a
  * different motivation, explained next.
-
+ *
  * The main factor to consider when choosing between sending uncoded vs. coded
  * is whether the receive-end might know something about the data object in
  * advance. Once a block is advertised by the "block header" message, the
