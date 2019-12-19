@@ -108,8 +108,13 @@ static void CopyMessageData(UDPMessage& msg, const std::vector<unsigned char>& d
         memset(&msg.msg.block.data[msg_size], 0, sizeof(msg.msg.block.data) - msg_size);
 }
 
-// Note that algo is broken if you use both high_prio_chunks_per_peer and chunk_limit!
-static void SendMessageData(UDPMessage& msg, const std::vector<unsigned char>& data, const size_t high_prio_chunks_per_peer, const uint64_t hash_prefix, const size_t chunk_limit) {
+/**
+ * Send uncoded (non FEC-coded) data chunks to all peers
+ *
+ * NOTE: algorithm is broken if you use both high_prio_chunks_per_peer and
+ * chunk_limit!
+ */
+static void RelayUncodedChunks(UDPMessage& msg, const std::vector<unsigned char>& data, const size_t high_prio_chunks_per_peer, const uint64_t hash_prefix, const size_t chunk_limit) {
     const size_t msg_chunks = DIV_CEIL(data.size(), FEC_CHUNK_SIZE);
 
     size_t chunks_sent_per_peer = 0;
@@ -152,7 +157,8 @@ static void CopyFECData(UDPMessage& msg, DataFECer& fec, size_t array_idx, bool 
     memcpy(msg.msg.block.data, &fec.fec_data.first[array_idx], FEC_CHUNK_SIZE);
 }
 
-static void SendFECData(UDPMessage& msg, DataFECer& fec, const size_t msg_chunks, const size_t high_prio_chunks_per_peer, const uint64_t hash_prefix) {
+/* Send FEC-coded chunks to all peers */
+static void RelayFECedChunks(UDPMessage& msg, DataFECer& fec, const size_t msg_chunks, const size_t high_prio_chunks_per_peer, const uint64_t hash_prefix) {
     assert(fec.fec_chunks > 9);
 
     size_t chunks_sent_per_peer = 0;
@@ -184,7 +190,14 @@ static inline void FillBlockMessageHeader(UDPMessage& msg, const uint64_t hash_p
     FillCommonMessageHeader(msg, hash_prefix, type | HAVE_BLOCK, data);
 }
 
-static void SendFECedData(const uint256& blockhash, UDPMessageType type, const std::vector<unsigned char>& data, DataFECer& fec) {
+/**
+ * Send FEC-coded and uncoded (original data) chunks to all peers
+ *
+ * This function processes either header chunks or block chunks, but not
+ * both. So it has to be called twice. After completion, all chunks (of the
+ * header or block) will be queued up for transmission.
+ */
+static void RelayChunks(const uint256& blockhash, UDPMessageType type, const std::vector<unsigned char>& data, DataFECer& fec) {
     UDPMessage msg;
     uint64_t hash_prefix = blockhash.GetUint64(0);
     const size_t msg_chunks = DIV_CEIL(data.size(), FEC_CHUNK_SIZE);
@@ -197,14 +210,14 @@ static void SendFECedData(const uint256& blockhash, UDPMessageType type, const s
         // Block headers are all high priority for the data itself,
         // and 3 packets of high priority for the FEC, after that if
         // we have block data available it should be sent.
-        SendMessageData(msg, data, std::numeric_limits<size_t>::max(), hash_prefix, std::numeric_limits<size_t>::max());
-        SendFECData(msg, fec, msg_chunks, 3, hash_prefix);
+        RelayUncodedChunks(msg, data, std::numeric_limits<size_t>::max(), hash_prefix, std::numeric_limits<size_t>::max());
+        RelayFECedChunks(msg, fec, msg_chunks, 3, hash_prefix);
     } else {
         // First 10 FEC chunks are high priority, then everything is
         // low. This should be sufficient to reconstruct many blocks
         // that only missed a handful of chunks, then revert to
         // sending header chunks until we've sent them all.
-        SendFECData(msg, fec, msg_chunks, 10, hash_prefix);
+        RelayFECedChunks(msg, fec, msg_chunks, 10, hash_prefix);
 
         // We also benchmark sending pre-calced data here to ensure there
         // isn't a lot of overhead here...
@@ -212,7 +225,7 @@ static void SendFECedData(const uint256& blockhash, UDPMessageType type, const s
         std::chrono::steady_clock::time_point start;
         if (fBench)
             start = std::chrono::steady_clock::now();
-        SendMessageData(msg, data, 0, hash_prefix, std::numeric_limits<size_t>::max());
+        RelayUncodedChunks(msg, data, 0, hash_prefix, std::numeric_limits<size_t>::max());
         if (fBench) {
             std::chrono::steady_clock::time_point finished(std::chrono::steady_clock::now());
             LogPrintf("UDP: Sent block data chunks in %lf ms\n", to_millis_double(finished - start));
@@ -225,7 +238,7 @@ static void SendLimitedDataChunks(const uint256& blockhash, UDPMessageType type,
     uint64_t hash_prefix = blockhash.GetUint64(0);
     FillBlockMessageHeader(msg, hash_prefix, type, data);
 
-    SendMessageData(msg, data, std::numeric_limits<size_t>::max(), hash_prefix, 3); // Send 3 packets to each peer, in RR
+    RelayUncodedChunks(msg, data, std::numeric_limits<size_t>::max(), hash_prefix, 3); // Send 3 packets to each peer, in RR
 }
 
 static boost::thread *process_block_thread = NULL;
@@ -240,7 +253,7 @@ void UDPRelayBlock(const CBlock& block) {
     std::unique_lock<std::recursive_mutex> lock(cs_mapUDPNodes, std::defer_lock);
 
     if (maybe_have_write_nodes) { // Scope for partial_block_lock and partial_block_ptr
-        const std::vector<unsigned char> *block_chunks = NULL;
+        const std::vector<unsigned char> *chunk_coded_block = NULL;
         bool skipEncode = false;
         std::unique_lock<std::mutex> partial_block_lock;
         std::shared_ptr<PartialBlockData> partial_block_ptr;
@@ -256,7 +269,7 @@ void UDPRelayBlock(const CBlock& block) {
                         LogPrintf("UDP: Building FEC chunks from decoded block\n");
                     skipEncode = true;
                     partial_block_ptr = it->second;
-                    block_chunks = &it->second->block_data.GetCodedBlock();
+                    chunk_coded_block = &it->second->block_data.GetCodedBlock();
                 }
             }
 
@@ -282,16 +295,16 @@ void UDPRelayBlock(const CBlock& block) {
 
         boost::optional<ChunkCodedBlock> codedBlock;
         CBlockHeaderAndLengthShortTxIDs headerAndIDs(block, true);
-        std::vector<unsigned char> data;
-        data.reserve(2500 + 8 * block.vtx.size()); // Rather conservatively high estimate
-        VectorOutputStream stream(&data, SER_NETWORK, PROTOCOL_VERSION);
+        std::vector<unsigned char> header_data;
+        header_data.reserve(2500 + 8 * block.vtx.size()); // Rather conservatively high estimate
+        VectorOutputStream stream(&header_data, SER_NETWORK, PROTOCOL_VERSION);
         stream << headerAndIDs;
 
         std::chrono::steady_clock::time_point coded;
         if (fBench)
             coded = std::chrono::steady_clock::now();
 
-        DataFECer header_fecer(data, (min_per_node_mbps.load(std::memory_order_relaxed) * 1024 * 1024 / 8 / 1000 / PACKET_SIZE) + 10); // 1ms + 10 chunks of header FEC
+        DataFECer header_fecer(header_data, (min_per_node_mbps.load(std::memory_order_relaxed) * 1024 * 1024 / 8 / 1000 / PACKET_SIZE) + 10); // 1ms + 10 chunks of header FEC
 
         boost::optional<DataFECer> block_fecer;
         size_t data_fec_chunks = 0;
@@ -302,10 +315,10 @@ void UDPRelayBlock(const CBlock& block) {
 
             if (!skipEncode) {
                 codedBlock.emplace(block, headerAndIDs);
-                block_chunks = &codedBlock->GetCodedBlock();
+                chunk_coded_block = &codedBlock->GetCodedBlock();
             }
-            if (!block_chunks->empty()) {
-                data_fec_chunks = DIV_CEIL(block_chunks->size(), FEC_CHUNK_SIZE) + 10; //TODO: Pick something different?
+            if (!chunk_coded_block->empty()) {
+                data_fec_chunks = DIV_CEIL(chunk_coded_block->size(), FEC_CHUNK_SIZE) + 10; //TODO: Pick something different?
                 if (skipEncode) {
                     // If we get here, we are currently in the processing thread
                     // and have partial_block_ptr set. Additionally, because
@@ -313,9 +326,9 @@ void UDPRelayBlock(const CBlock& block) {
                     // was initialized and fed FEC/data, meaning even if no FEC
                     // chunks were used to reconstruct the FECDecoder object is
                     // fully primed to be converted to a FECEncoder!
-                    block_fecer.emplace(std::move(partial_block_ptr->decoder), *block_chunks, data_fec_chunks);
+                    block_fecer.emplace(std::move(partial_block_ptr->decoder), *chunk_coded_block, data_fec_chunks);
                 } else {
-                    block_fecer.emplace(*block_chunks, data_fec_chunks);
+                    block_fecer.emplace(*chunk_coded_block, data_fec_chunks);
                 }
                 block_fecer->enc.PrefillChunks();
             }
@@ -337,7 +350,7 @@ void UDPRelayBlock(const CBlock& block) {
         if (setBlocksRelayed.count(hash_prefix))
             return;
 
-        SendFECedData(hashBlock, MSG_TYPE_BLOCK_HEADER, data, header_fecer);
+        RelayChunks(hashBlock, MSG_TYPE_BLOCK_HEADER, header_data, header_fecer);
 
         std::chrono::steady_clock::time_point header_sent;
         if (fBench)
@@ -346,15 +359,15 @@ void UDPRelayBlock(const CBlock& block) {
         if (!inUDPProcess) { // We sent header before calculating any block stuff
             if (!skipEncode) {
                 codedBlock.emplace(block, headerAndIDs);
-                block_chunks = &codedBlock->GetCodedBlock();
+                chunk_coded_block = &codedBlock->GetCodedBlock();
             }
 
             // Because we need the coded block's size to init block decoding, it
             // is important we get the first block packet out to peers ASAP. Thus,
             // we go ahead and send the first few non-FEC block packets here.
-            if (!block_chunks->empty()) {
-                data_fec_chunks = DIV_CEIL(block_chunks->size(), FEC_CHUNK_SIZE) + 10; //TODO: Pick something different?
-                SendLimitedDataChunks(hashBlock, MSG_TYPE_BLOCK_CONTENTS, *block_chunks);
+            if (!chunk_coded_block->empty()) {
+                data_fec_chunks = DIV_CEIL(chunk_coded_block->size(), FEC_CHUNK_SIZE) + 10; //TODO: Pick something different?
+                SendLimitedDataChunks(hashBlock, MSG_TYPE_BLOCK_CONTENTS, *chunk_coded_block);
             }
         }
 
@@ -363,8 +376,8 @@ void UDPRelayBlock(const CBlock& block) {
             block_coded = std::chrono::steady_clock::now();
 
         if (!inUDPProcess) { // We sent header before calculating any block stuff
-            if (!block_chunks->empty()) {
-                block_fecer.emplace(*block_chunks, data_fec_chunks);
+            if (!chunk_coded_block->empty()) {
+                block_fecer.emplace(*chunk_coded_block, data_fec_chunks);
             }
         }
 
@@ -373,8 +386,8 @@ void UDPRelayBlock(const CBlock& block) {
             block_fec_initd = std::chrono::steady_clock::now();
 
         // Now (maybe) send the transaction chunks
-        if (!block_chunks->empty())
-            SendFECedData(hashBlock, MSG_TYPE_BLOCK_CONTENTS, *block_chunks, *block_fecer);
+        if (!chunk_coded_block->empty())
+            RelayChunks(hashBlock, MSG_TYPE_BLOCK_CONTENTS, *chunk_coded_block, *block_fecer);
 
         if (fBench) {
             std::chrono::steady_clock::time_point all_sent(std::chrono::steady_clock::now());
@@ -485,13 +498,13 @@ void UDPFillMessagesFromBlock(const CBlock& block, std::vector<UDPMessage>& msgs
 
     /* Block */
     ChunkCodedBlock codedBlock(block, headerAndIDs);
-    const std::vector<unsigned char>& block_data = codedBlock.GetCodedBlock();
-    const size_t block_fec_chunks = DIV_CEIL(block_data.size(), FEC_CHUNK_SIZE) + 2;
+    const std::vector<unsigned char>& chunk_coded_block = codedBlock.GetCodedBlock();
+    const size_t block_fec_chunks = DIV_CEIL(chunk_coded_block.size(), FEC_CHUNK_SIZE) + 2;
     /* NOTE: on average wirehair needs about 0.02 chunks of overhead to recover
      * (meaning most often it doesn't need overhead at all). Again, we add two
      * extra chunks here (more than necessary) in order to overcome loss along
      * the transport link. */
-    DataFECer block_fecer(block_data, block_fec_chunks);
+    DataFECer block_fecer(chunk_coded_block, block_fec_chunks);
 
     msgs.resize(header_fec_chunks + block_fec_chunks);
 
@@ -503,7 +516,7 @@ void UDPFillMessagesFromBlock(const CBlock& block, std::vector<UDPMessage>& msgs
 
     /* Block chunks */
     for (size_t i = 0; i < block_fec_chunks; i++) {
-        FillBlockMessageHeader(msgs[i + header_fec_chunks], hash_prefix, MSG_TYPE_BLOCK_CONTENTS, block_data);
+        FillBlockMessageHeader(msgs[i + header_fec_chunks], hash_prefix, MSG_TYPE_BLOCK_CONTENTS, chunk_coded_block);
         CopyFECData(msgs[i + header_fec_chunks], block_fecer, i);
     }
 }
