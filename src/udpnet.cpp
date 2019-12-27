@@ -157,10 +157,10 @@ struct PerGroupMessageQueue {
      * 1) best-effort (non priority)
      * 2) background (used by backfill thread)
      */
-    inline MessageStateCache NextBuff(std::memory_order order) {
+    inline MessageStateCache NextBuff() {
         for (size_t i = 0; i < buffs.size(); i++) {
-            uint16_t next_undefined_message = buffs[i].nextUndefinedMessage.load(order);
-            uint16_t next_pending_message = buffs[i].nextPendingMessage.load(order);
+            uint16_t next_undefined_message = buffs[i].nextUndefinedMessage;
+            uint16_t next_pending_message = buffs[i].nextPendingMessage;
             if (next_undefined_message != next_pending_message)
                 return {(ssize_t)i, next_pending_message, next_undefined_message};
         }
@@ -912,8 +912,8 @@ static void timer_func(evutil_socket_t fd, short event, void* arg) {
 
 static inline void SendMessage(const UDPMessage& msg, const unsigned int length, PerGroupMessageQueue& queue, PendingMessagesBuff& buff, const CService& service, const uint64_t magic) {
     std::unique_lock<std::mutex> lock(send_messages_mutex);
-    const uint16_t next_undefined_message_cache = buff.nextUndefinedMessage.load(std::memory_order_acquire);
-    const uint16_t next_pending_message_cache = buff.nextPendingMessage.load(std::memory_order_acquire);
+    const uint16_t next_undefined_message_cache = buff.nextUndefinedMessage;
+    const uint16_t next_pending_message_cache = buff.nextPendingMessage;
     if (next_pending_message_cache == (next_undefined_message_cache + 1) % PENDING_MESSAGES_BUFF_SIZE)
         return;
 
@@ -924,7 +924,7 @@ static inline void SendMessage(const UDPMessage& msg, const unsigned int length,
     std::get<3>(new_msg) = magic;
 
     bool need_notify = next_undefined_message_cache == next_pending_message_cache;
-    buff.nextUndefinedMessage.store((next_undefined_message_cache + 1) % PENDING_MESSAGES_BUFF_SIZE, std::memory_order_release);
+    buff.nextUndefinedMessage = (next_undefined_message_cache + 1) % PENDING_MESSAGES_BUFF_SIZE;
 
     lock.unlock();
     if (need_notify)
@@ -953,7 +953,7 @@ static inline bool fill_cache(const std::chrono::steady_clock::time_point& now) 
         if (state.next_send > now)
             continue;
 
-        state.buff_state = queue.NextBuff(std::memory_order_acquire);
+        state.buff_state = queue.NextBuff();
         if (state.buff_state.buff_id != -1) {
             have_work = true;
             break;
@@ -1009,7 +1009,7 @@ static void do_send_messages() {
             if (send_state.buff_state.buff_id == -1 || // Skip if we got filled in in the locked check...
                     send_state.buff_state.nextPendingMessage == send_state.buff_state.nextUndefinedMessage || // ...or we're out of known messages
                     send_state.buff_state.buff_id == 0) // ...or we want to check for availability in a higher-priority buffer
-                send_state.buff_state = queue.NextBuff(std::memory_order_acquire);
+                send_state.buff_state = queue.NextBuff();
             if (send_state.buff_state.buff_id == -1) {
                 send_state.buff_emptied = true;
                 continue;
@@ -1041,15 +1041,15 @@ static void do_send_messages() {
 
                 send_state.buff_state.nextPendingMessage = (send_state.buff_state.nextPendingMessage + 1) % PENDING_MESSAGES_BUFF_SIZE;
                 if (send_state.buff_state.nextPendingMessage == send_state.buff_state.nextUndefinedMessage) {
-                    buff->nextPendingMessage.store(send_state.buff_state.nextPendingMessage, std::memory_order_release);
-                    send_state.buff_state = queue.NextBuff(std::memory_order_acquire);
+                    buff->nextPendingMessage = send_state.buff_state.nextPendingMessage;
+                    send_state.buff_state = queue.NextBuff();
                     if (send_state.buff_state.buff_id != -1)
                         buff = &queue.buffs[send_state.buff_state.buff_id];
                 }
             }
 
             if (send_state.buff_state.buff_id != -1)
-                buff->nextPendingMessage.store(send_state.buff_state.nextPendingMessage, std::memory_order_release);
+                buff->nextPendingMessage = send_state.buff_state.nextPendingMessage;
 
             size_t non_extra_messages_sent = std::max<ssize_t>(std::min(i, queue.write_objs_per_call), ssize_t(i) - extra_writes);
             send_state.next_send = start + std::chrono::nanoseconds(1000ULL*1000*1000 * queue.bytes_per_obj * non_extra_messages_sent / queue.target_bytes_per_sec);
@@ -1105,7 +1105,7 @@ static void MulticastBackfillThread(const CService& mcastNode,
         assert(it != mapTxQueues.end());
         PerGroupMessageQueue& queue = it->second;
 
-        while (!send_messages_break && queue.buffs[2].nextUndefinedMessage.load(std::memory_order_acquire) != queue.buffs[2].nextPendingMessage.load(std::memory_order_acquire))
+        while (!send_messages_break && queue.buffs[2].nextUndefinedMessage != queue.buffs[2].nextPendingMessage)
             std::this_thread::sleep_for(std::chrono::milliseconds(5));
 
         /* Define height of target block (to be transmitted) */
