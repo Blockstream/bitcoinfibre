@@ -658,10 +658,10 @@ static void ProcessBlockThread() {
                 }
 
                 if (block.block_data.IsBlockAvailable())
-                    block.is_decodeable.store(true, std::memory_order_release);
-                block.is_header_processing.store(false, std::memory_order_release);
+                    block.is_decodeable = true;
+                block.is_header_processing = false;
 
-                if (block.is_decodeable.load(std::memory_order_acquire))
+                if (block.is_decodeable)
                     more_work = true;
                 else
                     lock.unlock();
@@ -832,7 +832,7 @@ static void ProcessBlockThread() {
                         }
                     }
                     fDone = block.block_data.IsIterativeFillDone();
-                    if (!fDone && block.packet_awaiting_lock.load(std::memory_order_acquire)) {
+                    if (!fDone && block.packet_awaiting_lock) {
                         lock.unlock();
                         std::this_thread::yield();
                     }
@@ -1158,9 +1158,9 @@ bool HandleBlockTxMessage(UDPMessage& msg, size_t length, const CService& node, 
     }
 
     if (!block_lock) {
-        block.packet_awaiting_lock.store(true, std::memory_order_release);
+        block.packet_awaiting_lock = true;
         block_lock.lock();
-        block.packet_awaiting_lock.store(false, std::memory_order_release);
+        block.packet_awaiting_lock = false;
     }
 
     // is_decodeable || is_headerProcessing must come before any chunk-accessors in block.block_data
