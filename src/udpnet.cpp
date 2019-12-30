@@ -185,8 +185,8 @@ static void ThreadRunWriteEventLoop() { do_send_messages(); }
 static void read_socket_func(evutil_socket_t fd, short event, void* arg);
 static void timer_func(evutil_socket_t fd, short event, void* arg);
 
-static boost::thread *udp_read_thread = nullptr;
-static std::vector<boost::thread> udp_write_threads;
+static std::unique_ptr<std::thread> udp_read_thread;
+static std::vector<std::thread> udp_write_threads;
 
 static void OpenMulticastConnection(const CService& service, bool multicast_tx, size_t group);
 static UDPMulticastInfo ParseUDPMulticastInfo(const std::string& s, bool tx);
@@ -195,7 +195,7 @@ static std::vector<UDPMulticastInfo> GetUDPMulticastInfo();
 static const double txn_per_sec = 6.0;
 static void MulticastBackfillThread(const CService& mcastNode, const UDPMulticastInfo *info);
 static void LaunchMulticastBackfillThreads();
-static std::vector<boost::thread> mcast_tx_threads;
+static std::vector<std::thread> mcast_tx_threads;
 
 
 static void AddConnectionFromString(const std::string& node, bool fTrust) {
@@ -571,7 +571,7 @@ bool InitializeUDPConnections() {
 
     BlockRecvInit();
 
-    udp_read_thread = new boost::thread(boost::bind(&TraceThread<void (*)()>, "udpread", &ThreadRunReadEventLoop));
+    udp_read_thread.reset(new std::thread(&TraceThread<void (*)()>, "udpread", &ThreadRunReadEventLoop));
 
     return true;
 }
@@ -582,7 +582,7 @@ void StopUDPConnections() {
 
     event_base_loopbreak(event_base_read);
     udp_read_thread->join();
-    delete udp_read_thread;
+    udp_read_thread.reset();
 
     BlockRecvShutdown();
 
@@ -597,11 +597,11 @@ void StopUDPConnections() {
 
     send_messages_flush_and_break();
 
-    for (boost::thread& t : udp_write_threads)
+    for (std::thread& t : udp_write_threads)
         t.join();
     udp_write_threads.clear();
 
-    for (boost::thread& t : mcast_tx_threads)
+    for (std::thread& t : mcast_tx_threads)
         t.join();
     mcast_tx_threads.clear();
 
@@ -833,7 +833,6 @@ static void timer_func(evutil_socket_t fd, short event, void* arg) {
     }
 
     for (std::map<CService, UDPConnectionState>::iterator it = mapUDPNodes.begin(); it != mapUDPNodes.end();) {
-        boost::this_thread::interruption_point();
 
         if (it->second.connection.connection_type != UDP_CONNECTION_TYPE_NORMAL) {
             it++;
