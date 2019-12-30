@@ -283,7 +283,7 @@ static void SendLimitedDataChunks(const uint256& blockhash, UDPMessageType type,
     RelayUncodedChunks(msg, data, std::numeric_limits<size_t>::max(), hash_prefix, 3); // Send 3 packets to each peer, in RR
 }
 
-static boost::thread *process_block_thread = NULL;
+static std::unique_ptr<std::thread> process_block_thread;
 
 void UDPRelayBlock(const CBlock& block) {
     std::chrono::steady_clock::time_point start;
@@ -300,7 +300,7 @@ void UDPRelayBlock(const CBlock& block) {
         bool skipEncode = false;
         std::unique_lock<std::mutex> partial_block_lock;
         std::shared_ptr<PartialBlockData> partial_block_ptr;
-        bool inUDPProcess = process_block_thread && boost::this_thread::get_id() == process_block_thread->get_id();
+        bool inUDPProcess = process_block_thread && std::this_thread::get_id() == process_block_thread->get_id();
         if (inUDPProcess) {
             lock.lock();
 
@@ -859,7 +859,7 @@ static void ProcessBlockThread() {
 }
 
 void BlockRecvInit() {
-    process_block_thread = new boost::thread(boost::bind(&TraceThread<void (*)()>, "udpprocess", &ProcessBlockThread));
+    process_block_thread.reset(new std::thread(&TraceThread<void (*)()>, "udpprocess", &ProcessBlockThread));
 }
 
 void BlockRecvShutdown() {
@@ -867,8 +867,7 @@ void BlockRecvShutdown() {
         block_process_shutdown = true;
         block_process_cv.notify_all();
         process_block_thread->join();
-        delete process_block_thread;
-        process_block_thread = NULL;
+        process_block_thread.reset();
     }
 }
 
