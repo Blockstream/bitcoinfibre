@@ -280,9 +280,9 @@ CBlockHeaderAndLengthShortTxIDs::CBlockHeaderAndLengthShortTxIDs(const CBlock& b
         CBlockHeaderAndShortTxIDs(block, true, fDeterministic), txlens(shorttxids.size()) {
     int32_t lastprefilledindex = -1;
     uint16_t index_offset = 0;
-    std::vector<PrefilledTransaction>::const_iterator prefilledit = prefilledtxn.begin();
+    auto prefilledit = prefilledtxn.cbegin();
     for (size_t i = 0; i < block.vtx.size(); i++) {
-        if (prefilledit != prefilledtxn.end() && (uint32_t)(lastprefilledindex + prefilledit->index + 1) == i + index_offset) {
+        if (prefilledit != prefilledtxn.cend() && (uint32_t)(lastprefilledindex + prefilledit->index + 1) == i + index_offset) {
             lastprefilledindex += prefilledit->index + 1;
             prefilledit++;
             index_offset++;
@@ -304,9 +304,9 @@ ReadStatus CBlockHeaderAndLengthShortTxIDs::FillIndexOffsetMap(F& callback) cons
     size_t current_index = 0;
     int32_t lastprefilledindex = -1;
     uint16_t index_offset = 0;
-    std::vector<PrefilledTransaction>::const_iterator prefilledit = prefilledtxn.begin();
+    auto prefilledit = prefilledtxn.cbegin();
     for (size_t i = 0; i < txlens.size(); i++) {
-        while (prefilledit != prefilledtxn.end() &&
+        while (prefilledit != prefilledtxn.cend() &&
                 (uint32_t)(lastprefilledindex + prefilledit->index + 1) == i + index_offset) {
             lastprefilledindex += prefilledit->index + 1;
             prefilledit++;
@@ -321,9 +321,9 @@ ReadStatus CBlockHeaderAndLengthShortTxIDs::FillIndexOffsetMap(F& callback) cons
     std::multimap<size_t, size_t> indexes_left; // size -> index
     int32_t lastprefilledindex = -1;
     uint16_t index_offset = 0;
-    std::vector<PrefilledTransaction>::const_iterator prefilledit = prefilledtxn.begin();
+    auto prefilledit = prefilledtxn.cbegin();
     for (size_t i = 0; i < txlens.size(); i++) {
-        while (prefilledit != prefilledtxn.end() &&
+        while (prefilledit != prefilledtxn.cend() &&
                 (uint32_t)(lastprefilledindex + prefilledit->index + 1) == i + index_offset) {
             lastprefilledindex += prefilledit->index + 1;
             prefilledit++;
@@ -343,7 +343,9 @@ ReadStatus CBlockHeaderAndLengthShortTxIDs::FillIndexOffsetMap(F& callback) cons
         size_t size_left = FEC_CHUNK_SIZE - (current_index % FEC_CHUNK_SIZE);
         while (!indexes_left.empty() && size_left > indexes_left.begin()->first) {
             std::multimap<size_t, size_t>::iterator it = indexes_left.upper_bound(size_left);
-            assert(it != indexes_left.begin()); it--; assert(it->first <= size_left);
+            assert(it != indexes_left.begin());
+            it--;
+            assert(it->first <= size_left);
 
             callback(current_index, it->second);
             current_index += it->first;
@@ -382,7 +384,8 @@ ChunkCodedBlock::ChunkCodedBlock(const CBlock& block, const CBlockHeaderAndLengt
 
     {
         FillIndexOffsetMapSerializer ser{stream, block};
-        assert(headerAndIDs.FillIndexOffsetMap<FillIndexOffsetMapSerializer>(ser) == READ_STATUS_OK);
+        auto const ret = headerAndIDs.FillIndexOffsetMap(ser);
+        assert(ret == READ_STATUS_OK);
     }
     codedBlock.resize(DIV_CEIL(codedBlock.size() + 80, FEC_CHUNK_SIZE) * FEC_CHUNK_SIZE);
     // Append the block header at the end of the last chunk. We dont currently
@@ -437,7 +440,7 @@ ReadStatus PartiallyDownloadedChunkBlock::InitData(const CBlockHeaderAndLengthSh
         return READ_STATUS_OK;
 
     FillIndexOffsetMapCallback fiomCallback{index_offsets};
-    status = comprblock.FillIndexOffsetMap<FillIndexOffsetMapCallback>(fiomCallback);
+    status = comprblock.FillIndexOffsetMap(fiomCallback);
     if (status != READ_STATUS_OK)
         return status;
 
@@ -448,7 +451,8 @@ ReadStatus PartiallyDownloadedChunkBlock::InitData(const CBlockHeaderAndLengthSh
     int32_t prefilled_txn_offset = -1;
     for (size_t i = 0; i < comprblock.prefilledtxn.size(); i++) {
         prefilled_txn_offset += comprblock.prefilledtxn[i].index + 1;
-        assert(txn_prefilled.insert(std::make_pair(prefilled_txn_offset, i + 1)).second);
+        bool const inserted = txn_prefilled.insert(std::make_pair(prefilled_txn_offset, i + 1)).second;
+        assert(inserted);
     }
 
     if (index_offsets.size()) {
@@ -606,7 +610,7 @@ ReadStatus PartiallyDownloadedChunkBlock::FinalizeBlock() {
     // time we spend here, but by calling GetHash() at that time, save the
     // hashing time we'll spend later to check the hash of each transaction.
     VectorInputStream stream(&codedBlock, SER_NETWORK, PROTOCOL_VERSION | SERIALIZE_TRANSACTION_NO_CACHE);
-    for (std::map<size_t, size_t>::const_iterator it = index_offsets.begin(); it != index_offsets.end(); it++) {
+    for (auto it = index_offsets.cbegin(); it != index_offsets.cend(); it++) {
         if (block.vtx[it->second])
             continue;
         try {
