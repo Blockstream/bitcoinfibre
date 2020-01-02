@@ -208,54 +208,44 @@ void PadScriptPubKey(uint8_t TxOutCode, CScript &scriptPubKey);
 template <typename Stream>
 void decompressTransaction(Stream& s, CMutableTransaction& tx);
 
-inline void decompressTransaction(CVectorWriter&, CMutableTransaction&)
-{ assert(false); }
-
-inline void decompressTransaction(VectorOutputStream&, CMutableTransaction&)
-{ assert(false); }
-
-inline void decompressTransaction(CSizeComputer&, CMutableTransaction&)
-{ assert(false); }
-
 template <typename Stream>
 void compressTransaction(Stream& s, CTransaction const& tx);
 
-inline void compressTransaction(VectorInputStream&, CTransaction const&)
-{ assert(false); }
-
 struct CTxCompressor
 {
-    boost::variant<CMutableTransaction*, CTransaction const*, CTransactionRef*> tx;
+    CTxCompressor(CTransactionRef& txin) : tx(&txin) {}
+    CTxCompressor(CTransaction const& txin) : tx(&txin) {}
+    CTxCompressor(CMutableTransaction &txin) : tx(&txin) {}
 
-public:
-    explicit CTxCompressor(CTransactionRef& txin) : tx(&txin) {}
-    explicit CTxCompressor(CTransaction const& txin) : tx(&txin) {}
-    explicit CTxCompressor(CMutableTransaction &txin) : tx(&txin) {}
-
-    ADD_SERIALIZE_METHODS;
-
-    template <typename Stream, typename Operation>
-    void SerializationOp(Stream& s, Operation ser_action)
-    {
-        if (ser_action.ForRead()) {
-            if (boost::get<CTransactionRef*>(&tx) != nullptr) {
-                CMutableTransaction local_tx;
-                decompressTransaction(s, local_tx);
-                *boost::get<CTransactionRef*>(tx) = MakeTransactionRef(local_tx);
-            }
-            else {
-                decompressTransaction(s, *boost::get<CMutableTransaction*>(tx));
-            }
+    template<typename Stream>
+    void Serialize(Stream& s) const {
+        if (boost::get<CTransactionRef*>(&tx) != nullptr) {
+           compressTransaction(s, **boost::get<CTransactionRef*>(tx));
+        }
+        else if (boost::get<CTransaction const*>(&tx) != nullptr) {
+           compressTransaction(s, *boost::get<CTransaction const*>(tx));
         }
         else {
-            if (boost::get<CTransactionRef*>(&tx) != nullptr) {
-               compressTransaction(s, **boost::get<CTransactionRef*>(tx));
-            }
-            else {
-               compressTransaction(s, *boost::get<CTransaction const*>(tx));
-            }
+           throw std::runtime_error("cannot serialize CMutableTransaction");
         }
     }
+
+    template<typename Stream>
+    void Unserialize(Stream& s) {
+        if (boost::get<CTransactionRef*>(&tx) != nullptr) {
+           CMutableTransaction local_tx;
+           decompressTransaction(s, local_tx);
+           *boost::get<CTransactionRef*>(tx) = MakeTransactionRef(std::move(local_tx));
+        }
+        else if (boost::get<CMutableTransaction*>(&tx) != nullptr) {
+           decompressTransaction(s, *boost::get<CMutableTransaction*>(tx));
+        }
+        else {
+           throw std::runtime_error("cannot un-serialize into CTransaction");
+        }
+    }
+private:
+    boost::variant<CMutableTransaction*, CTransaction const*, CTransactionRef*> tx;
 };
 
 #endif // BITCOIN_COMPRESSOR_H
