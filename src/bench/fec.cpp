@@ -58,7 +58,8 @@ public:
             VectorInputStream stream(&header_data, SER_NETWORK, PROTOCOL_VERSION);
             stream >> shortIDs;
 
-            assert(partialBlock.InitData(shortIDs, extra_txn) == READ_STATUS_OK);
+            auto const ret = partialBlock.InitData(shortIDs, extra_txn);
+            assert(ret == READ_STATUS_OK);
 
             header_done = true;
         }
