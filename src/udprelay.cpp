@@ -156,7 +156,9 @@ struct DataFECer {
 };
 
 static void CopyFECData(UDPMessage& msg, DataFECer& fec, size_t array_idx, bool overwrite_chunk = false) {
-    assert(fec.enc.BuildChunk(array_idx, overwrite_chunk)); // TODO: Handle errors?
+    bool const ret = fec.enc.BuildChunk(array_idx, overwrite_chunk);
+    // TODO: Handle errors?
+    assert(ret);
     assert(fec.fec_data.second[array_idx] < (1 << 24));
     msg.msg.block.chunk_id = htole32(fec.fec_data.second[array_idx]);
     memcpy(msg.msg.block.data, &fec.fec_data.first[array_idx], FEC_CHUNK_SIZE);
@@ -892,7 +894,10 @@ PartialBlockData::PartialBlockData(const CService& node, const UDPMessage& msg, 
         in_header(true), initialized(false),
         is_decodeable(false), is_header_processing(false),
         currentlyProcessing(false), block_data(&mempool)
-    { assert(Init(msg)); }
+    {
+       bool const ret = Init(msg);
+       assert(ret);
+    }
 
 void PartialBlockData::ReconstructBlockFromDecoder() {
     assert(decoder.DecodeReady());
@@ -1123,7 +1128,7 @@ bool HandleBlockTxMessage(UDPMessage& msg, size_t length, const CService& node, 
     }
 
     bool new_block = false;
-    std::map<std::pair<uint64_t, CService>, std::shared_ptr<PartialBlockData> >::iterator it = mapPartialBlocks.find(hash_peer_pair);
+    auto it = mapPartialBlocks.find(hash_peer_pair);
     if (it == mapPartialBlocks.end()) {
         if ((msg.header.msg_type & UDP_MSG_TYPE_TYPE_MASK) == MSG_TYPE_BLOCK_HEADER)
             it = mapPartialBlocks.insert(std::make_pair(std::make_pair(hash_prefix, state.connection.fTrusted ? TRUSTED_PEER_DUMMY : node), std::make_shared<PartialBlockData>(node, msg, packet_process_start))).first;
@@ -1174,7 +1179,7 @@ bool HandleBlockTxMessage(UDPMessage& msg, size_t length, const CService& node, 
     if (block.is_decodeable || block.currentlyProcessing || block.is_header_processing)
         return true;
 
-    std::map<CService, std::pair<uint32_t, uint32_t>>::iterator perNodeChunkCountIt =
+    auto perNodeChunkCountIt =
             block.perNodeChunkCount.insert(std::make_pair(node, std::make_pair(0, 0))).first;
     perNodeChunkCountIt->second.second++;
 
