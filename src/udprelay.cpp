@@ -755,30 +755,32 @@ static void ProcessBlockThread() {
                     if (fBench)
                         process_start = std::chrono::steady_clock::now();
 
+                    const bool multicast_rx_node = IsMulticastRxNode(node);
+
                     bool fNewBlock;
                     if (!ProcessNewBlock(Params(), pdecoded_block, false, &fNewBlock)) {
-                        bool have_prev, save_block_for_later;
+                        bool have_prev, outoforder_and_valid;
                         {
                             LOCK(cs_main);
-                            have_prev = BlockIndex().count(pdecoded_block->hashPrevBlock);
 
-                            if (have_prev) {
-                                save_block_for_later = false;
-                            } else {
-                               /* Only save out-of-order blocks received
-                                * through a one-way multicast service
-                                * Only save blocks that are at least minimally valid */
-                                CValidationState state;
-                                save_block_for_later = IsMulticastRxNode(node)
-                                    && CheckBlock(*pdecoded_block, state, Params().GetConsensus());
-                            }
+                            have_prev = BlockIndex().count(pdecoded_block->hashPrevBlock);
+                            CValidationState state;
+                            outoforder_and_valid = !have_prev &&
+                                CheckBlock(*pdecoded_block, state, Params().GetConsensus());
                         }
-                        if (save_block_for_later) {
-                            save_block_for_later = StoreOoOBlock(Params(), pdecoded_block);
-                        }
+
                         LogPrintf("UDP: Failed to decode block %s\n", decoded_block.GetHash().ToString());
+
+                        /* Only save out-of-order blocks that are minimally
+                         * valid and that were received through a one-way
+                         * multicast service */
+                        bool ooob_saved = false;
+                        if (multicast_rx_node && outoforder_and_valid)
+                            ooob_saved = StoreOoOBlock(Params(), pdecoded_block);
+
                         std::lock_guard<std::recursive_mutex> udpNodesLock(cs_mapUDPNodes);
-                        if (have_prev || save_block_for_later) {
+
+                        if (have_prev || ooob_saved) {
                             setBlocksReceived.insert(process_block.first);
                         } else {
                             // Allow re-downloading again later, useful for local backfill downloads
