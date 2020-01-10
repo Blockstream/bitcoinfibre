@@ -520,10 +520,6 @@ bool InitializeUDPConnections() {
     }
 
     auto multicast_list = GetUDPMulticastInfo();
-    if (multicast_list.empty()) {
-        CloseSocketsAndReadEvents();
-        return false;
-    }
 
     if (!InitializeUDPMulticast(udp_socks, multicast_list)) {
         CloseSocketsAndReadEvents();
