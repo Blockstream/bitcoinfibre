@@ -994,9 +994,9 @@ static void do_send_messages() {
                 continue;
             }
 
-            if (send_state.buff_state.buff_id == -1 || // Skip if we got filled in in the locked check...
-                send_state.buff_state.nextPendingMessage == send_state.buff_state.nextUndefinedMessage || // ...or we're out of known messages
-                send_state.buff_state.buff_id == 0) { // ...or we want to check for availability in a higher-priority buffer
+            /* Search a higher priority non-empty buffer if... */
+            if (send_state.buff_state.buff_id != 0 || // we are not currently in the highest priority buffer
+                send_state.buff_state.nextPendingMessage == send_state.buff_state.nextUndefinedMessage) { // ...or we're out of known messages
                 send_state.buff_state = queue.NextBuff();
             }
 
