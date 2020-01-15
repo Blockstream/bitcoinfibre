@@ -131,7 +131,7 @@ static struct timeval timer_interval;
 
 // ~10MB of outbound messages pending
 static const size_t PENDING_MESSAGES_BUFF_SIZE = 8192;
-static const size_t WRITES_PER_SEC = 1000;
+static const double max_tx_group_turn_duration = 0.2; // seconds
 static std::atomic_bool send_messages_break(false);
 std::mutex send_messages_mutex;
 std::condition_variable send_messages_wake_cv;
@@ -148,7 +148,7 @@ struct MessageStateCache {
 struct PerQueueSendState {
     MessageStateCache buff_state;
     std::chrono::steady_clock::time_point next_send;
-    bool buff_emptied;
+    std::chrono::steady_clock::time_point last_send;
 };
 struct PerGroupMessageQueue {
     std::array<PendingMessagesBuff, 3> buffs;
@@ -156,7 +156,13 @@ struct PerGroupMessageQueue {
      * 0) high priority
      * 1) best-effort (non priority)
      * 2) background (used by backfill thread)
+     *
+     * The current buffer is indicated by `state.buff_id`. This id is set to -1
+     * when all buffers are empty.
      */
+
+    /* Find the next buffer with data available for transmission, while
+     * respecting buffer priorities. */
     inline MessageStateCache NextBuff() {
         for (size_t i = 0; i < buffs.size(); i++) {
             uint16_t next_undefined_message = buffs[i].nextUndefinedMessage;
@@ -166,11 +172,14 @@ struct PerGroupMessageQueue {
         }
         return {-1, 0, 0};
     }
+
     uint64_t bw;
     bool multicast;
-    size_t write_objs_per_call, bytes_per_obj, target_bytes_per_sec;
+    double byte_quota;
+    double target_bytes_per_sec;
+    double max_byte_quota_per_turn;
     struct PerQueueSendState state;
-    PerGroupMessageQueue() : bw(0), multicast(false), write_objs_per_call(0), bytes_per_obj(0), target_bytes_per_sec(0) {}
+    PerGroupMessageQueue() : bw(0), multicast(false), byte_quota(0), target_bytes_per_sec(0), max_byte_quota_per_turn(0) {}
     PerGroupMessageQueue(PerGroupMessageQueue&& q) =delete;
 };
 static std::map<size_t, PerGroupMessageQueue> mapTxQueues;
@@ -944,6 +953,8 @@ static inline bool fill_cache(const std::chrono::steady_clock::time_point& now) 
     return have_work;
 }
 
+static const int ip_udp_header_size = 8 + 20; // Min IPv4 header + UDP header
+
 static void do_send_messages() {
 #ifndef WIN32
     {
@@ -959,50 +970,48 @@ static void do_send_messages() {
 #endif
 
     /* Initialize state of Tx queues */
+    const std::chrono::steady_clock::time_point t_now(std::chrono::steady_clock::now());
     for (auto& q : mapTxQueues) {
-        q.second.state.buff_state   = {-1, 0, 0};
-        q.second.state.next_send    = std::chrono::steady_clock::now();
-        q.second.state.buff_emptied = true;
+        q.second.state.buff_state = {-1, 0, 0};
+        q.second.state.next_send  = t_now;
+        q.second.state.last_send  = t_now;
     }
 
     while (true) {
-        std::chrono::steady_clock::time_point start(std::chrono::steady_clock::now());
         if (send_messages_break)
             return;
-        std::chrono::steady_clock::time_point sleep_until(start + std::chrono::minutes(60));
+        std::chrono::steady_clock::time_point sleep_until(std::chrono::steady_clock::now() + std::chrono::minutes(60));
 
         /* Iterate over Tx queues and schedule transmissions */
         for (auto& q : mapTxQueues) {
             PerGroupMessageQueue& queue   = q.second;
             PerQueueSendState& send_state = queue.state;
             const size_t group            = q.first;
+            const std::chrono::steady_clock::time_point t_now(std::chrono::steady_clock::now());
 
-            if (send_state.next_send > start) {
+            if (send_state.next_send > t_now) {
                 sleep_until = std::min(sleep_until, send_state.next_send);
                 continue;
             }
 
-            size_t extra_writes = 0;
-            if (!send_state.buff_emptied) {
-                static_assert(std::is_same<std::chrono::steady_clock::time_point::period, std::nano>::value, "Better to math you with");
-                extra_writes = std::chrono::nanoseconds(start - send_state.next_send).count() * WRITES_PER_SEC * queue.write_objs_per_call / std::nano::den;
+            if (send_state.buff_state.buff_id == -1 || // Skip if we got filled in in the locked check...
+                send_state.buff_state.nextPendingMessage == send_state.buff_state.nextUndefinedMessage || // ...or we're out of known messages
+                send_state.buff_state.buff_id == 0) { // ...or we want to check for availability in a higher-priority buffer
+                send_state.buff_state = queue.NextBuff();
             }
 
-            if (send_state.buff_state.buff_id == -1 || // Skip if we got filled in in the locked check...
-                    send_state.buff_state.nextPendingMessage == send_state.buff_state.nextUndefinedMessage || // ...or we're out of known messages
-                    send_state.buff_state.buff_id == 0) // ...or we want to check for availability in a higher-priority buffer
-                send_state.buff_state = queue.NextBuff();
-            if (send_state.buff_state.buff_id == -1) {
-                send_state.buff_emptied = true;
+            if (send_state.buff_state.buff_id == -1)
                 continue;
-            }
 
             PendingMessagesBuff* buff = &queue.buffs[send_state.buff_state.buff_id];
-            size_t i = 0;
-            uint16_t bytes_sent = 0;
-            for (; i < queue.write_objs_per_call + extra_writes && send_state.buff_state.buff_id != -1; i++) {
-                std::tuple<CService, UDPMessage, unsigned int, uint64_t>& msg = buff->messagesPendingRingBuff[send_state.buff_state.nextPendingMessage];
+            std::tuple<CService, UDPMessage, unsigned int, uint64_t>& msg = buff->messagesPendingRingBuff[send_state.buff_state.nextPendingMessage];
+            queue.byte_quota += queue.target_bytes_per_sec * to_seconds(t_now - send_state.last_send);
 
+            /* Don't let this Tx group hold the link for too long */
+            if (queue.byte_quota > queue.max_byte_quota_per_turn)
+                queue.byte_quota = queue.max_byte_quota_per_turn;
+
+            while (queue.byte_quota > (std::get<2>(msg) + ip_udp_header_size) && send_state.buff_state.buff_id != -1) {
                 if (queue.multicast) {
                     assert((std::get<1>(msg).header.msg_type & UDP_MSG_TYPE_TYPE_MASK) == MSG_TYPE_BLOCK_HEADER ||
                            (std::get<1>(msg).header.msg_type & UDP_MSG_TYPE_TYPE_MASK) == MSG_TYPE_BLOCK_CONTENTS ||
@@ -1022,7 +1031,7 @@ static void do_send_messages() {
                               group, strerror(errno));
                 }
 
-                bytes_sent += std::get<2>(msg);
+                queue.byte_quota -= std::get<2>(msg) + ip_udp_header_size;
 
                 send_state.buff_state.nextPendingMessage = (send_state.buff_state.nextPendingMessage + 1) % PENDING_MESSAGES_BUFF_SIZE;
                 if (send_state.buff_state.nextPendingMessage == send_state.buff_state.nextUndefinedMessage) {
@@ -1031,13 +1040,16 @@ static void do_send_messages() {
                     if (send_state.buff_state.buff_id != -1)
                         buff = &queue.buffs[send_state.buff_state.buff_id];
                 }
+
+                msg = buff->messagesPendingRingBuff[send_state.buff_state.nextPendingMessage];
             }
+
+            send_state.last_send  = send_state.next_send;
+            send_state.next_send += std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::duration<double>(max_tx_group_turn_duration));
 
             if (send_state.buff_state.buff_id != -1)
                 buff->nextPendingMessage = send_state.buff_state.nextPendingMessage;
 
-            send_state.next_send = start + std::chrono::nanoseconds(1000ULL*1000*1000 * bytes_sent / queue.target_bytes_per_sec);
-            send_state.buff_emptied = false;
             sleep_until = std::min(sleep_until, send_state.next_send);
         }
 
@@ -1243,26 +1255,25 @@ static std::map<size_t, PerGroupMessageQueue> init_tx_queues(const std::vector<s
         }
     }
 
-    /* Throughput-related settings */
+    /* Throughput settings of each Tx group
+     *
+     * - On average, the transmission loop will try to respect
+     *   `target_bytes_per_sec` bytes/sec for each Tx group. This will be the
+     *   sum rate of all 3 message queues of the group.
+     *
+     * - Only one Tx group can be transmitting at a time and, hence, Tx groups
+     *   take turns. On each turn, there is a limit for the number of bytes the
+     *   Tx group can transmit. This is just so that other queues don't wait too
+     *   long for their turn. The limit is proportional to the groups's
+     *   throughput and there is some margin such that the residual quota from
+     *   the previous turn is not lost due to capping.
+     *
+     * NOTE: -udpport sets bw in Mbps, while -udpmulticasttx sets in bps. */
     for (auto it = mapQueues.begin(); it != mapQueues.end(); it++) {
-        /* NOTE: -udpport sets bw in Mbps, while -udpmulticasttx sets in bps. */
-        size_t& target_bytes_per_sec = it->second.target_bytes_per_sec;
-        size_t& bytes_per_obj        = it->second.bytes_per_obj;
-        size_t& write_objs_per_call  = it->second.write_objs_per_call;
-        target_bytes_per_sec = it->second.bw * (it->second.multicast ? 1 : 1024 * 1024) / 8;
-        bytes_per_obj        = it->second.multicast ? (sizeof(UDPMessageHeader) + MAX_UDP_MESSAGE_LENGTH) : PACKET_SIZE; // FIXME
-        write_objs_per_call  = std::max<size_t>(1, target_bytes_per_sec / WRITES_PER_SEC / bytes_per_obj / mapQueues.size());
-        /* Try roughly WRITES_PER_SEC UDP datagram transmissions per second in
-         * total, including all queues. For each queue, in turn, try to allocate
-         * a piece of this total budget of "writes" (transmissions) that is
-         * proportional to the queue's target throughput.
-         *
-         * NOTE: this assumes that all datagrams have the same length. However,
-         * in the current implementation txns are variable length and their size
-         * is less than or equal to "bytes_per_obj". Hence,
-         * "write_objs_per_call" is only a rough approximation. This is OK,
-         * since in the end, the flow control is based on number of bytes sent.
-         */
+        double& target_bytes_per_sec       = it->second.target_bytes_per_sec;
+        target_bytes_per_sec               = it->second.bw * (it->second.multicast ? 1 : 1024 * 1024) / 8;
+        const double cap_margin            = sizeof(UDPMessage) + ip_udp_header_size - 1;
+        it->second.max_byte_quota_per_turn = (target_bytes_per_sec * max_tx_group_turn_duration) + cap_margin;
     }
 
     return mapQueues;
