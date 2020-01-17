@@ -754,8 +754,12 @@ static void ProcessBlockThread() {
                     if (fBench)
                         process_start = std::chrono::steady_clock::now();
 
+                    /* Treat the block as a solicited block in case it came from
+                     * a trusted peer */
+                    const bool force_requested = (node == TRUSTED_PEER_DUMMY);
+
                     bool fNewBlock;
-                    if (!ProcessNewBlock(Params(), pdecoded_block, false, &fNewBlock)) {
+                    if (!ProcessNewBlock(Params(), pdecoded_block, force_requested, &fNewBlock)) {
                         bool have_prev, outoforder_and_valid;
                         {
                             LOCK(cs_main);
