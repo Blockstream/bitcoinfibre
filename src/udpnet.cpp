@@ -197,7 +197,7 @@ static void timer_func(evutil_socket_t fd, short event, void* arg);
 static std::unique_ptr<std::thread> udp_read_thread;
 static std::vector<std::thread> udp_write_threads;
 
-static void OpenMulticastConnection(const CService& service, bool multicast_tx, size_t group);
+static void OpenMulticastConnection(const CService& service, bool multicast_tx, size_t group, bool trusted);
 static UDPMulticastInfo ParseUDPMulticastInfo(const std::string& s, bool tx);
 static std::vector<UDPMulticastInfo> GetUDPMulticastInfo();
 
@@ -423,11 +423,13 @@ static bool InitializeUDPMulticast(std::vector<int> &udp_socks,
              * is used in order to find the corresponding CService */
             inet_pton(AF_INET, mcast_info.tx_ip, &multicastaddr.sin_addr);
 
-            LogPrintf("UDP: multicast rx -  multiaddr: %s interface: %s (%s) sourceaddr: %s\n",
+            LogPrintf("UDP: multicast rx -  multiaddr: %s, interface: %s (%s)"
+                      ", sourceaddr: %s, trusted: %u\n",
                       mcast_info.mcast_ip,
                       mcast_info.ifname,
                       imr_interface_str,
-                      mcast_info.tx_ip);
+                      mcast_info.tx_ip,
+                      mcast_info.trusted);
         }
 
         group++;
@@ -568,7 +570,8 @@ bool InitializeUDPConnections() {
     for (const auto& multicastNode : mapMulticastNodes) {
         OpenMulticastConnection(std::get<0>(multicastNode.first),
                                 multicastNode.second.tx,
-                                multicastNode.second.group);
+                                multicastNode.second.group,
+                                multicastNode.second.trusted);
     }
 
     /* Multicast transmission threads */
@@ -1322,6 +1325,7 @@ static UDPMulticastInfo ParseUDPMulticastInfo(const std::string& s, const bool t
     info.logical_idx = 0; // default for multicast Rx, overriden for Tx
     info.depth       = 144;
     info.dscp        = 0; // IPv4 DSCP used for multicast Tx
+    info.trusted     = false;
 
     if (info.tx) {
         const size_t bw_end = s.find(',', mcastaddr_end + 1);
@@ -1367,11 +1371,20 @@ static UDPMulticastInfo ParseUDPMulticastInfo(const std::string& s, const bool t
         const size_t tx_ip_end = s.find(',', mcastaddr_end + 1);
         std::string tx_ip;
 
-        if (tx_ip_end == std::string::npos)
-            tx_ip          = s.substr(mcastaddr_end + 1);
+        if (tx_ip_end == std::string::npos) {
+            LogPrintf("Failed to parse -udpmulticast option, missing required arguments\n");
+            return info;
+        }
+
+        tx_ip = s.substr(mcastaddr_end + 1, tx_ip_end - mcastaddr_end - 1);
+
+        const size_t trusted_end = s.find(',', tx_ip_end + 1);
+
+        if (trusted_end == std::string::npos)
+            info.trusted   = (bool) atoi64(s.substr(tx_ip_end + 1));
         else {
-            tx_ip          = s.substr(mcastaddr_end + 1, tx_ip_end - mcastaddr_end - 1);
-            info.groupname = s.substr(tx_ip_end + 1);
+            info.trusted   = (bool) atoi64(s.substr(tx_ip_end + 1, trusted_end - tx_ip_end - 1));
+            info.groupname = s.substr(trusted_end + 1);
         }
 
         if (tx_ip.empty()) {
@@ -1408,8 +1421,8 @@ static std::vector<UDPMulticastInfo> GetUDPMulticastInfo()
     return v;
 }
 
-static void OpenMulticastConnection(const CService& service, bool multicast_tx, size_t group) {
-    OpenPersistentUDPConnectionTo(service, multicast_magic, multicast_magic, false,
+static void OpenMulticastConnection(const CService& service, bool multicast_tx, size_t group, bool trusted) {
+    OpenPersistentUDPConnectionTo(service, multicast_magic, multicast_magic, trusted,
                                   multicast_tx ? UDP_CONNECTION_TYPE_OUTBOUND_ONLY : UDP_CONNECTION_TYPE_INBOUND_ONLY,
                                   group, udp_mode_t::multicast);
 }

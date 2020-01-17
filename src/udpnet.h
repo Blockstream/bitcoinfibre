@@ -204,6 +204,7 @@ struct UDPMulticastInfo {
     /* Rx only: */
     char tx_ip[INET_ADDRSTRLEN];    /** source IPv4 address (sender address) */
     std::string groupname;          /** optional label for stream */
+    bool trusted;                   /** whether multicast Tx peer is trusted */
     /* Tx only: */
     int ttl;               /** time-to-live desired for multicast packets */
     uint64_t bw;           /** target throughput in bps */
