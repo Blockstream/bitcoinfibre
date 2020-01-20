@@ -536,12 +536,20 @@ void UDPFillMessagesFromTx(const CTransaction& tx, std::vector<std::pair<UDPMess
  * block). The difference on decoding duration will be even lower in this case.
  *
  */
-void UDPFillMessagesFromBlock(const CBlock& block, std::vector<UDPMessage>& msgs) {
+void UDPFillMessagesFromBlock(const CBlock& block, std::vector<UDPMessage>& msgs, const int height) {
     const uint256 hashBlock(block.GetHash());
     const uint64_t hash_prefix = hashBlock.GetUint64(0);
 
     /* FIBRE block header */
     CBlockHeaderAndLengthShortTxIDs headerAndIDs(block, codec_version_t::default_version, true);
+    headerAndIDs.setBlockHeight(height);
+    /* NOTE: it is not mandatory to include the block height along
+     * CBlockHeaderAndLengthShortTxIDs. However, it is useful to include it here
+     * in order to support out-of-order block (OOOB) storage of pre-BIP34
+     * blocks. The reason is that pre-BIP34 blocks don't include the height as
+     * part of the coinbase transaction's input script, and so unless we send
+     * the height explicitly, the receive node won't know the height and won't
+     * be able to store the block in case it is received out-of-order. */
 
     std::vector<unsigned char> header_data;
     header_data.reserve(2500 + 8 * block.vtx.size()); // Rather conservatively high estimate
@@ -778,7 +786,7 @@ static void ProcessBlockThread() {
                          * valid */
                         bool ooob_saved = false;
                         if (outoforder_and_valid)
-                            ooob_saved = StoreOoOBlock(Params(), pdecoded_block, force_requested);
+                            ooob_saved = StoreOoOBlock(Params(), pdecoded_block, force_requested, block.block_data.getBlockHeight());
 
                         std::lock_guard<std::recursive_mutex> udpNodesLock(cs_mapUDPNodes);
 
