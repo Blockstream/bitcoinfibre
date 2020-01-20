@@ -134,7 +134,7 @@ extern CBlockIndex *pindexBestHeader;
 /** Documentation for argument 'checklevel'. */
 extern const std::vector<std::string> CHECKLEVEL_DOC;
 
-bool StoreOoOBlock(const CChainParams&, const std::shared_ptr<const CBlock>);
+bool StoreOoOBlock(const CChainParams&, const std::shared_ptr<const CBlock>, bool force);
 void ProcessSuccessorOoOBlocks(const CChainParams&, const uint256& prev_block_hash);
 void CheckForOoOBlocks(const CChainParams&);
 
