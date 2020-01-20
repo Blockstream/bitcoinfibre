@@ -12,6 +12,7 @@
 #include <validation.h>
 #include <version.h>
 
+#include <queue>
 #include <condition_variable>
 #include <thread>
 #include <boost/optional.hpp>
@@ -581,14 +582,14 @@ void UDPFillMessagesFromBlock(const CBlock& block, std::vector<UDPMessage>& msgs
 static std::mutex block_process_mutex;
 static std::condition_variable block_process_cv;
 static std::atomic_bool block_process_shutdown(false);
-static std::vector<std::pair<std::pair<uint64_t, CService>, std::shared_ptr<PartialBlockData> > > block_process_queue;
+static std::queue<std::pair<std::pair<uint64_t, CService>, std::shared_ptr<PartialBlockData> > > block_process_queue;
 
 static void DoBackgroundBlockProcessing(const std::pair<std::pair<uint64_t, CService>, std::shared_ptr<PartialBlockData> >& block_data) {
     // If we just blindly call ProcessNewBlock here, we have a cs_main/cs_mapUDPNodes inversion
     // (actually because fucking P2P code calls everything with cs_main already locked).
     // Instead we pass the processing back to ProcessNewBlockThread without cs_mapUDPNodes
     std::unique_lock<std::mutex> lock(block_process_mutex);
-    block_process_queue.emplace_back(block_data);
+    block_process_queue.emplace(block_data);
     lock.unlock();
     block_process_cv.notify_all();
 }
@@ -600,13 +601,14 @@ static void ProcessBlockThread() {
         std::unique_lock<std::mutex> process_lock(block_process_mutex);
         while (block_process_queue.empty() && !block_process_shutdown)
             block_process_cv.wait(process_lock);
+
         if (block_process_shutdown)
             return;
-        // To avoid vector re-allocation we pop_back, so its secretly a stack, shhhhh, dont tell anyone
-        std::pair<std::pair<uint64_t, CService>, std::shared_ptr<PartialBlockData> > process_block = block_process_queue.back();
+
+        auto process_block = block_process_queue.front();
         CService& node = process_block.first.second;
         PartialBlockData& block = *process_block.second;
-        block_process_queue.pop_back();
+        block_process_queue.pop();
         process_lock.unlock();
 
         bool more_work;
