@@ -778,7 +778,7 @@ static void ProcessBlockThread() {
                          * valid */
                         bool ooob_saved = false;
                         if (outoforder_and_valid)
-                            ooob_saved = StoreOoOBlock(Params(), pdecoded_block);
+                            ooob_saved = StoreOoOBlock(Params(), pdecoded_block, force_requested);
 
                         std::lock_guard<std::recursive_mutex> udpNodesLock(cs_mapUDPNodes);
 
