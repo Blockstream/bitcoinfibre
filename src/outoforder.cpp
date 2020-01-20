@@ -50,7 +50,7 @@ static CDBWrapper* GetOoOBlockDB() EXCLUSIVE_LOCKS_REQUIRED(cs_ooob)
     return &ooob_db;
 }
 
-bool StoreOoOBlock(const CChainParams& chainparams, const std::shared_ptr<const CBlock> pblock, const bool force)
+bool StoreOoOBlock(const CChainParams& chainparams, const std::shared_ptr<const CBlock> pblock, const bool force, const int in_height)
 {
     LOCK(cs_ooob);
     LOCK(cs_main);
@@ -66,8 +66,8 @@ bool StoreOoOBlock(const CChainParams& chainparams, const std::shared_ptr<const 
 
     // Figure out the block's height from BIP34
     const Consensus::Params& consensusParams = chainparams.GetConsensus();
-    const int height = ExtractHeightFromBlock(consensusParams, pblock);
-    if (height < consensusParams.BIP34Height) return false;  // nonsensical
+    const int height = (in_height == -1) ? ExtractHeightFromBlock(consensusParams, pblock) : in_height;
+    if (height == -1 || (!force && height < consensusParams.BIP34Height)) return false;  // nonsensical
 
     // Don't save blocks too far in the future, to prevent a DoS on pruning
     if (!force && (height > int(::ChainActive().Height() + MIN_BLOCKS_TO_KEEP))) return false;
