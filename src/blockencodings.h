@@ -152,6 +152,7 @@ private:
     // CBlockHeadersAnsShortTxIDs is used in the normal bitcoin peer protocol as
     // well, where transactions are not compressed.
     friend class PartiallyDownloadedChunkBlock;
+    int height = -1; // Block height - for OOOB storage of pre-BIP34 blocks
 public:
 
     codec_version_t codec_ver() const { return codec_version; }
@@ -161,6 +162,8 @@ public:
 
     // Dummy for deserialization
     CBlockHeaderAndLengthShortTxIDs() {}
+
+    void setBlockHeight(int h) { height = h; }
 
     // Fills a map from offset within a FEC-coded block to the tx index in the block
     // Returns false if this object is invalid (txlens.size() != shortxids.size())
@@ -172,6 +175,7 @@ public:
     template <typename Stream, typename Operation>
     inline void SerializationOp(Stream& s, Operation ser_action) {
         READWRITE(*reinterpret_cast<std::uint8_t*>(&codec_version));
+        READWRITE(height);
 
         READWRITE(*(CBlockHeaderAndShortTxIDs*)this);
         if (ser_action.ForRead()) {
@@ -212,8 +216,9 @@ private:
     bool block_finalized = false;
     std::shared_ptr<CBlock> decoded_block;
 
-    // this is initialied to what we read off the network in InitData()
+    // this is initialized to what we read off the network in InitData()
     codec_version_t codec_version = codec_version_t::default_version;
+    int height = -1; // either -1 or the block height advertised by the peer
 
     // Things used in the iterative fill-from-mempool:
     std::map<size_t, size_t>::iterator fill_coding_index_offsets_it;
@@ -247,6 +252,8 @@ public:
     // but can happen after MarkChunkAvailable
     unsigned char* GetChunk(size_t chunk);
     void MarkChunkAvailable(size_t chunk);
+
+    int getBlockHeight() { return height; }
 };
 
 #endif // BITCOIN_BLOCKENCODINGS_H

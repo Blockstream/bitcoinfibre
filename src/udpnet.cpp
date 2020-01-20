@@ -1201,7 +1201,7 @@ static void MulticastBackfillThread(const CService& mcastNode,
         CBlock block;
         assert(ReadBlockFromDisk(block, lastBlock, Params().GetConsensus()));
         std::vector<UDPMessage> msgs;
-        UDPFillMessagesFromBlock(block, msgs);
+        UDPFillMessagesFromBlock(block, msgs, height);
 
         LogPrint(BCLog::UDPNET, "UDP: Multicast Tx %lu-%lu - send block %s - height %d - %d chunks\n",
                  info->physical_idx, info->logical_idx,
