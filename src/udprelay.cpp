@@ -754,8 +754,6 @@ static void ProcessBlockThread() {
                     if (fBench)
                         process_start = std::chrono::steady_clock::now();
 
-                    const bool multicast_rx_node = IsMulticastRxNode(node);
-
                     bool fNewBlock;
                     if (!ProcessNewBlock(Params(), pdecoded_block, false, &fNewBlock)) {
                         bool have_prev, outoforder_and_valid;
@@ -771,10 +769,9 @@ static void ProcessBlockThread() {
                         LogPrintf("UDP: Failed to decode block %s\n", decoded_block.GetHash().ToString());
 
                         /* Only save out-of-order blocks that are minimally
-                         * valid and that were received through a one-way
-                         * multicast service */
+                         * valid */
                         bool ooob_saved = false;
-                        if (multicast_rx_node && outoforder_and_valid)
+                        if (outoforder_and_valid)
                             ooob_saved = StoreOoOBlock(Params(), pdecoded_block);
 
                         std::lock_guard<std::recursive_mutex> udpNodesLock(cs_mapUDPNodes);
