@@ -1081,15 +1081,15 @@ static void MulticastBackfillThread(const CService& mcastNode,
     std::chrono::steady_clock::time_point last_tx_time = std::chrono::steady_clock::now();
     std::chrono::steady_clock::time_point t_cycle_start = last_tx_time;
 
+    auto it = mapTxQueues.find(info->group);
+    assert(it != mapTxQueues.end());
+    PerGroupMessageQueue& queue = it->second;
+
     /* The txn transmission quota is based on the elapsed interval since
      * last time txns were sent, which is the "txn quota of seconds". */
     double txn_quota_sec = 0;
 
     while (!send_messages_break) {
-        auto it = mapTxQueues.find(info->group);
-        assert(it != mapTxQueues.end());
-        PerGroupMessageQueue& queue = it->second;
-
         while (!send_messages_break && queue.buffs[2].nextUndefinedMessage != queue.buffs[2].nextPendingMessage)
             std::this_thread::sleep_for(std::chrono::milliseconds(5));
 
@@ -1105,9 +1105,9 @@ static void MulticastBackfillThread(const CService& mcastNode,
                 height = chain_height - backfill_depth + 1;
             else if (height > chain_height) {
                 if (backfill_depth == 0)
-	                height = 0;
+                    height = 0;
                 else
-	                height = chain_height - backfill_depth + 1;
+                    height = chain_height - backfill_depth + 1;
                 wrapped_around = true;
             }
 
