@@ -903,11 +903,16 @@ static void timer_func(evutil_socket_t fd, short event, void* arg) {
 }
 
 static inline void SendMessage(const UDPMessage& msg, const unsigned int length, PerGroupMessageQueue& queue, PendingMessagesBuff& buff, const CService& service, const uint64_t magic) {
+    while (!send_messages_break &&
+           buff.nextPendingMessage == ((buff.nextUndefinedMessage + 1) % PENDING_MESSAGES_BUFF_SIZE)) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+
+    if (send_messages_break) return;
+
     std::unique_lock<std::mutex> lock(send_messages_mutex);
     const uint16_t next_undefined_message_cache = buff.nextUndefinedMessage;
     const uint16_t next_pending_message_cache = buff.nextPendingMessage;
-    if (next_pending_message_cache == (next_undefined_message_cache + 1) % PENDING_MESSAGES_BUFF_SIZE)
-        return;
 
     std::tuple<CService, UDPMessage, unsigned int, uint64_t>& new_msg = buff.messagesPendingRingBuff[next_undefined_message_cache];
     std::get<0>(new_msg) = service;
@@ -1102,9 +1107,6 @@ static void MulticastBackfillThread(const CService& mcastNode,
     double txn_quota_sec = 0;
 
     while (!send_messages_break) {
-        while (!send_messages_break && queue.buffs[2].nextUndefinedMessage != queue.buffs[2].nextPendingMessage)
-            std::this_thread::sleep_for(std::chrono::milliseconds(5));
-
         /* Define height of target block (to be transmitted) */
         int height;
         bool wrapped_around = false;
