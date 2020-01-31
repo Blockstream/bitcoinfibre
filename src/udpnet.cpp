@@ -713,7 +713,7 @@ static void read_socket_func(evutil_socket_t fd, short event, void* arg) {
         if (msg_type_masked == MSG_TYPE_BLOCK_HEADER ||
             msg_type_masked == MSG_TYPE_BLOCK_CONTENTS ||
             msg_type_masked == MSG_TYPE_TX_CONTENTS) {
-            if (!HandleBlockTxMessage(msg, sizeof(UDPMessage) - 1, it->first, it->second, start))
+            if (!HandleBlockTxMessage(msg, sizeof(UDPMessage) - 1, it->first, it->second, start, fd))
                 send_and_disconnect(it);
             else {
                 if (LogAcceptCategory(BCLog::UDPMCAST)) {
@@ -775,7 +775,7 @@ static void read_socket_func(evutil_socket_t fd, short event, void* arg) {
         return;
 
     if (msg_type_masked == MSG_TYPE_BLOCK_HEADER || msg_type_masked == MSG_TYPE_BLOCK_CONTENTS) {
-        if (!HandleBlockTxMessage(msg, res, it->first, it->second, start)) {
+        if (!HandleBlockTxMessage(msg, res, it->first, it->second, start, fd)) {
             send_and_disconnect(it);
             return;
         }
