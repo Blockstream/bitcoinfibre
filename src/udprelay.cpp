@@ -263,13 +263,13 @@ static void RelayChunks(const uint256& blockhash, UDPMessageType type, const std
             LogPrintf("UDP: %s: Finished queuing of %lu header chunks for tx - took %lf ms\n",
                       __func__, (msg_chunks + fec.fec_chunks),
                       to_millis_double(t_coded - t_start));
-            LogPrintf("UDP: %s:     %lu Uncoded chunks took %lf ms\n", __func__,
+            LogPrintf("UDP: %s:     %lu Uncoded header chunks took %lf ms\n", __func__,
                       msg_chunks, to_millis_double(t_uncoded - t_start));
-            LogPrintf("UDP: %s:     %lu Coded chunks took %lf ms\n", __func__,
+            LogPrintf("UDP: %s:     %lu Coded header chunks took %lf ms\n", __func__,
                       fec.fec_chunks, to_millis_double(t_coded - t_uncoded));
         } else {
             LogPrintf("UDP: %s: Finished queuing of %lu FEC-coded block chunks for tx - took %lf ms\n",
-                      __func__, (msg_chunks + fec.fec_chunks),
+                      __func__, (fec.fec_chunks),
                       to_millis_double(t_coded - t_start));
         }
     }
