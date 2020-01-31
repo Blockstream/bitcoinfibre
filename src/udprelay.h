@@ -17,7 +17,7 @@ void BlockRecvInit();
 
 void BlockRecvShutdown();
 
-bool HandleBlockTxMessage(UDPMessage& msg, size_t length, const CService& node, UDPConnectionState& state, const std::chrono::steady_clock::time_point& packet_process_start);
+bool HandleBlockTxMessage(UDPMessage& msg, size_t length, const CService& node, UDPConnectionState& state, const std::chrono::steady_clock::time_point& packet_process_start, const int sockfd);
 
 void ProcessDownloadTimerEvents();
 
