@@ -1070,6 +1070,9 @@ bool HandleBlockTxMessage(UDPMessage& msg, size_t length, const CService& node, 
     if ((msg.header.msg_type & UDP_MSG_TYPE_TYPE_MASK) == MSG_TYPE_TX_CONTENTS)
         return HandleTx(msg, length, node, state);
 
+    const bool is_blk_header_chunk  = (msg.header.msg_type & UDP_MSG_TYPE_TYPE_MASK) == MSG_TYPE_BLOCK_HEADER;
+    const bool is_blk_content_chunk = (msg.header.msg_type & UDP_MSG_TYPE_TYPE_MASK) == MSG_TYPE_BLOCK_CONTENTS;
+
     const uint64_t hash_prefix = msg.msg.block.hash_prefix; // Need a reference in a few places, but its packed, so we can't have one directly
     CService peer              = state.connection.fTrusted ? TRUSTED_PEER_DUMMY : node;
     const std::pair<uint64_t, CService> hash_peer_pair = std::make_pair(hash_prefix, peer);
@@ -1087,7 +1090,7 @@ bool HandleBlockTxMessage(UDPMessage& msg, size_t length, const CService& node, 
         mapChunkCountIt = mapChunkCount.emplace(std::make_pair(hash_prefix, sockfd),
                                                 BlockChunkCount{0, 0, 0, 0, 0, 0, t_chunk_rcvd, t_chunk_rcvd, t_chunk_rcvd}).first;
 
-        if ((msg.header.msg_type & UDP_MSG_TYPE_TYPE_MASK) == MSG_TYPE_BLOCK_HEADER)
+        if (is_blk_header_chunk)
             mapChunkCountIt->second.header_rcvd++;
         else
             mapChunkCountIt->second.data_rcvd++;
@@ -1103,7 +1106,7 @@ bool HandleBlockTxMessage(UDPMessage& msg, size_t length, const CService& node, 
     std::map<uint64_t, ChunksAvailableSet>::iterator chunks_avail_it = state.chunks_avail.find(msg.msg.block.hash_prefix);
 
     if (chunks_avail_it == state.chunks_avail.end()) {
-        if ((msg.header.msg_type & UDP_MSG_TYPE_TYPE_MASK) == MSG_TYPE_BLOCK_HEADER) {
+        if (is_blk_header_chunk) {
             if (state.chunks_avail.size() > 1 && !state.connection.fTrusted) {
                 // Non-trusted nodes can only be forwarding up to 2 blocks at a time
                 assert(state.chunks_avail.size() == 2);
@@ -1137,7 +1140,7 @@ bool HandleBlockTxMessage(UDPMessage& msg, size_t length, const CService& node, 
         // SetHeaderDataAndFECChunkCount call, we will miss the first block packet we
         // receive and re-send that in UDPRelayBlock...this is OK because we'll save
         // more by doing this before the during-process relay below
-        if ((msg.header.msg_type & UDP_MSG_TYPE_TYPE_MASK) == MSG_TYPE_BLOCK_HEADER)
+        if (is_blk_header_chunk)
             chunks_avail_it->second.SetHeaderChunkAvailable(msg.msg.block.chunk_id);
         else {
             if (!chunks_avail_it->second.IsBlockDataChunkCountSet())
@@ -1149,7 +1152,7 @@ bool HandleBlockTxMessage(UDPMessage& msg, size_t length, const CService& node, 
     bool new_block = false;
     auto it = mapPartialBlocks.find(hash_peer_pair);
     if (it == mapPartialBlocks.end()) {
-        if ((msg.header.msg_type & UDP_MSG_TYPE_TYPE_MASK) == MSG_TYPE_BLOCK_HEADER)
+        if (is_blk_header_chunk)
             it = mapPartialBlocks.insert(std::make_pair(std::make_pair(hash_prefix, state.connection.fTrusted ? TRUSTED_PEER_DUMMY : node), std::make_shared<PartialBlockData>(node, msg, packet_process_start))).first;
         else // Probably stale (ie we just finished reconstructing)
             return true;
@@ -1164,7 +1167,7 @@ bool HandleBlockTxMessage(UDPMessage& msg, size_t length, const CService& node, 
     std::unique_lock<std::mutex> block_lock(block.state_mutex, std::try_to_lock);
 
     if (block.is_decodeable || block.currentlyProcessing || block.is_header_processing ||
-        ((msg.header.msg_type & UDP_MSG_TYPE_TYPE_MASK) == MSG_TYPE_BLOCK_HEADER && !block.in_header)) {
+        (is_blk_header_chunk && !block.in_header)) {
         // It takes quite some time to decode the block.
         // Further, its good to check some things like if this packet is for
         // header after we've gotten the header to avoid taking the block_lock
@@ -1202,7 +1205,7 @@ bool HandleBlockTxMessage(UDPMessage& msg, size_t length, const CService& node, 
             block.perNodeChunkCount.insert(std::make_pair(node, std::make_pair(0, 0))).first;
     perNodeChunkCountIt->second.second++;
 
-    if ((msg.header.msg_type & UDP_MSG_TYPE_TYPE_MASK) == MSG_TYPE_BLOCK_HEADER && !block.in_header) {
+    if (is_blk_header_chunk && !block.in_header) {
         if (state.connection.fTrusted) {
             // Keep forwarding on header packets to our peers to make sure they
             // get the whole header.
@@ -1214,13 +1217,13 @@ bool HandleBlockTxMessage(UDPMessage& msg, size_t length, const CService& node, 
         }
         return true;
     }
-    if ((msg.header.msg_type & UDP_MSG_TYPE_TYPE_MASK) == MSG_TYPE_BLOCK_CONTENTS && block.in_header) {
+    if (is_blk_content_chunk && block.in_header) {
         // Either we're getting packets out of order and wasting this packet,
         // or we didnt get enough header and will fail download anyway
         return true;
     }
 
-    if ((msg.header.msg_type & UDP_MSG_TYPE_TYPE_MASK) == MSG_TYPE_BLOCK_CONTENTS && !block.initialized) {
+    if (is_blk_content_chunk && !block.initialized) {
         if (!block.Init(msg)) {
             LogPrintf("UDP: Got block contents that couldn't match header for block id %lu\n", msg.msg.block.hash_prefix);
             return true;
@@ -1237,8 +1240,7 @@ bool HandleBlockTxMessage(UDPMessage& msg, size_t length, const CService& node, 
     if (block.decoder.HasChunk(msg.msg.block.chunk_id))
         return true;
 
-    if ((msg.header.msg_type & UDP_MSG_TYPE_TYPE_MASK) == MSG_TYPE_BLOCK_CONTENTS &&
-            msg.msg.block.chunk_id < block.block_data.GetChunkCount()) {
+    if (is_blk_content_chunk && msg.msg.block.chunk_id < block.block_data.GetChunkCount()) {
         assert(!block.block_data.IsChunkAvailable(msg.msg.block.chunk_id)); // HasChunk should have returned false, then
         memcpy(block.block_data.GetChunk(msg.msg.block.chunk_id), msg.msg.block.data, sizeof(UDPBlockMessage::data));
         block.block_data.MarkChunkAvailable(msg.msg.block.chunk_id);
@@ -1258,7 +1260,7 @@ bool HandleBlockTxMessage(UDPMessage& msg, size_t length, const CService& node, 
     // Keep track of chunks that are actually used for decoding
     perNodeChunkCountIt->second.first++;
     if (debugFec) {
-        if ((msg.header.msg_type & UDP_MSG_TYPE_TYPE_MASK) == MSG_TYPE_BLOCK_HEADER)
+        if (is_blk_header_chunk)
             mapChunkCountIt->second.header_used++;
         else
             mapChunkCountIt->second.data_used++;
