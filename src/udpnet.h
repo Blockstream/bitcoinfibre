@@ -113,7 +113,8 @@ struct PartialBlockData {
     const CService nodeHeaderRecvd;
 
     std::atomic_bool in_header; // Indicates we are currently downloading header (or block txn)
-    std::atomic_bool initialized; // Indicates Init has been called in current in_header state
+    std::atomic_bool blk_initialized; // Indicates Init has been called with a block contents message
+    std::atomic_bool header_initialized; // Indicates Init has been called with a block header message
     std::atomic_bool is_decodeable; // Indicates decoder.DecodeReady() && !in_header
     std::atomic_bool is_header_processing; // Indicates in_header && !initialized but header is ready
     std::atomic_bool packet_awaiting_lock; // Indicates there is a packet ready to process that needs state_mutex
@@ -124,9 +125,11 @@ struct PartialBlockData {
     // perNodeChunkCount should be treated read-only.
     std::atomic_bool currentlyProcessing;
 
-    uint32_t obj_length; // FEC-coded length of currently-being-download object
-    std::vector<unsigned char> data_recvd; // Used for header data chunks, not FEC or block chunks
-    FECDecoder decoder; // Note that this may have been std::move()d if (currentlyProcessing)
+    uint32_t blk_len; // length of chunk-coded block being downloaded
+    uint32_t header_len; // length of CBlockHeaderAndLengthShortTxIDs (aka "block header") being downloaded
+    std::vector<unsigned char> header_data; // Serialized block header (CBlockHeaderAndLengthShortTxIDs)
+    FECDecoder header_decoder; // Note that this may have been std::move()d if (currentlyProcessing)
+    FECDecoder body_decoder; // Note that this may have been std::move()d if (currentlyProcessing)
     PartiallyDownloadedChunkBlock block_data;
 
     // nodes with chunks_avail set -> packets that were useful, packets provided

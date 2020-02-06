@@ -370,7 +370,7 @@ void UDPRelayBlock(const CBlock& block) {
                     // was initialized and fed FEC/data, meaning even if no FEC
                     // chunks were used to reconstruct the FECDecoder object is
                     // fully primed to be converted to a FECEncoder!
-                    block_fecer.emplace(std::move(partial_block_ptr->decoder), *chunk_coded_block, data_fec_chunks);
+                    block_fecer.emplace(std::move(partial_block_ptr->body_decoder), *chunk_coded_block, data_fec_chunks);
                 } else {
                     block_fecer.emplace(*chunk_coded_block, data_fec_chunks);
                 }
@@ -634,10 +634,10 @@ static void ProcessBlockThread() {
                 if (fBench)
                     decode_start = std::chrono::steady_clock::now();
 
-                for (uint32_t i = 0; i < DIV_CEIL(block.obj_length, sizeof(UDPBlockMessage::data)); i++) {
-                    const void* data_ptr = block.decoder.GetDataPtr(i);
+                for (uint32_t i = 0; i < DIV_CEIL(block.header_len, sizeof(UDPBlockMessage::data)); i++) {
+                    const void* data_ptr = block.header_decoder.GetDataPtr(i);
                     assert(data_ptr);
-                    memcpy(&block.data_recvd[i * sizeof(UDPBlockMessage::data)], data_ptr, sizeof(UDPBlockMessage::data));
+                    memcpy(&block.header_data[i * sizeof(UDPBlockMessage::data)], data_ptr, sizeof(UDPBlockMessage::data));
                 }
 
                 std::chrono::steady_clock::time_point data_copied;
@@ -646,7 +646,7 @@ static void ProcessBlockThread() {
 
                 CBlockHeaderAndLengthShortTxIDs header;
                 try {
-                    VectorInputStream stream(&block.data_recvd, SER_NETWORK, PROTOCOL_VERSION);
+                    VectorInputStream stream(&block.header_data, SER_NETWORK, PROTOCOL_VERSION);
                     stream >> header;
                 } catch (std::ios_base::failure& e) {
                     lock.unlock();
@@ -816,7 +816,7 @@ static void ProcessBlockThread() {
                     setBlocksReceived.insert(process_block.first);
                     RemovePartialBlocks(process_block.first.first); // Ensure we remove even if we didnt UDPRelayBlock()
                 }
-            } else if (!block.in_header && block.initialized) {
+            } else if (!block.in_header && block.blk_initialized) {
                 uint32_t mempool_provided_chunks = 0;
                 uint32_t total_chunk_count = 0;
                 uint256 blockHash;
@@ -849,14 +849,14 @@ static void ProcessBlockThread() {
                         break;
                     } else {
                         while (firstChunkProcessed < total_chunk_count && block.block_data.IsChunkAvailable(firstChunkProcessed)) {
-                            if (!block.decoder.HasChunk(firstChunkProcessed)) {
-                                block.decoder.ProvideChunk(block.block_data.GetChunk(firstChunkProcessed), firstChunkProcessed);
+                            if (!block.body_decoder.HasChunk(firstChunkProcessed)) {
+                                block.body_decoder.ProvideChunk(block.block_data.GetChunk(firstChunkProcessed), firstChunkProcessed);
                                 mempool_provided_chunks++;
                             }
                             firstChunkProcessed++;
                         }
 
-                        if (block.decoder.DecodeReady() || block.block_data.IsBlockAvailable()) {
+                        if (block.body_decoder.DecodeReady() || block.block_data.IsBlockAvailable()) {
                             block.is_decodeable = true;
                             more_work = true;
                             break;
@@ -894,38 +894,44 @@ static std::vector<std::pair<uint256, CTransactionRef>> udpnet_dummy_extra_txn;
 ReadStatus PartialBlockData::ProvideHeaderData(const CBlockHeaderAndLengthShortTxIDs& header) {
     assert(in_header);
     in_header = false;
-    initialized = false;
     return block_data.InitData(header, udpnet_dummy_extra_txn);
 }
 
 bool PartialBlockData::Init(const UDPMessage& msg) {
     assert((msg.header.msg_type & UDP_MSG_TYPE_TYPE_MASK) == MSG_TYPE_BLOCK_HEADER || (msg.header.msg_type & UDP_MSG_TYPE_TYPE_MASK) == MSG_TYPE_BLOCK_CONTENTS);
-    obj_length  = msg.msg.block.obj_length;
+    const uint32_t obj_length  = msg.msg.block.obj_length;
     if (obj_length > MAX_BLOCK_SERIALIZED_SIZE * MAX_CHUNK_CODED_BLOCK_SIZE_FACTOR)
         return false;
-    if ((msg.header.msg_type & UDP_MSG_TYPE_TYPE_MASK) == MSG_TYPE_BLOCK_HEADER)
-        data_recvd.resize(DIV_CEIL(obj_length, sizeof(UDPBlockMessage::data)) * sizeof(UDPBlockMessage::data));
-    decoder = FECDecoder(obj_length);
-    initialized = true;
+    if ((msg.header.msg_type & UDP_MSG_TYPE_TYPE_MASK) == MSG_TYPE_BLOCK_HEADER) {
+        header_data.resize(DIV_CEIL(obj_length, sizeof(UDPBlockMessage::data)) * sizeof(UDPBlockMessage::data));
+        header_decoder = FECDecoder(obj_length);
+        header_len = obj_length;
+        header_initialized = true;
+    } else {
+        body_decoder = FECDecoder(obj_length);
+        blk_len = obj_length;
+        blk_initialized = true;
+    }
     return true;
 }
 
 PartialBlockData::PartialBlockData(const CService& node, const UDPMessage& msg, const std::chrono::steady_clock::time_point& packet_recv) :
         timeHeaderRecvd(packet_recv), nodeHeaderRecvd(node),
-        in_header(true), initialized(false),
+        in_header(true), blk_initialized(false), header_initialized(false),
         is_decodeable(false), is_header_processing(false),
-        currentlyProcessing(false), block_data(&mempool)
+        packet_awaiting_lock(false), currentlyProcessing(false),
+        blk_len(0), header_len(0), block_data(&mempool)
     {
        bool const ret = Init(msg);
        assert(ret);
     }
 
 void PartialBlockData::ReconstructBlockFromDecoder() {
-    assert(decoder.DecodeReady());
+    assert(body_decoder.DecodeReady());
 
-    for (uint32_t i = 0; i < DIV_CEIL(obj_length, sizeof(UDPBlockMessage::data)); i++) {
+    for (uint32_t i = 0; i < DIV_CEIL(blk_len, sizeof(UDPBlockMessage::data)); i++) {
         if (!block_data.IsChunkAvailable(i)) {
-            const void* data_ptr = decoder.GetDataPtr(i);
+            const void* data_ptr = body_decoder.GetDataPtr(i);
             assert(data_ptr);
             memcpy(block_data.GetChunk(i), data_ptr, sizeof(UDPBlockMessage::data));
             block_data.MarkChunkAvailable(i);
@@ -1127,7 +1133,7 @@ bool HandleBlockTxMessage(UDPMessage& msg, size_t length, const CService& node, 
                     mapPartialBlocks.erase(second_partial_block_it);
                 }
             }
-            // Once we add to chunks_avail, we MUST add to mapPartialBlocks->second->perNodeChunkCount, or we will leak memory
+            // Once we add to chunks_avail, we MUST add to PartialBlockData.perNodeChunkCount, or we will leak memory
             bool they_have_block = msg.header.msg_type & HAVE_BLOCK;
             size_t header_data_chunks = DIV_CEIL(msg.msg.block.obj_length, sizeof(UDPBlockMessage::data));
             chunks_avail_it = state.chunks_avail.emplace(std::piecewise_construct,
@@ -1171,18 +1177,27 @@ bool HandleBlockTxMessage(UDPMessage& msg, size_t length, const CService& node, 
 
     std::unique_lock<std::mutex> block_lock(block.state_mutex, std::try_to_lock);
 
-    if (block.is_decodeable || block.currentlyProcessing || block.is_header_processing ||
-        (is_blk_header_chunk && !block.in_header)) {
-        // It takes quite some time to decode the block.
-        // Further, its good to check some things like if this packet is for
-        // header after we've gotten the header to avoid taking the block_lock
-        // and possibly interrupting background fill.
-        // Thus, while the block is processing in ProcessNewBlockThread, we
-        // continue forwarding chunks we received from trusted peers
-        // Note that we will also drop block body packets here while processing
-        // the header, sadly isnt much we can do about that (unless we were to
-        // queue them, but most of the packets we'll drop here are header FEC
-        // anyway, so not much use in doing so).
+    if ((block.is_decodeable || block.currentlyProcessing) || // condition 1
+        (is_blk_header_chunk && block.is_header_processing) || // condition 2
+        (is_blk_header_chunk && !block.in_header)) { // condition 3
+        /*
+         * It seems this chunk isn't necessary, so it will be dropped. Yet, the
+         * fact that we are here indicates that the block has not been processed
+         * yet (setBlocksRelayed and setBlocksReceived don't have the block
+         * yet). Thus, while the block is processing in ProcessNewBlockThread,
+         * we continue forwarding chunks received from trusted peers.
+         *
+         * Note the conditions that lead to dropping:
+         *
+         * - Condition 1: We are already processing or ready to decode and
+         *   process the block, so block content chunks are no longer necessary.
+         *
+         * - Condition 2: We know the header is already decodable, so further
+         *   header FEC chunks are no longer necessary.
+         *
+         * - Condition 3: The header has already been decoded (ProvideHeaderData
+         *   was called), so header chunks are no longer useful for decoding.
+         */
         if (state.connection.fTrusted) {
             BlockMsgHToLE(msg);
             if (block.is_decodeable || block.currentlyProcessing)
@@ -1202,14 +1217,17 @@ bool HandleBlockTxMessage(UDPMessage& msg, size_t length, const CService& node, 
         block.packet_awaiting_lock = false;
     }
 
-    // is_decodeable || is_headerProcessing must come before any chunk-accessors in block.block_data
-    if (block.is_decodeable || block.currentlyProcessing || block.is_header_processing)
-        return true;
-
     auto perNodeChunkCountIt =
-            block.perNodeChunkCount.insert(std::make_pair(node, std::make_pair(0, 0))).first;
+        block.perNodeChunkCount.insert(std::make_pair(node, std::make_pair(0, 0))).first;
     perNodeChunkCountIt->second.second++;
 
+    // Check one more time after locking. Maybe the state changed inside
+    // ProcessBlockThread.
+    if (block.is_decodeable || block.currentlyProcessing)
+        return true;
+
+    // The header has already been decoded (ProvideHeaderData was called), so
+    // header chunks are no longer useful for decoding
     if (is_blk_header_chunk && !block.in_header) {
         if (state.connection.fTrusted) {
             // Keep forwarding on header packets to our peers to make sure they
@@ -1222,37 +1240,59 @@ bool HandleBlockTxMessage(UDPMessage& msg, size_t length, const CService& node, 
         }
         return true;
     }
-    if (is_blk_content_chunk && block.in_header) {
-        // Either we're getting packets out of order and wasting this packet,
-        // or we didnt get enough header and will fail download anyway
+
+    if (is_blk_content_chunk && !block.header_initialized) {
+        // We're getting block content packets before ever receiving a header
+        // packet. This isn't expected.
         return true;
     }
 
-    if (is_blk_content_chunk && !block.initialized) {
+    if (is_blk_content_chunk && !block.blk_initialized) {
         if (!block.Init(msg)) {
             LogPrintf("UDP: Got block contents that couldn't match header for block id %lu\n", msg.msg.block.hash_prefix);
             return true;
         }
         DoBackgroundBlockProcessing(*it); // Kick off mempool scan (waits on us to unlock block_lock)
+        /* The scan will work as long as !is_header_processing &&
+         * !block.in_header && block.blk_initialized when the PartialBlockData
+         * queued in block_process_queue is finally processed. Otherwise, it
+         * won't start. */
     }
 
-    if (msg.msg.block.obj_length  != block.obj_length) {
+    FECDecoder& decoder = is_blk_header_chunk ? block.header_decoder : block.body_decoder;
+
+    if ((is_blk_header_chunk && (msg.msg.block.obj_length != block.header_len)) ||
+        (is_blk_content_chunk && (msg.msg.block.obj_length != block.blk_len))) {
         // Duplicate hash_prefix or bad trusted peer
         LogPrintf("UDP: Got wrong obj_length/chunsk_sent for block id %lu from peer %s! Check your trusted peers are behaving well\n", msg.msg.block.hash_prefix, node.ToString());
         return true;
     }
 
-    if (block.decoder.HasChunk(msg.msg.block.chunk_id))
+    if (decoder.HasChunk(msg.msg.block.chunk_id)) {
+        /* We are probably receiving a repeated chunk while the block is not
+         * decodable yet. This is typical (and acceptable) when receiving from
+         * multiple peers, especially for the initial uncoded chunks that are
+         * sent by all peers through SendLimitedDataChunks. */
         return true;
+    }
 
-    if (is_blk_content_chunk && msg.msg.block.chunk_id < block.block_data.GetChunkCount()) {
+    if (is_blk_content_chunk && !block.in_header && msg.msg.block.chunk_id < block.block_data.GetChunkCount()) {
+        /* If in_header is true, ProvideHeaderData has not be called yet, which
+         * means PartiallyDownloadedChunkBlock::InitData also has not been
+         * called yet and, hence, chunksAvailable has not been resized. So
+         * GetChunkCount() will fail. Thus, we check in_header before calling
+         * GetChunkCount(). Also, this means we can't mark an uncoded chunk as
+         * available yet. We can still feed it to the FEC decoder, though. And
+         * FEC-coded chunks (chunk ids exceeding GetChunkCount()) are not
+         * affected by this, as they are not marked as available.
+         */
         assert(!block.block_data.IsChunkAvailable(msg.msg.block.chunk_id)); // HasChunk should have returned false, then
         memcpy(block.block_data.GetChunk(msg.msg.block.chunk_id), msg.msg.block.data, sizeof(UDPBlockMessage::data));
         block.block_data.MarkChunkAvailable(msg.msg.block.chunk_id);
     }
-    //TODO: Also pre-copy header data into data_recvd here, if its a non-FEC chunk
+    //TODO: Also pre-copy header data into header_data here, if its a non-FEC chunk
 
-    if (!block.decoder.ProvideChunk(msg.msg.block.data, msg.msg.block.chunk_id)) {
+    if (!decoder.ProvideChunk(msg.msg.block.data, msg.msg.block.chunk_id)) {
         // Bad chunk id, maybe FEC is upset? Don't disconnect in case it can be random
         LogPrintf("UDP: FEC chunk decode failed for chunk %d from block %lu from %s\n", msg.msg.block.chunk_id, msg.msg.block.hash_prefix, node.ToString());
         return true;
@@ -1279,8 +1319,8 @@ bool HandleBlockTxMessage(UDPMessage& msg, size_t length, const CService& node, 
         SendMessageToAllNodes(msg, length, true, hash_prefix);
     }
 
-    if (block.decoder.DecodeReady()) {
-        if (block.in_header)
+    if (decoder.DecodeReady()) {
+        if (is_blk_header_chunk)
             block.is_header_processing = true;
         else
             block.is_decodeable = true;
