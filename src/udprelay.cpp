@@ -119,6 +119,9 @@ static void RelayUncodedChunks(UDPMessage& msg, const std::vector<unsigned char>
     bool high_prio = high_prio_chunks_per_peer;
 
     for (uint16_t i = 0; i < msg_chunks && i < chunk_limit; i++) {
+        if (high_prio && i >= high_prio_chunks_per_peer)
+            high_prio = false;
+
         /* Send the same uncoded chunk to all peers */
         CopyMessageData(msg, data, msg_chunks, i);
 
@@ -135,9 +138,6 @@ static void RelayUncodedChunks(UDPMessage& msg, const std::vector<unsigned char>
                             multicast_checksum_magic, node.second.group);
             }
         }
-
-        if (high_prio && i >= high_prio_chunks_per_peer)
-            high_prio = false;
     }
 }
 
@@ -177,6 +177,9 @@ static void RelayFECedChunks(UDPMessage& msg, DataFECer& fec, const size_t high_
 
     bool high_prio = high_prio_chunks_per_peer;
     for (size_t i = 0; i < fec.fec_chunks; i++) {
+        if (high_prio && (i >= high_prio_chunks_per_peer))
+            high_prio = false;
+
         /* Send over unicast services */
         for (auto it = mapUDPNodes.begin(); it != mapUDPNodes.end(); it++) {
             CopyFECData(msg, fec, i, true /*regenerate chunk on index i*/);
@@ -194,9 +197,6 @@ static void RelayFECedChunks(UDPMessage& msg, DataFECer& fec, const size_t high_
                             multicast_checksum_magic, node.second.group);
             }
         }
-
-        if (high_prio && (i >= high_prio_chunks_per_peer))
-            high_prio = false;
     }
 }
 
