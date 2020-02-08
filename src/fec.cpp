@@ -224,11 +224,11 @@ FECEncoder::~FECEncoder() {
  * Build FEC chunk
  *
  * Depending on the total number of chunks (of FEC_CHUNK_SIZE bytes) composing
- * the data, one of the following coding schemes will be used:
+ * the original data object, one of the following coding schemes will be used:
  *
- * 1) Repetition coding: if data has a single chunk
- * 2) cm256: if data has number of chunks up to CM256_MAX_CHUNKS
- * 3) wirehair: if data has number of chunks greater than CM256_MAX_CHUNKS
+ * 1) Repetition coding: if object fits in a single chunk
+ * 2) cm256: if object has number of chunks up to CM256_MAX_CHUNKS
+ * 3) wirehair: if object has number of chunks greater than CM256_MAX_CHUNKS
  *
  * cm256 is a maximum distance separable (MDS), so it always recovers N original
  * data chunks from N coded chunks. However, it supports up to 256 chunks only,
@@ -254,10 +254,10 @@ bool FECEncoder::BuildChunk(size_t vector_idx, bool overwrite) {
         return true;
 
     size_t data_chunks = DIV_CEIL(data->size(), FEC_CHUNK_SIZE);
-    if (data_chunks < 2) { // For 1-packet data, just send it repeatedly...
+    if (data_chunks < 2) { // When the original data fits in 1 chunk, just send it repeatedly...
         memcpy(&fec_chunks->first[vector_idx], &(*data)[0], data->size());
         memset(((char*)&fec_chunks->first[vector_idx]) + data->size(), 0, FEC_CHUNK_SIZE - data->size());
-        fec_chunks->second[vector_idx] = vector_idx + 1; // chunk_id
+        fec_chunks->second[vector_idx] = vector_idx; // chunk_id
         return true;
     }
 
