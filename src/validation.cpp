@@ -3785,7 +3785,7 @@ bool ProcessNewBlock(const CChainParams& chainparams, const std::shared_ptr<cons
 
     if (do_ooob) {
         // Check if we have any other blocks to process waiting on this one
-        ProcessSuccessorOoOBlocks(chainparams, pblock->GetHash());
+        ProcessSuccessorOoOBlocks(chainparams, pblock->GetHash(), fForceProcessing);
     }
 
     return true;

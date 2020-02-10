@@ -82,7 +82,7 @@ bool StoreOoOBlock(const CChainParams& chainparams, const std::shared_ptr<const 
     return true;
 }
 
-void ProcessSuccessorOoOBlocks(const CChainParams& chainparams, const uint256& prev_block_hash)
+void ProcessSuccessorOoOBlocks(const CChainParams& chainparams, const uint256& prev_block_hash, const bool force)
 {
     std::deque<uint256> queue;
     queue.push_back(prev_block_hash);
@@ -105,7 +105,7 @@ void ProcessSuccessorOoOBlocks(const CChainParams& chainparams, const uint256& p
                 continue;
             }
             LogPrintf("Accepting deferred block %s from out-of-order disk cache\n", block.GetHash().GetHex());
-            ProcessNewBlock(chainparams, pblock, /*force processing=*/false, /*is new block?=*/nullptr, &successor.second, /*do_ooob=*/false);
+            ProcessNewBlock(chainparams, pblock, force, /*is new block?=*/nullptr, &successor.second, /*do_ooob=*/false);
             queue.push_back(pblock->GetHash());
         }
 
