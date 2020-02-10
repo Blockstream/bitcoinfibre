@@ -135,7 +135,7 @@ extern CBlockIndex *pindexBestHeader;
 extern const std::vector<std::string> CHECKLEVEL_DOC;
 
 bool StoreOoOBlock(const CChainParams&, const std::shared_ptr<const CBlock>, bool force, int in_height);
-void ProcessSuccessorOoOBlocks(const CChainParams&, const uint256& prev_block_hash);
+void ProcessSuccessorOoOBlocks(const CChainParams&, const uint256& prev_block_hash, bool force=false);
 void CheckForOoOBlocks(const CChainParams&);
 
 /** Unload database information */
