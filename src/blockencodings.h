@@ -223,6 +223,7 @@ public:
     CBlockHeaderAndLengthShortTxIDs() {}
 
     void setBlockHeight(int h) { height = h; }
+    size_t ShortTxIdCount() const { return shorttxids.size(); }
 
     // Fills a map from offset within a FEC-coded block to the tx index in the block
     // Returns false if this object is invalid (txlens.size() != shortxids.size())

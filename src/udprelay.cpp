@@ -562,7 +562,20 @@ void UDPFillMessagesFromBlock(const CBlock& block, std::vector<UDPMessage>& msgs
      * necessary. Nevertheless, since chunks can be lost along the transport
      * link, 2 chunks of overhead are used. */
 
+    /* Header chunks */
+    msgs.resize(header_fec_chunks);
+    for (size_t i = 0; i < header_fec_chunks; i++) {
+        FillBlockMessageHeader(msgs[i], hash_prefix, MSG_TYPE_BLOCK_HEADER, header_data.size());
+        CopyFECData(msgs[i], header_fecer, i);
+    }
+
     /* Block */
+
+    /* Don't send the chunk-coded block if the block does not have any
+     * transaction other than the coinbase (sent in the block header) */
+    if (headerAndIDs.ShortTxIdCount() == 0)
+        return;
+
     ChunkCodedBlock codedBlock(block, headerAndIDs);
     const std::vector<unsigned char>& chunk_coded_block = codedBlock.GetCodedBlock();
     const size_t block_fec_chunks = DIV_CEIL(chunk_coded_block.size(), FEC_CHUNK_SIZE) + 2;
@@ -572,15 +585,8 @@ void UDPFillMessagesFromBlock(const CBlock& block, std::vector<UDPMessage>& msgs
      * the transport link. */
     DataFECer block_fecer(chunk_coded_block, block_fec_chunks);
 
-    msgs.resize(header_fec_chunks + block_fec_chunks);
-
-    /* Header chunks */
-    for (size_t i = 0; i < header_fec_chunks; i++) {
-        FillBlockMessageHeader(msgs[i], hash_prefix, MSG_TYPE_BLOCK_HEADER, header_data.size());
-        CopyFECData(msgs[i], header_fecer, i);
-    }
-
     /* Block chunks */
+    msgs.resize(header_fec_chunks + block_fec_chunks);
     for (size_t i = 0; i < block_fec_chunks; i++) {
         FillBlockMessageHeader(msgs[i + header_fec_chunks], hash_prefix, MSG_TYPE_BLOCK_CONTENTS, chunk_coded_block.size());
         CopyFECData(msgs[i + header_fec_chunks], block_fecer, i);
