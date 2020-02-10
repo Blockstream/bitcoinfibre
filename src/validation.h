@@ -150,7 +150,7 @@ extern const std::vector<std::string> CHECKLEVEL_DOC;
 
 FlatFilePos SaveBlockToDisk(const CBlock&, int nHeight, const CChainParams&, const FlatFilePos*);
 bool StoreOoOBlock(const CChainParams&, const std::shared_ptr<const CBlock>, bool force, int in_height);
-void ProcessSuccessorOoOBlocks(const CChainParams&, const uint256& prev_block_hash);
+void ProcessSuccessorOoOBlocks(const CChainParams&, const uint256& prev_block_hash, bool force=false);
 void CheckForOoOBlocks(const CChainParams&);
 
 /** Open a block file (blk?????.dat) */
