@@ -1029,23 +1029,23 @@ static void printChunkStats(const uint64_t hash_prefix, const int sockfd,
             double tot_duration = to_millis_double(chunkCountIt->second.t_last -
                                                    chunkCountIt->second.t_first);
 
-            LogPrint(BCLog::FEC, "FEC: Chunk count for block id %lu from socket %d:\n",
+            LogPrint(BCLog::FEC, "FEC chunks: block %20lu, socket %d, ",
                      chunkCountIt->first.first,
                      chunkCountIt->first.second);
-            LogPrint(BCLog::FEC, "    Total chunks:  %4d used / %4d rcvd\n",
+            LogPrint(BCLog::FEC, "Total %4du/%4dr, ",
                      (chunkCountIt->second.data_used +
                       chunkCountIt->second.header_used),
                      (chunkCountIt->second.data_rcvd +
                       chunkCountIt->second.header_rcvd));
-            LogPrint(BCLog::FEC, "    Header chunks: %4d used / %4d rcvd\tDecodable after: %d\n",
+            LogPrint(BCLog::FEC, "Header %4du/%4dr/%4dd, ",
                      chunkCountIt->second.header_used,
                      chunkCountIt->second.header_rcvd,
                      chunkCountIt->second.header_to_decode);
-            LogPrint(BCLog::FEC, "    Data chunks:   %4d used / %4d rcvd\tDecodable after: %d\n",
+            LogPrint(BCLog::FEC, "Body: %4du/%4dr/%4dd, ",
                      chunkCountIt->second.data_used,
                      chunkCountIt->second.data_rcvd,
                      chunkCountIt->second.data_to_decode);
-            LogPrint(BCLog::FEC, "    Duration: %.2f ms total\t%.2f ms until decodable\n",
+            LogPrint(BCLog::FEC, "%9.2f ms/%9.2f ms\n",
                      tot_duration, dec_duration);
 
             chunkCountIt = mapChunkCount.erase(chunkCountIt);
