@@ -938,14 +938,16 @@ static void timer_func(evutil_socket_t fd, short event, void* arg) {
 }
 
 static inline void SendMessage(const UDPMessage& msg, const unsigned int length, PerGroupMessageQueue& queue, PendingMessagesBuff& buff, const CService& service, const uint64_t magic) {
+    std::unique_lock<std::mutex> lock(send_messages_mutex);
     while (!send_messages_break &&
            buff.nextPendingMessage == ((buff.nextUndefinedMessage + 1) % PENDING_MESSAGES_BUFF_SIZE)) {
+        lock.unlock();
         std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        lock.lock();
     }
 
     if (send_messages_break) return;
 
-    std::unique_lock<std::mutex> lock(send_messages_mutex);
     const uint16_t next_undefined_message_cache = buff.nextUndefinedMessage;
     const uint16_t next_pending_message_cache = buff.nextPendingMessage;
 
