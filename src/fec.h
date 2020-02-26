@@ -9,6 +9,7 @@
 #include <memory>
 #include <stdint.h>
 #include <vector>
+#include <fs.h>
 
 #define FEC_CHUNK_SIZE 1152
 #define CM256_MAX_CHUNKS 27
@@ -39,7 +40,7 @@ public:
     BlockChunkRecvdTracker(size_t data_chunks);
     BlockChunkRecvdTracker(const BlockChunkRecvdTracker& o) =delete;
     BlockChunkRecvdTracker(BlockChunkRecvdTracker&& o) =delete;
-    BlockChunkRecvdTracker& operator=(BlockChunkRecvdTracker&& other);
+    BlockChunkRecvdTracker& operator=(BlockChunkRecvdTracker&& other) noexcept;
 
     inline bool CheckPresentAndMarkRecvd(uint32_t chunk_id) {
         if (chunk_id < data_chunk_recvd_flags.size()) {
@@ -65,7 +66,7 @@ public:
 class FECDecoder;
 class FECEncoder {
 private:
-    WirehairCodec state = NULL;
+    WirehairCodec wirehair_encoder = NULL;
     const std::vector<unsigned char>* data;
     std::pair<std::unique_ptr<FECChunkType[]>, std::vector<uint32_t>>* fec_chunks;
     int32_t cm256_start_idx = -1;
@@ -96,30 +97,47 @@ public:
 };
 
 class FECDecoder {
-private:
     FECChunkType tmp_chunk;
-    size_t chunk_count, chunks_recvd;
-    mutable bool decodeComplete;
+    size_t chunk_count = 0;
+    size_t chunks_recvd = 0;
+    size_t obj_size = 0;
+    mutable bool decodeComplete = false;
     BlockChunkRecvdTracker chunk_tracker;
 
     // Only used in wirehair mode:
-    WirehairCodec state = nullptr;
+    WirehairCodec wirehair_decoder = nullptr;
 
-    // Only used in cm256 mode:
-    std::vector<FECChunkType> cm256_chunks;
-    cm256_block cm256_blocks[CM256_MAX_CHUNKS];
+    // whether this instance is expected to delete the file or not, when
+    // destructed
+    bool owns_file = false;
+
+    // maps final chunk ids to offset into the storage (backed by the file)
+    // filled in once cm256_decoded is set to true
+    std::vector<uint8_t> cm256_map;
+
+    // the chunk IDs of the chunks stored in chunk_storage, in the order they
+    // are stored.
+    std::vector<uint32_t> chunk_ids;
+
     bool cm256_decoded = false;
+
+    void remove_file();
+
+    // filename for the chunk storage
+    fs::path filename;
 
     friend FECEncoder::FECEncoder(FECDecoder&& decoder, const std::vector<unsigned char>* dataIn, std::pair<std::unique_ptr<FECChunkType[]>, std::vector<uint32_t>>* fec_chunksIn);
 
+    fs::path compute_filename() const;
+
 public:
     FECDecoder(size_t data_size); // data_size must be <= MAX_BLOCK_SERIALIZED_SIZE * MAX_CHUNK_CODED_BLOCK_SIZE_FACTOR
-    FECDecoder() {}
+    FECDecoder();
     ~FECDecoder();
 
     FECDecoder(const FECDecoder&) =delete;
     FECDecoder(FECDecoder&& decoder) =delete;
-    FECDecoder& operator=(FECDecoder&& decoder);
+    FECDecoder& operator=(FECDecoder&& decoder) noexcept;
 
     bool ProvideChunk(const unsigned char* chunk, uint32_t chunk_id);
     bool ProvideChunk(const FECChunkType* chunk, uint32_t chunk_id) { return ProvideChunk((const unsigned char*)chunk, chunk_id); }
