@@ -1118,11 +1118,6 @@ static void MulticastBackfillThread(const CService& mcastNode,
 
     const int backfill_depth = info->depth;
 
-    /* Use a bloom filter to keep track of txns already sent */
-    boost::optional<CRollingBloomFilter> sent_txn_bloom;
-    if (info->send_txns)
-        sent_txn_bloom.emplace(500000, 0.001); // Hold 500k (~24*6 blocks of txn) txn
-
     const CBlockIndex *lastBlock;
     {
         LOCK(cs_main);
@@ -1130,16 +1125,11 @@ static void MulticastBackfillThread(const CService& mcastNode,
         assert(lastBlock);
     }
 
-    std::chrono::steady_clock::time_point last_tx_time = std::chrono::steady_clock::now();
-    std::chrono::steady_clock::time_point t_cycle_start = last_tx_time;
+    std::chrono::steady_clock::time_point t_cycle_start = std::chrono::steady_clock::now();
 
     auto it = mapTxQueues.find(info->group);
     assert(it != mapTxQueues.end());
     PerGroupMessageQueue& queue = it->second;
-
-    /* The txn transmission quota is based on the elapsed interval since
-     * last time txns were sent, which is the "txn quota of seconds". */
-    double txn_quota_sec = 0;
 
     while (!send_messages_break) {
         /* Define height of target block (to be transmitted) */
@@ -1163,23 +1153,70 @@ static void MulticastBackfillThread(const CService& mcastNode,
             lastBlock = ::ChainActive()[height];
         }
 
-
         if (debugMcast && wrapped_around) {
             std::chrono::steady_clock::time_point t_cycle_end(std::chrono::steady_clock::now());
             std::chrono::duration<float> backfill_cycle_duration = t_cycle_end - t_cycle_start;
             t_cycle_start = t_cycle_end;
-            LogPrint(BCLog::UDPNET, "UDP: Multicast Tx %lu-%lu - cycle finished in %f secs\n",
+            LogPrint(BCLog::UDPMCAST, "UDP: Multicast Tx %lu-%lu - cycle finished in %f secs\n",
                      info->physical_idx, info->logical_idx, backfill_cycle_duration.count());
         }
 
-        /* Txn transmission quota (number of txns to transmit now) */
-        int txn_tx_quota = 0;
-        if (info->send_txns) {
-            std::chrono::steady_clock::time_point const now = std::chrono::steady_clock::now();
-            txn_quota_sec += to_seconds(now - last_tx_time);
-            last_tx_time = now;
-            txn_tx_quota = txn_quota_sec * txn_per_sec;
+
+        CBlock block;
+        assert(ReadBlockFromDisk(block, lastBlock, Params().GetConsensus()));
+        std::vector<UDPMessage> msgs;
+        UDPFillMessagesFromBlock(block, msgs, height);
+        const uint256 block_hash(block.GetHash());
+
+        LogPrint(BCLog::UDPMCAST, "UDP: Multicast Tx %lu-%lu - send block %s (%20lu) - height %7d - %5d chunks\n",
+                 info->physical_idx, info->logical_idx,
+                 block_hash.ToString(), block_hash.GetUint64(0),
+                 height, msgs.size());
+
+        for (UDPMessage const& msg : msgs) {
+            SendMessage(msg, sizeof(UDPMessageHeader) + MAX_UDP_MESSAGE_LENGTH, queue, queue.buffs[2], mcastNode, multicast_checksum_magic);
         }
+    }
+}
+
+static void MulticastTxnThread(const CService& mcastNode,
+                               const UDPMulticastInfo *info) {
+    assert(info->send_txns);
+
+    /* Start only after the initial sync */
+    while (::ChainstateActive().IsInitialBlockDownload() && !send_messages_break)
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+
+    // if IsInitialBlockDownload() is false, chainActive.Tip()->pprev will
+    // return nullptr and trip the assert below
+    if (send_messages_break) return;
+
+    /* Debug options */
+    const bool debugMcast = LogAcceptCategory(BCLog::UDPMCAST);
+    const int stats_interval = 10;
+    int n_sent_txns = 0;
+    std::chrono::steady_clock::time_point last_print = std::chrono::steady_clock::now();
+
+    /* Use a bloom filter to keep track of txns already sent */
+    boost::optional<CRollingBloomFilter> sent_txn_bloom;
+    sent_txn_bloom.emplace(500000, 0.001); // Hold 500k (~24*6 blocks of txn) txn
+
+    auto it = mapTxQueues.find(info->group);
+    assert(it != mapTxQueues.end());
+    PerGroupMessageQueue& queue = it->second;
+
+    /* The txn transmission quota is based on the elapsed interval since
+     * last time txns were sent, which is the "txn quota of seconds". */
+    double txn_quota_sec = 0;
+    int txn_tx_quota = 0;
+    std::chrono::steady_clock::time_point last_tx_time = std::chrono::steady_clock::now();
+
+    while (!send_messages_break) {
+        /* Txn transmission quota (number of txns to transmit now) */
+        std::chrono::steady_clock::time_point const now = std::chrono::steady_clock::now();
+        txn_quota_sec += to_seconds(now - last_tx_time);
+        last_tx_time = now;
+        txn_tx_quota = txn_quota_sec * txn_per_sec;
 
         if (txn_tx_quota > 0) {
             /* We will send txns now, so we must remove the corresponding
@@ -1219,6 +1256,18 @@ static void MulticastBackfillThread(const CService& mcastNode,
                 }
             }
 
+            if (debugMcast) {
+                n_sent_txns += txn_to_send.size();
+                const auto now = std::chrono::steady_clock::now();
+                const double timeDeltaMillis = to_millis_double(now - last_print);
+                if (timeDeltaMillis > 1000*stats_interval) {
+                    LogPrint(BCLog::UDPMCAST, "UDP: Multicast Tx %lu-%lu - sent %d txns in %d secs\n",
+                             info->physical_idx, info->logical_idx, n_sent_txns, timeDeltaMillis/1000);
+                    last_print = now;
+                    n_sent_txns = 0;
+                }
+            }
+
             for (const CTransactionRef& tx : txn_to_send) {
                 std::vector<std::pair<UDPMessage, size_t>> msgs;
                 UDPFillMessagesFromTx(*tx, msgs);
@@ -1228,21 +1277,8 @@ static void MulticastBackfillThread(const CService& mcastNode,
                     SendMessage(msg, sizeof(UDPMessageHeader) + udp_blk_msg_header_size + msg_size, queue, queue.buffs[2], mcastNode, multicast_checksum_magic);
                 }
             }
-        }
-
-        CBlock block;
-        assert(ReadBlockFromDisk(block, lastBlock, Params().GetConsensus()));
-        std::vector<UDPMessage> msgs;
-        UDPFillMessagesFromBlock(block, msgs, height);
-        const uint256 block_hash(block.GetHash());
-
-        LogPrint(BCLog::UDPNET, "UDP: Multicast Tx %lu-%lu - send block %s (%20lu) - height %d - %d chunks\n",
-                 info->physical_idx, info->logical_idx,
-                 block_hash.ToString(), block_hash.GetUint64(0),
-                 height, msgs.size());
-
-        for (UDPMessage const& msg : msgs) {
-            SendMessage(msg, sizeof(UDPMessageHeader) + MAX_UDP_MESSAGE_LENGTH, queue, queue.buffs[2], mcastNode, multicast_checksum_magic);
+        } else {
+            std::this_thread::sleep_for(std::chrono::milliseconds(200));
         }
     }
 }
@@ -1253,7 +1289,7 @@ static void LaunchMulticastBackfillThreads() {
         if (info.tx) {
             mcast_tx_threads.emplace_back([&info, &node] {
                     char name[50];
-                    sprintf(name, "udpbackfill %d-%d", info.physical_idx,
+                    sprintf(name, "udpblkbackfill %d-%d", info.physical_idx,
                             info.logical_idx);
                     TraceThread(
                         name,
@@ -1261,6 +1297,19 @@ static void LaunchMulticastBackfillThreads() {
                                   std::get<0>(node.first), &info)
                         );
                 });
+
+            if (info.send_txns) {
+                mcast_tx_threads.emplace_back([&info, &node] {
+                        char name[50];
+                        sprintf(name, "udptxnbackfill %d-%d", info.physical_idx,
+                                info.logical_idx);
+                        TraceThread(
+                            name,
+                            std::bind(MulticastTxnThread,
+                                      std::get<0>(node.first), &info)
+                            );
+                    });
+            }
         }
     }
 }
