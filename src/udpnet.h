@@ -212,6 +212,10 @@ struct UDPMulticastInfo {
     int ttl;               /** time-to-live desired for multicast packets */
     uint64_t bw;           /** target throughput in bps */
     int depth;             /** backfill depth - no. of blocks to iterate over */
+    int interleave_size;   /** determines the depth of the sub-window of blocks
+                            *  within the backfill window whose FEC chunks are
+                            *  intereleaved. This depth is given in terms of the
+                            *  total size of all blocks in the sub-window. */
     uint16_t physical_idx; /** index of destination IP - net interface pair */
     uint16_t logical_idx;  /** logical idx for streams sharing physical idx */
     bool send_txns;        /** whether to send txns over this logical stream */

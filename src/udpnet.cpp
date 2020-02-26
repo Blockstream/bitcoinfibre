@@ -484,13 +484,14 @@ static bool InitializeUDPMulticast(std::vector<int> &udp_socks,
             tx_addr_ifindex_vec.push_back(addr_ifindex_pair);
             tx_addr_ifindex_set.insert(addr_ifindex_pair);
 
-            LogPrintf("UDP: multicast tx %lu-%lu -  multiaddr: %s interface: %s ttl: %d depth: %d\n",
+            LogPrintf("UDP: multicast tx %lu-%lu -  multiaddr: %s interface: %s ttl: %d depth: %d, interleave: %d\n",
                       mcast_info.physical_idx,
                       mcast_info.logical_idx,
                       mcast_info.mcast_ip,
                       mcast_info.ifname,
                       mcast_info.ttl,
-                      mcast_info.depth);
+                      mcast_info.depth,
+                      mcast_info.interleave_size);
         }
 
         /* Index based on multicast "addr", ifindex and logical index
@@ -1107,9 +1108,13 @@ static void do_send_messages() {
     }
 }
 
+struct backfill_block {
+    std::vector<UDPMessage> msgs;
+    mutable size_t idx = 0; // index of next message to be transmitted
+};
+
 static void MulticastBackfillThread(const CService& mcastNode,
                                     const UDPMulticastInfo *info) {
-    const bool debugMcast = LogAcceptCategory(BCLog::UDPMCAST);
     /* Start only after the initial sync */
     while (::ChainstateActive().IsInitialBlockDownload() && !send_messages_break)
         std::this_thread::sleep_for(std::chrono::milliseconds(50));
@@ -1127,56 +1132,128 @@ static void MulticastBackfillThread(const CService& mcastNode,
         assert(lastBlock);
     }
 
+    /* Debug options */
+    const bool debugMcast = LogAcceptCategory(BCLog::UDPMCAST);
     std::chrono::steady_clock::time_point t_cycle_start = std::chrono::steady_clock::now();
+    std::chrono::steady_clock::time_point t_last_win_stats = std::chrono::steady_clock::now();
+    const int window_stats_interval = 60; // in seconds
 
     auto it = mapTxQueues.find(info->group);
     assert(it != mapTxQueues.end());
     PerGroupMessageQueue& queue = it->second;
 
-    while (!send_messages_break) {
-        /* Define height of target block (to be transmitted) */
-        int height;
-        bool wrapped_around = false;
-        {
-            LOCK(cs_main);
-            height = lastBlock->nHeight + 1;
-            const int chain_height = ::ChainActive().Height();
+    std::map<int, backfill_block> block_window;
+    const size_t target_window_size = std::max(info->interleave_size/FEC_CHUNK_SIZE, 1);
 
-            if ((height < chain_height - backfill_depth + 1) && (backfill_depth > 0))
-                height = chain_height - backfill_depth + 1;
-            else if (height > chain_height) {
-                if (backfill_depth == 0)
-                    height = 0;
-                else
+    while (!send_messages_break) {
+        /* Fill FEC chunk interleaving window */
+        while ((block_window.size() < target_window_size) && (!send_messages_break)) {
+            /* Height of block to be inserted on the block window */
+            int height;
+            bool wrapped_around = false;
+            {
+                LOCK(cs_main);
+                height = lastBlock->nHeight + 1;
+                const int chain_height = ::ChainActive().Height();
+
+                if ((height < chain_height - backfill_depth + 1) && (backfill_depth > 0))
                     height = chain_height - backfill_depth + 1;
-                wrapped_around = true;
+                else if (height > chain_height) {
+                    if (backfill_depth == 0)
+                        height = 0;
+                    else
+                        height = chain_height - backfill_depth + 1;
+                    wrapped_around = true;
+                }
+
+                lastBlock = ::ChainActive()[height];
             }
 
-            lastBlock = ::ChainActive()[height];
+            if (debugMcast && wrapped_around) {
+                std::chrono::steady_clock::time_point t_cycle_end(std::chrono::steady_clock::now());
+                std::chrono::duration<float> backfill_cycle_duration = t_cycle_end - t_cycle_start;
+                t_cycle_start = t_cycle_end;
+                LogPrint(BCLog::UDPMCAST, "UDP: Multicast Tx %lu-%lu - cycle finished in %f secs\n",
+                         info->physical_idx, info->logical_idx, backfill_cycle_duration.count());
+            }
+
+            /* Fetch block from disk and generate its FEC chunks */
+            CBlock block;
+            assert(ReadBlockFromDisk(block, lastBlock, Params().GetConsensus()));
+            const auto res = block_window.insert(std::make_pair(height, backfill_block()));
+            if (!res.second)
+                throw std::runtime_error("Failed to insert new block on backfill window");
+            const auto block_it = res.first;
+            UDPFillMessagesFromBlock(block, block_it->second.msgs, height);
+            const uint256 block_hash(block.GetHash());
+
+            LogPrint(BCLog::FEC, "UDP: Multicast Tx %lu-%lu - fill block %s (%20lu) - height %7d - %5d chunks\n",
+                     info->physical_idx, info->logical_idx,
+                     block_hash.ToString(), block_hash.GetUint64(0),
+                     height, block_it->second.msgs.size());
         }
 
-        if (debugMcast && wrapped_around) {
-            std::chrono::steady_clock::time_point t_cycle_end(std::chrono::steady_clock::now());
-            std::chrono::duration<float> backfill_cycle_duration = t_cycle_end - t_cycle_start;
-            t_cycle_start = t_cycle_end;
-            LogPrint(BCLog::UDPMCAST, "UDP: Multicast Tx %lu-%lu - cycle finished in %f secs\n",
-                     info->physical_idx, info->logical_idx, backfill_cycle_duration.count());
-        }
-
-
-        CBlock block;
-        assert(ReadBlockFromDisk(block, lastBlock, Params().GetConsensus()));
-        std::vector<UDPMessage> msgs;
-        UDPFillMessagesFromBlock(block, msgs, height);
-        const uint256 block_hash(block.GetHash());
-
-        LogPrint(BCLog::UDPMCAST, "UDP: Multicast Tx %lu-%lu - send block %s (%20lu) - height %7d - %5d chunks\n",
-                 info->physical_idx, info->logical_idx,
-                 block_hash.ToString(), block_hash.GetUint64(0),
-                 height, msgs.size());
-
-        for (UDPMessage const& msg : msgs) {
+        /* Send window of interleaved chunks */
+        for (const auto& b : block_window) {
+            if (send_messages_break)
+                break;
+            assert(b.second.idx < b.second.msgs.size());
+            const UDPMessage& msg = b.second.msgs[b.second.idx];
+            b.second.idx++;
             SendMessage(msg, sizeof(UDPMessageHeader) + MAX_UDP_MESSAGE_LENGTH, queue, queue.buffs[2], mcastNode, multicast_checksum_magic);
+        }
+
+        /* Print some info regarding blocks that are currently in the
+         * block-interleaving window */
+        if (debugMcast && target_window_size > 1) {
+            const auto t_now = std::chrono::steady_clock::now();
+            const double timeDeltaMillis = to_millis_double(t_now - t_last_win_stats);
+            if (timeDeltaMillis > 1000*window_stats_interval) {
+                int min_height   = std::numeric_limits<int>::max();
+                int max_height   = 0;
+                size_t max_n_chunks = 0;
+                int height_largest_block;
+                const backfill_block* b_min_height = nullptr;
+                const backfill_block* b_max_height = nullptr;
+                const backfill_block* b_largest    = nullptr;
+                for (const auto& b : block_window) {
+                    if (b.first < min_height) {
+                        min_height   = b.first;
+                        b_min_height = &b.second;
+                    }
+                    if (b.first > max_height) {
+                        max_height   = b.first;
+                        b_max_height = &b.second;
+                    }
+                    if (b.second.msgs.size() > max_n_chunks) {
+                        max_n_chunks         = b.second.msgs.size();
+                        height_largest_block = b.first;
+                        b_largest            = &b.second;
+                    }
+                }
+                assert(b_min_height != nullptr);
+                assert(b_max_height != nullptr);
+                assert(b_largest != nullptr);
+                LogPrint(BCLog::UDPMCAST,
+                         "UDP: Multicast Tx %lu-%lu - Block Window:\n"
+                         "\t\tMin Height:    %7d - Sent %4d / %4d chunks\n"
+                         "\t\tMax Height:    %7d - Sent %4d / %4d chunks\n"
+                         "\t\tLargest Block: %7d - Sent %4d / %4d chunks\n",
+                         info->physical_idx, info->logical_idx,
+                         min_height, b_min_height->idx, b_min_height->msgs.size(),
+                         max_height, b_max_height->idx, b_max_height->msgs.size(),
+                         height_largest_block, b_largest->idx, b_largest->msgs.size()
+                    );
+                t_last_win_stats = t_now;
+            }
+        }
+
+        /* Cleanup blocks that have been fully transmitted */
+        for (auto it = block_window.cbegin(); it != block_window.cend();) {
+            if (it->second.idx == it->second.msgs.size())
+                it = block_window.erase(it);
+            else
+                ++it;
         }
     }
 }
@@ -1405,13 +1482,14 @@ static UDPMulticastInfo ParseUDPMulticastInfo(const std::string& s, const bool t
     info.tx         = tx;
 
     /* Defaults */
-    info.groupname   = "";
-    info.ttl         = 3;
-    info.bw          = 0;
-    info.logical_idx = 0; // default for multicast Rx, overriden for Tx
-    info.depth       = 144;
-    info.dscp        = 0; // IPv4 DSCP used for multicast Tx
-    info.trusted     = false;
+    info.groupname       = "";
+    info.ttl             = 3;
+    info.bw              = 0;
+    info.logical_idx     = 0; // default for multicast Rx, overriden for Tx
+    info.depth           = 144;
+    info.interleave_size = 0; // default is to disable interleaving
+    info.dscp            = 0; // IPv4 DSCP used for multicast Tx
+    info.trusted         = false;
 
     if (info.tx) {
         const size_t bw_end = s.find(',', mcastaddr_end + 1);
@@ -1439,7 +1517,14 @@ static UDPMulticastInfo ParseUDPMulticastInfo(const std::string& s, const bool t
                     info.depth = atoi(s.substr(ttl_end + 1));
                 } else {
                     info.depth = atoi(s.substr(ttl_end + 1, depth_end - ttl_end - 1));
-                    info.dscp  = atoi(s.substr(depth_end + 1));
+
+                    const size_t dscp_end = s.find(',', depth_end + 1);
+                    if (dscp_end == std::string::npos) {
+                        info.dscp  = atoi(s.substr(depth_end + 1));
+                    } else {
+                        info.dscp  = atoi(s.substr(depth_end + 1, dscp_end - depth_end - 1));
+                        info.interleave_size = atoi(s.substr(dscp_end + 1)) * 60 * info.bw / 8;
+                    }
                 }
             }
         }
