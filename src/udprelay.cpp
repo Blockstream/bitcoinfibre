@@ -564,10 +564,11 @@ void UDPFillMessagesFromBlock(const CBlock& block, std::vector<UDPMessage>& msgs
      * link, 2 chunks of overhead are used. */
 
     /* Header chunks */
-    msgs.resize(header_fec_chunks);
+    int offset = msgs.size();
+    msgs.resize(offset + header_fec_chunks);
     for (size_t i = 0; i < header_fec_chunks; i++) {
-        FillBlockMessageHeader(msgs[i], hash_prefix, MSG_TYPE_BLOCK_HEADER, header_data.size());
-        CopyFECData(msgs[i], header_fecer, i);
+        FillBlockMessageHeader(msgs[offset + i], hash_prefix, MSG_TYPE_BLOCK_HEADER, header_data.size());
+        CopyFECData(msgs[offset + i], header_fecer, i);
     }
 
     /* Block */
@@ -587,11 +588,14 @@ void UDPFillMessagesFromBlock(const CBlock& block, std::vector<UDPMessage>& msgs
     DataFECer block_fecer(chunk_coded_block, block_fec_chunks);
 
     /* Block chunks */
-    msgs.resize(header_fec_chunks + block_fec_chunks);
+    offset = msgs.size();
+    msgs.resize(offset + block_fec_chunks);
     for (size_t i = 0; i < block_fec_chunks; i++) {
-        FillBlockMessageHeader(msgs[i + header_fec_chunks], hash_prefix, MSG_TYPE_BLOCK_CONTENTS, chunk_coded_block.size());
-        CopyFECData(msgs[i + header_fec_chunks], block_fecer, i);
+        FillBlockMessageHeader(msgs[offset + i], hash_prefix, MSG_TYPE_BLOCK_CONTENTS, chunk_coded_block.size());
+        CopyFECData(msgs[offset + i], block_fecer, i);
     }
+
+    return;
 }
 
 static std::mutex block_process_mutex;
