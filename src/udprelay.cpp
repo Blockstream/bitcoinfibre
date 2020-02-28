@@ -484,7 +484,7 @@ void UDPFillMessagesFromTx(const CTransaction& tx, std::vector<std::pair<UDPMess
 }
 
 /**
- * Send block through a composition of block header and block data messages
+ * Fill FEC messages of block header and block data
  *
  * This is used by the multicast Tx (backfill) thread only, specifically to send
  * "past blocks", i.e. blocks that are already in the chain. When a new block
@@ -536,8 +536,18 @@ void UDPFillMessagesFromTx(const CTransaction& tx, std::vector<std::pair<UDPMess
  * than wirehair), due to its smaller size (compared to the chunk-coded
  * block). The difference on decoding duration will be even lower in this case.
  *
+ * The ensuing function fills all FEC chunks of both header and block data. The
+ * order on which chunks are filled is noteworthy. It is optimized for minimum
+ * latency in the absence of data loss. First the minimum amount of chunks of
+ * header and block data are sent. Receivers that succesfully decode all of
+ * these can then complete the decoding right away. After them, the overhead
+ * header chunks are sent and, lastly, the overhead block chunks.
+ *
  */
 void UDPFillMessagesFromBlock(const CBlock& block, std::vector<UDPMessage>& msgs, const int height) {
+    const size_t header_overhead = 2;
+    const size_t block_overhead  = 2;
+
     const uint256 hashBlock(block.GetHash());
     const uint64_t hash_prefix = hashBlock.GetUint64(0);
 
@@ -556,43 +566,72 @@ void UDPFillMessagesFromBlock(const CBlock& block, std::vector<UDPMessage>& msgs
     header_data.reserve(2500 + 8 * block.vtx.size()); // Rather conservatively high estimate
     VectorOutputStream stream(&header_data, SER_NETWORK, PROTOCOL_VERSION);
     stream << headerAndIDs;
-    const size_t header_fec_chunks = DIV_CEIL(header_data.size(), FEC_CHUNK_SIZE) + 2;
-    DataFECer header_fecer(header_data, header_fec_chunks);
+    const size_t n_header_chunks = DIV_CEIL(header_data.size(), FEC_CHUNK_SIZE);
+    const size_t n_header_fec_chunks = n_header_chunks + header_overhead;
+    DataFECer header_fecer(header_data, n_header_fec_chunks);
     /* NOTE: the block header will typically be encoded by cm256, due to its
      * size. Since cm256 is MDS, in principle only the N original chunks are
      * necessary. Nevertheless, since chunks can be lost along the transport
-     * link, 2 chunks of overhead are used. */
+     * link, some chunks of overhead are used. */
 
-    /* Header chunks */
+    /* First fill the minimum amount of header chunks for decoding
+     *
+     * NOTE: since cm256 is MDS, the minimum amount of header chunks is
+     * guaranteed to be sufficient for decoding */
     int offset = msgs.size();
-    msgs.resize(offset + header_fec_chunks);
-    for (size_t i = 0; i < header_fec_chunks; i++) {
+    msgs.resize(offset + n_header_chunks);
+    for (size_t i = 0; i < n_header_chunks; i++) {
         FillBlockMessageHeader(msgs[offset + i], hash_prefix, MSG_TYPE_BLOCK_HEADER, header_data.size());
         CopyFECData(msgs[offset + i], header_fecer, i);
     }
 
-    /* Block */
-
     /* Don't send the chunk-coded block if the block does not have any
-     * transaction other than the coinbase (sent in the block header) */
-    if (headerAndIDs.ShortTxIdCount() == 0)
+     * transaction other than the coinbase (which is sent in the header) */
+    if (headerAndIDs.ShortTxIdCount() == 0) {
+        /* Fill overhead header chunks */
+        offset = msgs.size();
+        msgs.resize(offset + header_overhead);
+        for (size_t i = 0; i < header_overhead; i++) {
+            FillBlockMessageHeader(msgs[offset + i], hash_prefix, MSG_TYPE_BLOCK_HEADER, header_data.size());
+            CopyFECData(msgs[offset + i], header_fecer, n_header_chunks + i);
+        }
         return;
+    }
 
     ChunkCodedBlock codedBlock(block, headerAndIDs);
     const std::vector<unsigned char>& chunk_coded_block = codedBlock.GetCodedBlock();
-    const size_t block_fec_chunks = DIV_CEIL(chunk_coded_block.size(), FEC_CHUNK_SIZE) + 2;
-    /* NOTE: on average wirehair needs about 0.02 chunks of overhead to recover
-     * (meaning most often it doesn't need overhead at all). Again, we add two
-     * extra chunks here (more than necessary) in order to overcome loss along
-     * the transport link. */
-    DataFECer block_fecer(chunk_coded_block, block_fec_chunks);
+    const size_t n_block_chunks = DIV_CEIL(chunk_coded_block.size(), FEC_CHUNK_SIZE);
+    const size_t n_block_fec_chunks = n_block_chunks + block_overhead;
+    /* NOTE: on average wirehair needs about 0.02 chunks of overhead to recover,
+     * meaning most often it doesn't need overhead at all. Again, we add
+     * overhead chunks here in order to overcome loss along the link. */
+    DataFECer block_fecer(chunk_coded_block, n_block_fec_chunks);
 
-    /* Block chunks */
+    /* Minimum amount of block chunks for decoding
+     *
+     * NOTE: unlike header chunks, this minimum amount sent here is only almost
+     * always sufficient for decoding, but not 100% guaranteed. */
     offset = msgs.size();
-    msgs.resize(offset + block_fec_chunks);
-    for (size_t i = 0; i < block_fec_chunks; i++) {
+    msgs.resize(offset + n_block_chunks);
+    for (size_t i = 0; i < n_block_chunks; i++) {
         FillBlockMessageHeader(msgs[offset + i], hash_prefix, MSG_TYPE_BLOCK_CONTENTS, chunk_coded_block.size());
         CopyFECData(msgs[offset + i], block_fecer, i);
+    }
+
+    /* Overhead header chunks */
+    offset = msgs.size();
+    msgs.resize(offset + header_overhead);
+    for (size_t i = 0; i < header_overhead; i++) {
+        FillBlockMessageHeader(msgs[offset + i], hash_prefix, MSG_TYPE_BLOCK_HEADER, header_data.size());
+        CopyFECData(msgs[offset + i], header_fecer, n_header_chunks + i);
+    }
+
+    /* Overhead block chunks */
+    offset = msgs.size();
+    msgs.resize(offset + block_overhead);
+    for (size_t i = 0; i < block_overhead; i++) {
+        FillBlockMessageHeader(msgs[offset + i], hash_prefix, MSG_TYPE_BLOCK_CONTENTS, chunk_coded_block.size());
+        CopyFECData(msgs[offset + i], block_fecer, n_block_chunks + i);
     }
 
     return;
