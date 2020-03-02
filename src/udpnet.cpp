@@ -1129,7 +1129,7 @@ static void MulticastBackfillThread(const CService& mcastNode,
     const CBlockIndex *lastBlock;
     {
         LOCK(cs_main);
-        lastBlock = ::ChainActive().Tip()->pprev;
+        lastBlock = ::ChainActive().Tip();
         assert(lastBlock);
     }
 
