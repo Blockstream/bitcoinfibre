@@ -700,6 +700,12 @@ static void ProcessBlockThread() {
                     LogPrintf("UDP: Got full header and shorttxids from %s in %lf %lf %lf ms\n", block.nodeHeaderRecvd.ToString(), to_millis_double(data_copied - decode_start), to_millis_double(header_deserialized - data_copied), to_millis_double(header_provided - header_deserialized));
                 } else
                     LogPrintf("UDP: Got full header and shorttxids from %s\n", block.nodeHeaderRecvd.ToString());
+            } else if (block.block_data.IsHeaderNull()) {
+                /* If we are not going to process the header data now, it is
+                 * because we are either going to process block data or fill
+                 * block data. However, in order for this to succeed we must
+                 * have had processed the header before. Double check. */
+                break;
             } else if (block.is_decodeable || block.block_data.IsBlockAvailable()) {
                 if (block.currentlyProcessing) {
                     // We often duplicatively schedule DoBackgroundBlockProcessing,
