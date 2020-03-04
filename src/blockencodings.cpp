@@ -578,6 +578,10 @@ uint256& PartiallyDownloadedChunkBlock::GetBlockHash() const {
     return block_hash;
 }
 
+bool PartiallyDownloadedChunkBlock::IsHeaderNull() const {
+    return header.IsNull();
+}
+
 bool PartiallyDownloadedChunkBlock::IsBlockAvailable() const {
     assert(!header.IsNull());
     return allTxnFromMempool || !remainingChunks;

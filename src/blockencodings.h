@@ -297,6 +297,7 @@ public:
     bool IsIterativeFillDone() const;
 
     bool IsBlockAvailable() const;
+    bool IsHeaderNull() const;
     ReadStatus FinalizeBlock();
     std::shared_ptr<const CBlock> GetBlock() const { assert(block_finalized); return decoded_block; }
     const std::vector<unsigned char>& GetCodedBlock() const { assert(AreChunksAvailable() && IsBlockAvailable()); return codedBlock; }
