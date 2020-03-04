@@ -1190,8 +1190,7 @@ bool HandleBlockTxMessage(UDPMessage& msg, size_t length, const CService& node, 
                                                          std::forward_as_tuple(hash_prefix),
                                                          std::forward_as_tuple(they_have_block, header_data_chunks)
                                                  ).first;
-        } else // Probably stale (ie we just finished reconstructing
-            return true;
+        }
     }
 
     if (msg.header.msg_type & HAVE_BLOCK)
@@ -1213,10 +1212,7 @@ bool HandleBlockTxMessage(UDPMessage& msg, size_t length, const CService& node, 
     bool new_block = false;
     auto it = mapPartialBlocks.find(hash_peer_pair);
     if (it == mapPartialBlocks.end()) {
-        if (is_blk_header_chunk)
-            it = mapPartialBlocks.insert(std::make_pair(std::make_pair(hash_prefix, state.connection.fTrusted ? TRUSTED_PEER_DUMMY : node), std::make_shared<PartialBlockData>(node, msg, packet_process_start))).first;
-        else // Probably stale (ie we just finished reconstructing)
-            return true;
+        it = mapPartialBlocks.insert(std::make_pair(std::make_pair(hash_prefix, state.connection.fTrusted ? TRUSTED_PEER_DUMMY : node), std::make_shared<PartialBlockData>(node, msg, packet_process_start))).first;
         new_block = true;
     }
     PartialBlockData& block = *it->second;
@@ -1227,7 +1223,7 @@ bool HandleBlockTxMessage(UDPMessage& msg, size_t length, const CService& node, 
 
     std::unique_lock<std::mutex> block_lock(block.state_mutex, std::try_to_lock);
 
-    if ((block.is_decodeable || block.currentlyProcessing) || // condition 1
+    if ((is_blk_content_chunk && (block.is_decodeable || block.currentlyProcessing)) || // condition 1
         (is_blk_header_chunk && block.is_header_processing) || // condition 2
         (is_blk_header_chunk && !block.in_header)) { // condition 3
         /*
@@ -1273,7 +1269,7 @@ bool HandleBlockTxMessage(UDPMessage& msg, size_t length, const CService& node, 
 
     // Check one more time after locking. Maybe the state changed inside
     // ProcessBlockThread.
-    if (block.is_decodeable || block.currentlyProcessing)
+    if (is_blk_content_chunk && (block.is_decodeable || block.currentlyProcessing))
         return true;
 
     // The header has already been decoded (ProvideHeaderData was called), so
@@ -1291,18 +1287,15 @@ bool HandleBlockTxMessage(UDPMessage& msg, size_t length, const CService& node, 
         return true;
     }
 
-    if (is_blk_content_chunk && !block.header_initialized) {
-        // We're getting block content packets before ever receiving a header
-        // packet. This isn't expected.
-        return true;
-    }
-
-    if (is_blk_content_chunk && !block.blk_initialized) {
+    if ((is_blk_content_chunk && !block.blk_initialized) ||
+        (is_blk_header_chunk && !block.header_initialized)) {
         if (!block.Init(msg)) {
             LogPrintf("UDP: Got block contents that couldn't match header for block id %lu\n", msg.msg.block.hash_prefix);
             return true;
         }
-        DoBackgroundBlockProcessing(*it); // Kick off mempool scan (waits on us to unlock block_lock)
+
+        if (is_blk_content_chunk)
+            DoBackgroundBlockProcessing(*it); // Kick off mempool scan (waits on us to unlock block_lock)
         /* The scan will work as long as !is_header_processing &&
          * !block.in_header && block.blk_initialized when the PartialBlockData
          * queued in block_process_queue is finally processed. Otherwise, it
