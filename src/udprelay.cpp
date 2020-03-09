@@ -1388,11 +1388,6 @@ bool HandleBlockTxMessage(UDPMessage& msg, size_t length, const CService& node, 
         // from inside ProcessBlockThread, so after we notify the ProcessNewBlockThread we cannot access block.
         block_lock.unlock();
         DoBackgroundBlockProcessing(*it); // Decode block and call ProcessNewBlock
-
-        if (block.is_decodeable) {
-            // Make sure we throw out any future packets for this block
-            setBlocksReceived.insert(hash_peer_pair);
-        }
     }
 
     if (fBench && new_block) {
