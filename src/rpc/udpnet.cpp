@@ -160,7 +160,49 @@ UniValue disconnectudpnode(const JSONRPCRequest& request)
     return NullUniValue;
 }
 
+UniValue getchunkstats(const JSONRPCRequest& request)
+{
+    RPCHelpMan{"getchunkstats",
+	"\nReturns some statistics about chunks of current partial blocks.\n",
+	{},
+	RPCResult{
+	    "{\n"
+            "  \"min_height\":n,           (numeric) The lowest partial block currently under processing\n"
+            "  \"min_height_progress\":n,  (string)  Chunk progress of lowest partial block under processing\n"
+            "  \"max_height\":n,           (numeric) The highest partial block currently under processing\n"
+            "  \"max_height_progress\":n,  (string)  Chunk progress of highest partial block under processing\n"
+            "  \"n_blks\":n,               (numeric) Total number of partial blocks currently under processing\n"
+            "  \"n_chunks\":n,             (numeric) Total number of chunks within current partial blocks\n"
+            "}\n"
+	},
+	RPCExamples{
+	    HelpExampleCli("getchunkstats", "")
+	    + HelpExampleRpc("getchunkstats", "")
+	}
+    }.Check(request);
 
+    const ChunkStats stats = GetChunkStats();
+
+    // Progress strings
+    std::ostringstream min_progress;
+    std::ostringstream max_progress;
+    min_progress << "header: " << stats.min_header_rcvd << "/" << \
+        stats.min_header_expected << " body: " << stats.min_body_rcvd <<
+        "/" << stats.min_body_expected;
+    max_progress << "header: " << stats.max_header_rcvd << "/" << \
+        stats.max_header_expected << " body: " << stats.max_body_rcvd <<
+        "/" << stats.max_body_expected;
+
+    UniValue ret(UniValue::VOBJ);
+    ret.pushKV("min_height", stats.min_height);
+    ret.pushKV("min_height_progress", min_progress.str());
+    ret.pushKV("max_height", stats.max_height);
+    ret.pushKV("max_height_progress", max_progress.str());
+    ret.pushKV("n_blks", stats.n_blks);
+    ret.pushKV("n_chunks", stats.n_chunks);
+
+    return ret;
+}
 
 
 
@@ -170,6 +212,7 @@ static const CRPCCommand commands[] =
     { "udpnetwork",         "getudppeerinfo",         &getudppeerinfo,         {} },
     { "udpnetwork",         "addudpnode",             &addudpnode,             {"node", "local_magic", "remote_magic", "ultimately_trusted", "command", "group"} },
     { "udpnetwork",         "disconnectudpnode",      &disconnectudpnode,      {"node"} },
+    { "udpnetwork",         "getchunkstats",          &getchunkstats,          {} },
 };
 
 void RegisterUDPNetRPCCommands(CRPCTable &t)
