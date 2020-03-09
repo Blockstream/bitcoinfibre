@@ -41,4 +41,20 @@ void GetUDPConnectionList(std::vector<UDPConnectionStats>& connections_list);
 
 void UDPRelayBlock(const CBlock& block);
 
+struct ChunkStats {
+	int min_height = std::numeric_limits<int>::max();
+	int max_height = 0;
+	size_t n_blks = 0;
+	size_t n_chunks = 0;
+	size_t min_header_rcvd = 0;
+	size_t min_header_expected = 0;
+	size_t min_body_rcvd = 0;
+	size_t min_body_expected = 0;
+	size_t max_header_rcvd = 0;
+	size_t max_header_expected = 0;
+	size_t max_body_rcvd = 0;
+	size_t max_body_expected = 0;
+};
+ChunkStats GetChunkStats();
+
 #endif
