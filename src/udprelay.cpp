@@ -1413,3 +1413,45 @@ void ProcessDownloadTimerEvents() {
     }
     //TODO: Prune setBlocksRelayed and setBlocksReceived to keep lookups fast?
 }
+
+ChunkStats GetChunkStats() {
+    std::unique_lock<std::recursive_mutex> lock(cs_mapUDPNodes);
+    ChunkStats s;
+
+    s.n_blks = mapPartialBlocks.size();
+
+    for (const auto& b : mapPartialBlocks) {
+        const int height = b.second->block_data.getBlockHeight();
+        const size_t header_rx_cnt = b.second->header_decoder.GetChunksRcvd();
+        const size_t body_rx_cnt   = b.second->body_decoder.GetChunksRcvd();
+        const bool h_ready = b.second->header_initialized;
+        const bool b_ready = b.second->blk_initialized;
+
+        if (h_ready)
+            s.n_chunks += header_rx_cnt;
+
+        if (b_ready)
+            s.n_chunks += body_rx_cnt;
+
+        if (height == -1)
+            continue;
+
+        if (height < s.min_height) {
+            s.min_height           = height;
+            s.min_header_rcvd      = (h_ready) ? header_rx_cnt : 0;
+            s.min_header_expected  = (h_ready) ? b.second->header_decoder.GetChunkCount() : 0;
+            s.min_body_rcvd        = (b_ready) ? body_rx_cnt : 0;
+            s.min_body_expected    = (b_ready) ? b.second->body_decoder.GetChunkCount() : 0;
+        }
+
+        if (height > s.max_height) {
+            s.max_height           = height;
+            s.max_header_rcvd      = (h_ready) ? header_rx_cnt : 0;
+            s.max_header_expected  = (h_ready) ? b.second->header_decoder.GetChunkCount() : 0;
+            s.max_body_rcvd        = (b_ready) ? body_rx_cnt : 0;
+            s.max_body_expected    = (b_ready) ? b.second->body_decoder.GetChunkCount() : 0;
+        }
+    }
+
+    return s;
+}
