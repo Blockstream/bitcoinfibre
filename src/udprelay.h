@@ -21,7 +21,8 @@ bool HandleBlockTxMessage(UDPMessage& msg, size_t length, const CService& node, 
 void ProcessDownloadTimerEvents();
 
 // Each UDPMessage must be of sizeof(UDPMessageHeader) + MAX_UDP_MESSAGE_LENGTH in length!
-void UDPFillMessagesFromBlock(const CBlock& block, std::vector<UDPMessage>& msgs, int height);
+void UDPFillMessagesFromBlock(const CBlock& block, std::vector<UDPMessage>& msgs, int height,
+                              size_t base_overhead=60, double overhead=0.05);
 void UDPFillMessagesFromTx(const CTransaction& tx, std::vector<std::pair<UDPMessage, size_t>>& msgs);
 
 #endif
