@@ -35,7 +35,7 @@ static std::set<std::pair<uint64_t, CService>> setBlocksReceived;
 static std::map<std::pair<uint64_t, int>, BlockChunkCount> mapChunkCount;
 
 static std::map<std::pair<uint64_t, CService>, std::shared_ptr<PartialBlockData> >::iterator RemovePartialBlock(std::map<std::pair<uint64_t, CService>, std::shared_ptr<PartialBlockData> >::iterator it) {
-    uint64_t hash_prefix = it->first.first;
+    uint64_t const hash_prefix = it->first.first;
     std::lock_guard<std::mutex> lock(it->second->state_mutex);
     // Note that we do not modify perNodeChunkCount, as it might be "read-only" due to currentlyProcessing
     for (const std::pair<CService, std::pair<uint32_t, uint32_t> >& node : it->second->perNodeChunkCount) {
@@ -56,7 +56,7 @@ static void RemovePartialBlock(const std::pair<uint64_t, CService>& key) {
         RemovePartialBlock(it);
 }
 
-static void RemovePartialBlocks(uint64_t hash_prefix) {
+static void RemovePartialBlocks(uint64_t const hash_prefix) {
     std::map<std::pair<uint64_t, CService>, std::shared_ptr<PartialBlockData> >::iterator it = mapPartialBlocks.lower_bound(std::make_pair(hash_prefix, TRUSTED_PEER_DUMMY));
     while (it != mapPartialBlocks.end() && it->first.first == hash_prefix)
         it = RemovePartialBlock(it);
@@ -65,32 +65,26 @@ static void RemovePartialBlocks(uint64_t hash_prefix) {
 static inline void SendMessageToNode(const UDPMessage& msg, unsigned int length, bool high_prio, uint64_t hash_prefix, std::map<CService, UDPConnectionState>::iterator it) {
     if ((it->second.state & STATE_INIT_COMPLETE) != STATE_INIT_COMPLETE)
         return;
-    const auto chunks_avail_it = it->second.chunks_avail.find(hash_prefix);
 
+    const bool is_blk_content_chunk = (msg.header.msg_type & UDP_MSG_TYPE_TYPE_MASK) == MSG_TYPE_BLOCK_CONTENTS;
+    const size_t n_chunks = DIV_CEIL(le32toh(msg.msg.block.obj_length), sizeof(UDPBlockMessage::data));
+    const uint32_t chunk_id = le32toh(msg.msg.block.chunk_id);
+
+    const auto chunks_avail_it = it->second.chunks_avail.find(hash_prefix);
     bool use_chunks_avail = chunks_avail_it != it->second.chunks_avail.end();
+
     if (use_chunks_avail) {
         if (chunks_avail_it->second.AreAllAvailable())
             return;
 
-        if ((msg.header.msg_type & UDP_MSG_TYPE_TYPE_MASK) == MSG_TYPE_BLOCK_HEADER) {
-            if (chunks_avail_it->second.IsHeaderChunkAvailable(le32toh(msg.msg.block.chunk_id)))
-                return;
-        } else {
-            if (!chunks_avail_it->second.IsBlockDataChunkCountSet())
-                chunks_avail_it->second.SetBlockDataChunkCount(DIV_CEIL(le32toh(msg.msg.block.obj_length), sizeof(UDPBlockMessage::data)));
-            if (chunks_avail_it->second.IsBlockChunkAvailable(le32toh(msg.msg.block.chunk_id)))
-                return;
-        }
+        if (chunks_avail_it->second.IsChunkAvailable(chunk_id, n_chunks, is_blk_content_chunk))
+            return;
     }
 
     SendMessage(msg, length, high_prio, *it);
 
-    if (use_chunks_avail) {
-        if ((msg.header.msg_type & UDP_MSG_TYPE_TYPE_MASK) == MSG_TYPE_BLOCK_HEADER)
-            chunks_avail_it->second.SetHeaderChunkAvailable(le32toh(msg.msg.block.chunk_id));
-        else if ((msg.header.msg_type & UDP_MSG_TYPE_TYPE_MASK) == MSG_TYPE_BLOCK_CONTENTS)
-            chunks_avail_it->second.SetBlockChunkAvailable(le32toh(msg.msg.block.chunk_id));
-    }
+    if (use_chunks_avail)
+        chunks_avail_it->second.SetChunkAvailable(chunk_id, n_chunks, is_blk_content_chunk);
 }
 
 static void SendMessageToAllNodes(const UDPMessage& msg, unsigned int length, bool high_prio, uint64_t hash_prefix) {
@@ -1143,6 +1137,9 @@ bool HandleBlockTxMessage(UDPMessage& msg, size_t length, const CService& node, 
         return false;
     }
 
+    // Number of chunks that the data object (before FEC enconding) would occupy
+    const size_t n_chunks = DIV_CEIL(msg.msg.block.obj_length, sizeof(UDPBlockMessage::data));
+
     /* Track all received chunks */
     std::map<std::pair<uint64_t, int>, BlockChunkCount>::iterator mapChunkCountIt;
     if (debugFec) {
@@ -1183,14 +1180,27 @@ bool HandleBlockTxMessage(UDPMessage& msg, size_t length, const CService& node, 
                     mapPartialBlocks.erase(second_partial_block_it);
                 }
             }
-            // Once we add to chunks_avail, we MUST add to PartialBlockData.perNodeChunkCount, or we will leak memory
-            bool they_have_block = msg.header.msg_type & HAVE_BLOCK;
-            size_t header_data_chunks = DIV_CEIL(msg.msg.block.obj_length, sizeof(UDPBlockMessage::data));
-            chunks_avail_it = state.chunks_avail.emplace(std::piecewise_construct,
-                                                         std::forward_as_tuple(hash_prefix),
-                                                         std::forward_as_tuple(they_have_block, header_data_chunks)
-                                                 ).first;
         }
+
+        /* NOTE: once we add to chunks_avail, we MUST add to
+         * PartialBlockData.perNodeChunkCount, or we will leak memory.
+         *
+         * This is mostly because chunks_avail is a state that is kept per node,
+         * whereas perNodeChunkCount is kept per partial block. When the
+         * decoding of a partial block is completed, function RemovePartialBlock
+         * is called and the partial block is provided as argument. This
+         * function, then, iterates over all nodes that are present in
+         * PartialBlockData.perNodeChunkCount (nodes that delivered chunks of
+         * the partial block) and, for each node, it erases the corresponding
+         * entry (with the hash of the given block as key) from the chunks_avail
+         * maps. Hence, the node must be registered in perNodeChunkCount in
+         * order for the erasing from chunks_avail to work.
+         */
+        bool const they_have_block = msg.header.msg_type & HAVE_BLOCK;
+        chunks_avail_it = state.chunks_avail.emplace(std::piecewise_construct,
+                                                     std::forward_as_tuple(hash_prefix),
+                                                     std::forward_as_tuple(they_have_block, n_chunks, is_blk_header_chunk)
+            ).first;
     }
 
     if (msg.header.msg_type & HAVE_BLOCK)
@@ -1200,13 +1210,7 @@ bool HandleBlockTxMessage(UDPMessage& msg, size_t length, const CService& node, 
         // SetHeaderDataAndFECChunkCount call, we will miss the first block packet we
         // receive and re-send that in UDPRelayBlock...this is OK because we'll save
         // more by doing this before the during-process relay below
-        if (is_blk_header_chunk)
-            chunks_avail_it->second.SetHeaderChunkAvailable(msg.msg.block.chunk_id);
-        else {
-            if (!chunks_avail_it->second.IsBlockDataChunkCountSet())
-                chunks_avail_it->second.SetBlockDataChunkCount(DIV_CEIL(msg.msg.block.obj_length, sizeof(UDPBlockMessage::data)));
-            chunks_avail_it->second.SetBlockChunkAvailable(msg.msg.block.chunk_id);
-        }
+        chunks_avail_it->second.SetChunkAvailable(msg.msg.block.chunk_id, n_chunks, is_blk_content_chunk);
     }
 
     bool new_block = false;
@@ -1254,7 +1258,6 @@ bool HandleBlockTxMessage(UDPMessage& msg, size_t length, const CService& node, 
             // peers didn't as well
             SendMessageToAllNodes(msg, length, false, hash_prefix);
         }
-        return true;
     }
 
     if (!block_lock) {
@@ -1267,23 +1270,13 @@ bool HandleBlockTxMessage(UDPMessage& msg, size_t length, const CService& node, 
         block.perNodeChunkCount.insert(std::make_pair(node, std::make_pair(0, 0))).first;
     perNodeChunkCountIt->second.second++;
 
-    // Check one more time after locking. Maybe the state changed inside
-    // ProcessBlockThread.
-    if (is_blk_content_chunk && (block.is_decodeable || block.currentlyProcessing))
-        return true;
-
-    // The header has already been decoded (ProvideHeaderData was called), so
-    // header chunks are no longer useful for decoding
-    if (is_blk_header_chunk && !block.in_header) {
-        if (state.connection.fTrusted) {
-            // Keep forwarding on header packets to our peers to make sure they
-            // get the whole header.
-            BlockMsgHToLE(msg);
-            msg.header.msg_type &= ~HAVE_BLOCK;
-            // We didn't need this chunk, call it low priority assuming our
-            // peers didn't as well
-            SendMessageToAllNodes(msg, length, false, hash_prefix);
-        }
+    // Check one more time after finally locking. Maybe the state changed inside
+    // ProcessBlockThread. If the conditions still indicate the chunk is
+    // unnecessary, return now that we already registered the chunk on
+    // perNodeChunkCount.
+    if ((is_blk_content_chunk && (block.is_decodeable || block.currentlyProcessing)) || // condition 1
+        (is_blk_header_chunk && block.is_header_processing) || // condition 2
+        (is_blk_header_chunk && !block.in_header)) { // condition 3
         return true;
     }
 

@@ -144,38 +144,57 @@ struct PartialBlockData {
 class ChunksAvailableSet {
 private:
     bool allSent;
-    bool block_tracker_initd;
-    BlockChunkRecvdTracker header_tracker;
-    BlockChunkRecvdTracker block_tracker;
+    mutable bool header_tracker_initd;
+    mutable bool block_tracker_initd;
+    mutable BlockChunkRecvdTracker header_tracker;
+    mutable BlockChunkRecvdTracker block_tracker;
+
+    void InitTracker(size_t n_chunks, bool is_block_chunk) const {
+        if (is_block_chunk && !block_tracker_initd) {
+            block_tracker = BlockChunkRecvdTracker(n_chunks);
+            block_tracker_initd = true;
+        }
+
+        if (!is_block_chunk && !header_tracker_initd) {
+            header_tracker = BlockChunkRecvdTracker(n_chunks);
+            header_tracker_initd = true;
+        }
+    }
+
 public:
-    ChunksAvailableSet(bool hasAllChunks, size_t header_chunks) :
-            allSent(hasAllChunks), block_tracker_initd(false)
-        { if (!allSent) header_tracker = BlockChunkRecvdTracker(header_chunks); }
+    ChunksAvailableSet(bool hasAllChunks, size_t n_chunks, bool is_block_chunk) :
+        allSent(hasAllChunks), header_tracker_initd(!is_block_chunk),
+        block_tracker_initd(is_block_chunk) {
+            if (allSent) return;
+            InitTracker(n_chunks, is_block_chunk);
+    }
 
-    bool IsHeaderChunkAvailable(uint32_t chunk_id) const {
+    bool IsChunkAvailable(uint32_t chunk_id, size_t n_chunks, bool is_block_chunk) const {
         if (allSent) return true;
-        return header_tracker.CheckPresent(chunk_id);
-    }
-    void SetHeaderChunkAvailable(uint32_t chunk_id) {
-        if (allSent) return;
-        header_tracker.CheckPresentAndMarkRecvd(chunk_id);
+
+        InitTracker(n_chunks, is_block_chunk);
+
+        if (is_block_chunk) {
+            assert(block_tracker_initd);
+            return block_tracker.CheckPresent(chunk_id);
+        } else {
+            assert(header_tracker_initd);
+            return header_tracker.CheckPresent(chunk_id);
+        }
     }
 
-    bool IsBlockDataChunkCountSet() const { return block_tracker_initd; }
-    void SetBlockDataChunkCount(size_t block_chunks) {
-        block_tracker = BlockChunkRecvdTracker(block_chunks);
-        block_tracker_initd = true;
-    }
-
-    bool IsBlockChunkAvailable(uint32_t chunk_id) const {
-        if (allSent) return true;
-        assert(block_tracker_initd);
-        return block_tracker.CheckPresent(chunk_id);
-    }
-    void SetBlockChunkAvailable(uint32_t chunk_id) {
+    void SetChunkAvailable(uint32_t chunk_id, size_t n_chunks, bool is_block_chunk) {
         if (allSent) return;
-        assert(block_tracker_initd);
-        block_tracker.CheckPresentAndMarkRecvd(chunk_id);
+
+        InitTracker(n_chunks, is_block_chunk);
+
+        if (is_block_chunk) {
+            assert(block_tracker_initd);
+            block_tracker.CheckPresentAndMarkRecvd(chunk_id);
+        } else {
+            assert(header_tracker_initd);
+            header_tracker.CheckPresentAndMarkRecvd(chunk_id);
+        }
     }
 
     void SetAllAvailable() { allSent = true; }
