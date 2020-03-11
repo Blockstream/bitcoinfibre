@@ -1406,7 +1406,7 @@ bool HandleBlockTxMessage(UDPMessage& msg, size_t length, const CService& node, 
 void ProcessDownloadTimerEvents() {
     std::unique_lock<std::recursive_mutex> lock(cs_mapUDPNodes);
     for (auto it = mapPartialBlocks.begin(); it != mapPartialBlocks.end();) {
-        if (to_millis_double(std::chrono::steady_clock::now() - it->second->timeHeaderRecvd) > 1000 * 60 * 60 * 24) // 1 day
+        if (std::chrono::steady_clock::now() - it->second->timeHeaderRecvd > std::chrono::hours(36))
             it = RemovePartialBlock(it);
         else
             it++;
