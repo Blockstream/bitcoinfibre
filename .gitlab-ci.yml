@@ -1,8 +1,8 @@
+image: glregistry.blockstream.io/satellite/bitcoinfibre:latest
+
 test:
     script:
     - set -e
-    - apt-get update -y
-    - apt-get install -yqq bsdmainutils libboost-thread-dev libboost-system-dev libboost-program-options-dev libboost-chrono-dev libboost-test-dev libboost-filesystem-dev
     - ./autogen.sh
     - ./configure --disable-wallet --enable-debug --with-gui=no
     - make -j$(nproc)
@@ -11,12 +11,8 @@ test:
 xcompile-aarch64:
   script:
     - set -e
-    - apt-get update -y
-    - apt-get install -yqq bsdmainutils libboost-thread-dev libboost-system-dev libboost-program-options-dev libboost-chrono-dev libboost-test-dev libboost-filesystem-dev
-    - apt-get install -yqq gcc-aarch64-linux-gnu g++-aarch64-linux-gnu binutils-aarch64-linux-gnu
-    - cd depends && make HOST=aarch64-linux-gnu NO_QT=1 && cd ..
     - ./autogen.sh
-    - ./configure --disable-wallet --prefix=$PWD/depends/aarch64-linux-gnu --enable-glibc-back-compat --enable-reduce-exports LDFLAGS=-static-libstdc++
+    - ./configure --disable-wallet --prefix=/src/depends/aarch64-linux-gnu --enable-glibc-back-compat --enable-reduce-exports LDFLAGS=-static-libstdc++
     - make -j$(nproc) CXXFLAGS='-pipe -O2  -fvisibility=hidden  -DLINUX_ARM -DHAVE_ARM_NEON_H -DGF256_TRY_NEON'
   only:
     refs:

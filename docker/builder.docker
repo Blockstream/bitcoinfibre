@@ -1,0 +1,12 @@
+FROM buildpack-deps:bionic
+MAINTAINER Blockstream Satellite
+
+RUN apt update && apt install -y git bsdmainutils libboost-thread-dev \
+	libboost-system-dev libboost-program-options-dev libboost-chrono-dev \
+	libboost-test-dev libboost-filesystem-dev gcc-aarch64-linux-gnu \
+	g++-aarch64-linux-gnu binutils-aarch64-linux-gnu ccache
+RUN mkdir src && cd src && \
+	git clone https://github.com/bitcoinfibre/bitcoinfibre && \
+	mv bitcoinfibre/depends . && rm -r bitcoinfibre && \
+	cd depends && make HOST=aarch64-linux-gnu NO_QT=1
+
