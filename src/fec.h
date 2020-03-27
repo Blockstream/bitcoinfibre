@@ -144,8 +144,8 @@ public:
     bool HasChunk(uint32_t chunk_id);
     bool DecodeReady() const;
     const void* GetDataPtr(uint32_t chunk_id); // Only valid until called again
-    size_t GetChunkCount() { return chunk_count; }
-    size_t GetChunksRcvd() { return chunks_recvd; }
+    size_t GetChunkCount() const { return chunk_count; }
+    size_t GetChunksRcvd() const { return chunks_recvd; }
 };
 
 bool BuildFECChunks(const std::vector<unsigned char>& data, std::pair<std::unique_ptr<FECChunkType[]>, std::vector<uint32_t>>& fec_chunks);
