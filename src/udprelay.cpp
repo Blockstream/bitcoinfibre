@@ -1429,44 +1429,122 @@ void ProcessDownloadTimerEvents() {
     //TODO: Prune setBlocksRelayed and setBlocksReceived to keep lookups fast?
 }
 
-ChunkStats GetChunkStats() {
+struct BlkChunkStats {
+    int height = -1;
+    size_t header_rcvd = 0;
+    size_t header_expected = 0;
+    size_t body_rcvd = 0;
+    size_t body_expected = 0;
+    double progress = 0.0;
+};
+
+struct ChunkStats {
+    int min_height = std::numeric_limits<int>::max();
+    int max_height = 0;
+    size_t n_blks = 0;
+    size_t n_chunks = 0;
+    BlkChunkStats min_blk;
+    BlkChunkStats max_blk;
+};
+
+BlkChunkStats GetBlkChunkStats(const PartialBlockData& b) EXCLUSIVE_LOCKS_REQUIRED(cs_mapUDPNodes) {
+    BlkChunkStats s;
+    s.height          = b.block_data.getBlockHeight();
+    s.header_rcvd     = b.header_decoder.GetChunksRcvd();
+    s.body_rcvd       = b.body_decoder.GetChunksRcvd();
+    const bool h_init = b.header_initialized;
+    const bool b_init = b.blk_initialized;
+    s.header_expected = (h_init) ? b.header_decoder.GetChunkCount() : 0;
+    s.body_expected   = (b_init) ? b.body_decoder.GetChunkCount() : 0;
+    s.progress        = (h_init && b_init) ?
+        100.0 * ((double) (s.header_rcvd + s.body_rcvd)) /
+        (s.header_expected + s.body_expected) : 0.0;
+    return s;
+}
+
+/* Convert block stats to JSON */
+UniValue BlkChunkStatsToJSON(const BlkChunkStats& s) EXCLUSIVE_LOCKS_REQUIRED(cs_mapUDPNodes) {
+        std::ostringstream h_stream;
+        std::ostringstream b_stream;
+        std::ostringstream p_stream;
+        h_stream << s.header_rcvd << " / " << s.header_expected;
+        b_stream << s.body_rcvd << " / " << s.body_expected;
+        p_stream << std::setprecision(4) << s.progress << "%";
+
+        UniValue info(UniValue::VOBJ);
+        if (s.height != -1)
+            info.pushKV("height", s.height);
+        info.pushKV("header_chunks", h_stream.str());
+        info.pushKV("body_chunks", b_stream.str());
+        info.pushKV("progress", p_stream.str());
+        return info;
+}
+
+/* Given a block height of interest, search if there is a partial block with
+ * that height currently in memory and return the stats of that block in JSON */
+UniValue BlkChunkStatsToJSON(const int target_height) {
+    std::unique_lock<std::recursive_mutex> lock(cs_mapUDPNodes);
+    for (const auto& b : mapPartialBlocks) {
+        std::unique_lock<std::mutex> block_lock(b.second->state_mutex);
+        const int height = b.second->block_data.getBlockHeight();
+        if (height == target_height) {
+            const BlkChunkStats s = GetBlkChunkStats(*b.second);
+            return BlkChunkStatsToJSON(s);
+        }
+    }
+    return UniValue::VNULL;
+}
+
+/* Return JSON with chunk stats of the current partial blocks with min and max height */
+UniValue MaxMinBlkChunkStatsToJSON() {
     std::unique_lock<std::recursive_mutex> lock(cs_mapUDPNodes);
     ChunkStats s;
 
     s.n_blks = mapPartialBlocks.size();
 
     for (const auto& b : mapPartialBlocks) {
-        const int height = b.second->block_data.getBlockHeight();
-        const size_t header_rx_cnt = b.second->header_decoder.GetChunksRcvd();
-        const size_t body_rx_cnt   = b.second->body_decoder.GetChunksRcvd();
-        const bool h_ready = b.second->header_initialized;
-        const bool b_ready = b.second->blk_initialized;
+        std::unique_lock<std::mutex> block_lock(b.second->state_mutex);
+        const BlkChunkStats blk_s = GetBlkChunkStats(*b.second);
+        s.n_chunks += blk_s.header_rcvd;
+        s.n_chunks += blk_s.body_rcvd;
 
-        if (h_ready)
-            s.n_chunks += header_rx_cnt;
-
-        if (b_ready)
-            s.n_chunks += body_rx_cnt;
-
-        if (height == -1)
+        if (blk_s.height == -1)
             continue;
 
-        if (height < s.min_height) {
-            s.min_height           = height;
-            s.min_header_rcvd      = (h_ready) ? header_rx_cnt : 0;
-            s.min_header_expected  = (h_ready) ? b.second->header_decoder.GetChunkCount() : 0;
-            s.min_body_rcvd        = (b_ready) ? body_rx_cnt : 0;
-            s.min_body_expected    = (b_ready) ? b.second->body_decoder.GetChunkCount() : 0;
+        if (blk_s.height < s.min_height) {
+            s.min_height = blk_s.height;
+            s.min_blk    = blk_s;
         }
 
-        if (height > s.max_height) {
-            s.max_height           = height;
-            s.max_header_rcvd      = (h_ready) ? header_rx_cnt : 0;
-            s.max_header_expected  = (h_ready) ? b.second->header_decoder.GetChunkCount() : 0;
-            s.max_body_rcvd        = (b_ready) ? body_rx_cnt : 0;
-            s.max_body_expected    = (b_ready) ? b.second->body_decoder.GetChunkCount() : 0;
+        if (blk_s.height > s.max_height) {
+            s.max_height = blk_s.height;
+            s.max_blk    = blk_s;
         }
     }
 
-    return s;
+    UniValue ret(UniValue::VOBJ);
+    if (s.min_height != std::numeric_limits<int>::max())
+        ret.pushKV("min_blk", BlkChunkStatsToJSON(s.min_blk));
+
+    if (s.max_height != 0)
+        ret.pushKV("max_blk", BlkChunkStatsToJSON(s.max_blk));
+
+    ret.pushKV("n_blks", s.n_blks);
+    ret.pushKV("n_chunks", s.n_chunks);
+
+    return ret;
+}
+
+/* Return JSON with chunk stats of all current partial blocks */
+UniValue AllBlkChunkStatsToJSON() {
+    std::unique_lock<std::recursive_mutex> lock(cs_mapUDPNodes);
+    UniValue o(UniValue::VOBJ);
+    for (const auto& b : mapPartialBlocks) {
+        std::unique_lock<std::mutex> block_lock(b.second->state_mutex);
+        const uint64_t hash_prefix = b.first.first;
+        const BlkChunkStats s      = GetBlkChunkStats(*b.second);
+        UniValue info              = BlkChunkStatsToJSON(s);
+        o.__pushKV(std::to_string(hash_prefix), info);
+    }
+    return o;
 }

@@ -1,3 +1,4 @@
+\
 // Copyright (c) 2017 Matt Corallo
 // Unlike the rest of Bitcoin Core, this file is
 // distributed under the Affero General Public License (AGPL v3)
@@ -159,51 +160,73 @@ UniValue disconnectudpnode(const JSONRPCRequest& request)
     return NullUniValue;
 }
 
+static std::string StatsDescriptionString()
+{
+    return "  \"height\": n,                  (numeric) Block height\n"
+        "  \"header_chunks\": \"rx / exp\",  (string)  Header FEC chunks received / expected\n"
+        "  \"body_chunks\": \"rx / exp\",    (string)  Body FEC chunks received / expected\n"
+        "  \"progress\": \"x%\"              (string)  Percentage of chunks received\n";
+}
+
 UniValue getchunkstats(const JSONRPCRequest& request)
 {
     RPCHelpMan{"getchunkstats",
-	"\nReturns some statistics about chunks of current partial blocks.\n",
-	{},
-	RPCResult{
-	    "{\n"
-            "  \"min_height\":n,           (numeric) The lowest partial block currently under processing\n"
-            "  \"min_height_progress\":n,  (string)  Chunk progress of lowest partial block under processing\n"
-            "  \"max_height\":n,           (numeric) The highest partial block currently under processing\n"
-            "  \"max_height_progress\":n,  (string)  Chunk progress of highest partial block under processing\n"
-            "  \"n_blks\":n,               (numeric) Total number of partial blocks currently under processing\n"
-            "  \"n_chunks\":n,             (numeric) Total number of chunks within current partial blocks\n"
-            "}\n"
-	},
-	RPCExamples{
-	    HelpExampleCli("getchunkstats", "")
-	    + HelpExampleRpc("getchunkstats", "")
-	}
+    "\nReturns chunk statistics of current partial blocks.\n",
+    {
+        {"height", RPCArg::Type::NUM, RPCArg::Optional::OMITTED, "Height of the partial block of interest. If set to 0, show stats of all current partial blocks."},
+    },
+    {
+        RPCResult{
+        "if height is not provided",
+        "{\n"
+        "\"min_blk\": {                    (json object)\n"
+        + StatsDescriptionString()
+        + "},\n"
+        "\"max_blk\": {                    (json object)\n"
+        + StatsDescriptionString()
+        + "},\n"
+        "\"n_blks\": n,                    (numeric) Total number of partial blocks currently under processing\n"
+        "\"n_chunks\": n                   (numeric) Total number of chunks within current partial blocks\n"
+        "}\n"
+        },
+        RPCResult{
+        "for height > 0",
+        "{                               (json object)\n"
+        + StatsDescriptionString()
+        + "}\n"
+        },
+        RPCResult{
+        "for height = 0",
+        "{                               (json object)\n"
+        "  \"block_hash_prefix\": {        (json object)\n"
+        + StatsDescriptionString()
+        + "  },\n"
+        "  ...\n"
+        "}\n"
+        }
+    },
+    RPCExamples{
+        HelpExampleCli("getchunkstats", "")
+        + HelpExampleRpc("getchunkstats", "100000")
+    }
     }.Check(request);
 
-    const ChunkStats stats = GetChunkStats();
-
-    // Progress strings
-    std::ostringstream min_progress;
-    std::ostringstream max_progress;
-    min_progress << "header: " << stats.min_header_rcvd << "/" << \
-        stats.min_header_expected << " body: " << stats.min_body_rcvd <<
-        "/" << stats.min_body_expected;
-    max_progress << "header: " << stats.max_header_rcvd << "/" << \
-        stats.max_header_expected << " body: " << stats.max_body_rcvd <<
-        "/" << stats.max_body_expected;
-
-    UniValue ret(UniValue::VOBJ);
-    ret.pushKV("min_height", stats.min_height);
-    ret.pushKV("min_height_progress", min_progress.str());
-    ret.pushKV("max_height", stats.max_height);
-    ret.pushKV("max_height_progress", max_progress.str());
-    ret.pushKV("n_blks", stats.n_blks);
-    ret.pushKV("n_chunks", stats.n_chunks);
-
-    return ret;
+    if (request.params[0].isNull())
+        return MaxMinBlkChunkStatsToJSON();
+    else {
+        RPCTypeCheckArgument(request.params[0], UniValue::VNUM);
+        const int target_height = request.params[0].get_int();
+        if (target_height == 0) {
+            return AllBlkChunkStatsToJSON();
+        } else {
+            UniValue info = BlkChunkStatsToJSON(request.params[0].get_int());
+            if (info.isNull())
+                throw JSONRPCError(RPC_INVALID_ADDRESS_OR_KEY, "Block height not in partial blocks");
+            else
+                return info;
+        }
+    }
 }
-
-
 
 static const CRPCCommand commands[] =
 { //  category              name                      actor (function)         argNames
@@ -211,7 +234,7 @@ static const CRPCCommand commands[] =
     { "udpnetwork",         "getudppeerinfo",         &getudppeerinfo,         {} },
     { "udpnetwork",         "addudpnode",             &addudpnode,             {"node", "local_magic", "remote_magic", "ultimately_trusted", "command", "group"} },
     { "udpnetwork",         "disconnectudpnode",      &disconnectudpnode,      {"node"} },
-    { "udpnetwork",         "getchunkstats",          &getchunkstats,          {} },
+    { "udpnetwork",         "getchunkstats",          &getchunkstats,          {"height"} },
 };
 
 void RegisterUDPNetRPCCommands(CRPCTable &t)

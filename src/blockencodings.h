@@ -282,7 +282,7 @@ public:
     unsigned char* GetChunk(size_t chunk);
     void MarkChunkAvailable(size_t chunk);
 
-    int getBlockHeight() { return height; }
+    int getBlockHeight() const { return height; };
 };
 
 #endif // BITCOIN_BLOCKENCODINGS_H
