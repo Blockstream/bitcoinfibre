@@ -27,6 +27,7 @@ public:
  */
 static const CRPCConvertParam vRPCConvertParams[] =
 {
+    { "getchunkstats", 0, "height" },
     { "addudpnode", 3, "ultimately_trusted" },
     { "addudpnode", 5, "group" },
     { "setmocktime", 0, "timestamp" },
