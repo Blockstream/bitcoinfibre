@@ -92,15 +92,17 @@ enum UDPState {
 };
 
 struct BlockChunkCount {
-    uint32_t data_rcvd;   // number of received block contents (data) chunks
-    uint32_t data_used;   // number of used block contents (data) chunks
-    uint32_t header_rcvd; // number of received block header chunks
-    uint32_t header_used; // number of used block header chunks
-    uint32_t data_to_decode;   // number of data chunks until able to decode
-    uint32_t header_to_decode; // number of header chunks until able to decode
-    std::chrono::steady_clock::time_point t_first;  // time first chunk received
-    std::chrono::steady_clock::time_point t_decode; // time when ready to decode
-    std::chrono::steady_clock::time_point t_last;   // last time chunk received
+    uint32_t data_rcvd = 0;   // number of received block contents (data) chunks
+    uint32_t data_used = 0;   // number of used block contents (data) chunks
+    uint32_t header_rcvd = 0; // number of received block header chunks
+    uint32_t header_used = 0; // number of used block header chunks
+    uint32_t data_to_decode = 0;   // number of data chunks until able to decode
+    uint32_t header_to_decode = 0; // number of header chunks until able to decode
+    std::chrono::steady_clock::time_point t_first = std::chrono::steady_clock::now();  // time first chunk received
+    std::chrono::steady_clock::time_point t_decode = std::chrono::steady_clock::now(); // time when ready to decode
+    std::chrono::steady_clock::time_point t_last = std::chrono::steady_clock::now();   // last time chunk received
+    double accum_chunk_interval = 0; // accumulator for average interval computation
+    double avg_chunk_interval = 0;   // average interval between chunks
     /* NOTE: not all chunks received before the block becomes decodable are
      * effectively used. Some chunks can be known already, in which case they
      * are dropped (not used). Thus, not necessarily the count of
