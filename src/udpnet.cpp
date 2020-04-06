@@ -423,17 +423,19 @@ static bool InitializeUDPMulticast(std::vector<int> &udp_socks,
 #ifdef __linux__
             if (actual_rcvbuf != (2*rcvbuf)) {
                 const int tgtbuf = (2*rcvbuf) + 8;
-                LogPrintf("UDP: WARNING - setsockopt(SO_RCVBUF) failed to set buffer size of %d bytes.\n"
+                LogPrintf("UDP: setsockopt(SO_RCVBUF) failed to set buffer size of %d bytes.\n"
                           "Please check the maximum OS buffer size by running:\n\n> sysctl net.core.rmem_max\n\n"
                           "If the maximum is less than %d, you can increase it by running:\n\n"
                           "> sysctl -w net.core.rmem_max=%d\n\n",
                           rcvbuf, tgtbuf, tgtbuf);
+                return false;
             }
 #else
             if (actual_rcvbuf < rcvbuf) {
-                LogPrintf("UDP: WARNING - setsockopt(SO_RCVBUF) tried to set buffer size of %d bytes, but got %d bytes.\n"
+                LogPrintf("UDP: setsockopt(SO_RCVBUF) tried to set buffer size of %d bytes, but got %d bytes.\n"
                           "Please check and configure the maximum receive buffer size allowed in the OS.\n",
                           rcvbuf, actual_rcvbuf);
+                return false;
             }
 #endif
 
