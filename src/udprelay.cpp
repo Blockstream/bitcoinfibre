@@ -1074,12 +1074,12 @@ static bool HandleTx(UDPMessage& msg, size_t length, const CService& node, UDPCo
 
 /* Print chunk stats
  *
- * Print whenever the block hash being received by a UDP socket changes. To
- * prevent an anticipated print in case the sender node is multiplexing blocks
- * in the stream, check also that sufficient time has elapsed since the last
- * chunk received of the block. If an even longer duration has elapsed without
- * further chunks of the block, assume we are probably not going to receive
- * chunks of that block anymore and print the stats.
+ * Print whenever sufficient time has elapsed since the last chunk received for
+ * a given block and from a given socket. This sufficient time is either an
+ * interval significantly higher than the average chunk arrival interval, or the
+ * arbitrarily large value of 5 seconds, whatever is the largest. Note that, if
+ * the same block is received on multiple sockets, independent stats will be
+ * printed for each socket.
  */
 static void printChunkStats(const uint64_t hash_prefix, const int sockfd,
                             const std::map<std::pair<uint64_t, int>, BlockChunkCount>::iterator& currentIt) {
@@ -1094,11 +1094,10 @@ static void printChunkStats(const uint64_t hash_prefix, const int sockfd,
             continue;
         }
 
-        double elapsed_since_last_rx = to_millis_double(t_now - chunkCountIt->second.t_last);
-        if (elapsed_since_last_rx > 5000.0 ||
-            (chunkCountIt->first.first != hash_prefix &&
-             chunkCountIt->first.second == sockfd &&
-             elapsed_since_last_rx > 2000.0)) {
+        const double elapsed_since_last_rx = to_millis_double(t_now - chunkCountIt->second.t_last);
+        const double timeout = std::max<double>(300000, (3*chunkCountIt->second.avg_chunk_interval));
+        const uint32_t tot_received = chunkCountIt->second.header_rcvd + chunkCountIt->second.data_rcvd;
+        if (tot_received > 1 && elapsed_since_last_rx > timeout) {
             double dec_duration = to_millis_double(chunkCountIt->second.t_decode -
                                                    chunkCountIt->second.t_first);
             double tot_duration = to_millis_double(chunkCountIt->second.t_last -
@@ -1120,8 +1119,9 @@ static void printChunkStats(const uint64_t hash_prefix, const int sockfd,
                      chunkCountIt->second.data_used,
                      chunkCountIt->second.data_rcvd,
                      chunkCountIt->second.data_to_decode);
-            LogPrint(BCLog::FEC, "%9.2f ms/%9.2f ms\n",
-                     tot_duration, dec_duration);
+            LogPrint(BCLog::FEC, "%9.2f ms/%9.2f ms/%9.2f ms\n",
+                     tot_duration, dec_duration,
+                     chunkCountIt->second.avg_chunk_interval);
 
             chunkCountIt = mapChunkCount.erase(chunkCountIt);
         } else
@@ -1172,12 +1172,21 @@ bool HandleBlockTxMessage(UDPMessage& msg, size_t length, const CService& node, 
         std::chrono::steady_clock::time_point t_chunk_rcvd(std::chrono::steady_clock::now());
 
         mapChunkCountIt = mapChunkCount.emplace(std::make_pair(hash_prefix, sockfd),
-                                                BlockChunkCount{0, 0, 0, 0, 0, 0, t_chunk_rcvd, t_chunk_rcvd, t_chunk_rcvd}).first;
+                                                BlockChunkCount()).first;
 
         if (is_blk_header_chunk)
             mapChunkCountIt->second.header_rcvd++;
         else
             mapChunkCountIt->second.data_rcvd++;
+
+        /* Compute average chunk interval (consider that we can't compute the
+         * interval for the first chunk received) */
+        const uint32_t tot_received = mapChunkCountIt->second.header_rcvd + mapChunkCountIt->second.data_rcvd;
+        if (tot_received > 1) {
+            const double chunk_interval = to_millis_double(t_chunk_rcvd - mapChunkCountIt->second.t_last);
+            mapChunkCountIt->second.accum_chunk_interval += chunk_interval;
+            mapChunkCountIt->second.avg_chunk_interval = mapChunkCountIt->second.accum_chunk_interval / (tot_received -1);
+        }
 
         mapChunkCountIt->second.t_last = t_chunk_rcvd;
 
