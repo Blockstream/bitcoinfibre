@@ -201,7 +201,6 @@ static void OpenMulticastConnection(const CService& service, bool multicast_tx, 
 static UDPMulticastInfo ParseUDPMulticastInfo(const std::string& s, bool tx);
 static std::vector<UDPMulticastInfo> GetUDPMulticastInfo();
 
-static const double txn_per_sec = 6.0;
 static void MulticastBackfillThread(const CService& mcastNode, const UDPMulticastInfo *info);
 static void LaunchMulticastBackfillThreads();
 static std::vector<std::thread> mcast_tx_threads;
@@ -1260,7 +1259,8 @@ static void MulticastBackfillThread(const CService& mcastNode,
 
 static void MulticastTxnThread(const CService& mcastNode,
                                const UDPMulticastInfo *info) {
-    assert(info->send_txns);
+    assert(info->txn_per_sec > 0);
+    double txn_per_sec = (double) info->txn_per_sec;
 
     /* Start only after the initial sync */
     while (::ChainstateActive().IsInitialBlockDownload() && !send_messages_break)
@@ -1377,7 +1377,7 @@ static void LaunchMulticastBackfillThreads() {
                         );
                 });
 
-            if (info.send_txns) {
+            if (info.txn_per_sec > 0) {
                 mcast_tx_threads.emplace_back([&info, &node] {
                         char name[50];
                         sprintf(name, "udptxnbackfill %d-%d", info.physical_idx,
@@ -1500,17 +1500,17 @@ static UDPMulticastInfo ParseUDPMulticastInfo(const std::string& s, const bool t
         }
         info.bw  = atoi64(s.substr(mcastaddr_end + 1, bw_end - mcastaddr_end - 1));
 
-        const size_t send_txns_end = s.find(',', bw_end + 1);
-        if (send_txns_end == std::string::npos)
-            info.send_txns = (bool) atoi64(s.substr(bw_end + 1));
+        const size_t txn_per_sec_end = s.find(',', bw_end + 1);
+        if (txn_per_sec_end == std::string::npos)
+            info.txn_per_sec = atoi64(s.substr(bw_end + 1));
         else {
-            info.send_txns = (bool) atoi64(s.substr(bw_end + 1, send_txns_end - bw_end - 1));
+            info.txn_per_sec = atoi64(s.substr(bw_end + 1, txn_per_sec_end - bw_end - 1));
 
-            const size_t ttl_end = s.find(',', send_txns_end + 1);
+            const size_t ttl_end = s.find(',', txn_per_sec_end + 1);
             if (ttl_end == std::string::npos) {
-                info.ttl = atoi(s.substr(send_txns_end + 1));
+                info.ttl = atoi(s.substr(txn_per_sec_end + 1));
             } else {
-                info.ttl   = atoi(s.substr(send_txns_end + 1, ttl_end - send_txns_end - 1));
+                info.ttl   = atoi(s.substr(txn_per_sec_end + 1, ttl_end - txn_per_sec_end - 1));
 
                 const size_t depth_end = s.find(',', ttl_end + 1);
                 if (depth_end == std::string::npos) {
