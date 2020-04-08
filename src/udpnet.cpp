@@ -420,24 +420,19 @@ static bool InitializeUDPMulticast(std::vector<int> &udp_socks,
                 return false;
             }
 
-#ifdef __linux__
-            if (actual_rcvbuf != (2*rcvbuf)) {
-                const int tgtbuf = (2*rcvbuf) + 8;
-                LogPrintf("UDP: setsockopt(SO_RCVBUF) failed to set buffer size of %d bytes.\n"
-                          "Please check the maximum OS buffer size by running:\n\n> sysctl net.core.rmem_max\n\n"
-                          "If the maximum is less than %d, you can increase it by running:\n\n"
-                          "> sysctl -w net.core.rmem_max=%d\n\n",
-                          rcvbuf, tgtbuf, tgtbuf);
-                return false;
-            }
-#else
             if (actual_rcvbuf < rcvbuf) {
                 LogPrintf("UDP: setsockopt(SO_RCVBUF) tried to set buffer size of %d bytes, but got %d bytes.\n"
                           "Please check and configure the maximum receive buffer size allowed in the OS.\n",
                           rcvbuf, actual_rcvbuf);
+#ifdef __linux__
+                const int tgtbuf = (2*rcvbuf) + 8;
+                LogPrintf("UDP: You can check by running:\n\n> sysctl net.core.rmem_max\n\n"
+                          "If the maximum is less than %d, you can increase it by running:\n\n"
+                          "> sysctl -w net.core.rmem_max=%d\n\n",
+                          rcvbuf, tgtbuf, tgtbuf);
+#endif
                 return false;
             }
-#endif
 
             /* Join multicast group, but only allow multicast packets from a
              * specific source address */
