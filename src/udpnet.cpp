@@ -152,11 +152,12 @@ struct PerQueueSendState {
     std::chrono::steady_clock::time_point last_send;
 };
 struct PerGroupMessageQueue {
-    std::array<PendingMessagesBuff, 3> buffs;
+    std::array<PendingMessagesBuff, 4> buffs;
     /* Three message queues (buffers) per group:
      * 0) high priority
      * 1) best-effort (non priority)
-     * 2) background (used by backfill thread)
+     * 2) background txns (used by txn thread)
+     * 3) background blocks (used by backfill thread)
      *
      * The current buffer is indicated by `state.buff_id`. This id is set to -1
      * when all buffers are empty.
@@ -1209,7 +1210,7 @@ static void MulticastBackfillThread(const CService& mcastNode,
             assert(b.second.idx < b.second.msgs.size());
             const UDPMessage& msg = b.second.msgs[b.second.idx];
             b.second.idx++;
-            SendMessage(msg, sizeof(UDPMessageHeader) + MAX_UDP_MESSAGE_LENGTH, queue, queue.buffs[2], mcastNode, multicast_checksum_magic);
+            SendMessage(msg, sizeof(UDPMessageHeader) + MAX_UDP_MESSAGE_LENGTH, queue, queue.buffs[3], mcastNode, multicast_checksum_magic);
         }
 
         /* Print some info regarding blocks that are currently in the
