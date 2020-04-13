@@ -1344,18 +1344,6 @@ static void MulticastTxnThread(const CService& mcastNode,
                 }
             }
 
-            if (debugMcast) {
-                n_sent_txns += txn_to_send.size();
-                const auto now = std::chrono::steady_clock::now();
-                const double timeDeltaMillis = to_millis_double(now - last_print);
-                if (timeDeltaMillis > 1000*stats_interval) {
-                    LogPrint(BCLog::UDPMCAST, "UDP: Multicast Tx %lu-%lu - sent %d txns in %d secs\n",
-                             info->physical_idx, info->logical_idx, n_sent_txns, timeDeltaMillis/1000);
-                    last_print = now;
-                    n_sent_txns = 0;
-                }
-            }
-
             for (const CTransactionRef& tx : txn_to_send) {
                 std::vector<std::pair<UDPMessage, size_t>> msgs;
                 UDPFillMessagesFromTx(*tx, msgs);
@@ -1363,6 +1351,22 @@ static void MulticastTxnThread(const CService& mcastNode,
                     const UDPMessage& msg = msg_info.first;
                     const size_t msg_size = msg_info.second;
                     SendMessage(msg, sizeof(UDPMessageHeader) + udp_blk_msg_header_size + msg_size, queue, queue.buffs[2], mcastNode, multicast_checksum_magic);
+                }
+
+                if (debugMcast) {
+                    n_sent_txns++;
+                    const auto now = std::chrono::steady_clock::now();
+                    const double timeDeltaMillis = to_millis_double(now - last_print);
+                    if (timeDeltaMillis > 1000*stats_interval) {
+                        LogPrint(BCLog::UDPMCAST,
+                                 "UDP: Multicast Tx %lu-%lu - sent %4d txns "
+                                 "in %5.2f secs (current quota: %5.2f)\n",
+                                 info->physical_idx, info->logical_idx,
+                                 n_sent_txns, timeDeltaMillis/1000,
+                                 (txn_quota_sec * txn_per_sec));
+                        last_print = now;
+                        n_sent_txns = 0;
+                    }
                 }
             }
         } else {
