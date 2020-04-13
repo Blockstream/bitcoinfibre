@@ -1327,9 +1327,14 @@ static void MulticastTxnThread(const CService& mcastNode,
                     std::vector<CTransactionRef> to_add{iter.GetSharedTx()};
                     while (!to_add.empty()) {
                         bool has_dep = false;
+                        /* If any input of the transaction references a txn that
+                         * is also in the mempool, and which has not been sent
+                         * previously, then add this parent txn also to the list
+                         * of txns to be sent over multicast */
                         for (const CTxIn& txin : to_add.back()->vin) {
                             CTxMemPool::txiter init = mempool.mapTx.find(txin.prevout.hash);
-                            if (init != mempool.mapTx.end() && !txids_to_send.count(txin.prevout.hash)) {
+                            if (init != mempool.mapTx.end() && !txids_to_send.count(txin.prevout.hash) &&
+                                !sent_txn_bloom->contains(txin.prevout.hash)) {
                                 to_add.emplace_back(init->GetSharedTx());
                                 has_dep = true;
                             }
