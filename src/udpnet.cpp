@@ -430,7 +430,7 @@ static bool InitializeUDPMulticast(std::vector<int> &udp_socks,
                 LogPrintf("UDP: You can check by running:\n\n> sysctl net.core.rmem_max\n\n"
                           "If the maximum is less than %d, you can increase it by running:\n\n"
                           "> sysctl -w net.core.rmem_max=%d\n\n",
-                          rcvbuf, tgtbuf, tgtbuf);
+                          tgtbuf, tgtbuf);
 #endif
                 return false;
             }
