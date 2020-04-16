@@ -201,9 +201,9 @@ static inline void FillCommonMessageHeader(UDPMessage& msg, const uint64_t hash_
     msg.msg.block.obj_length   = htole32(obj_size);
 }
 
-static inline void FillBlockMessageHeader(UDPMessage& msg, const uint64_t hash_prefix, UDPMessageType type, const size_t obj_size) {
+static inline void FillBlockMessageHeader(UDPMessage& msg, const uint64_t hash_prefix, UDPMessageType type, const size_t obj_size, uint8_t flags = HAVE_BLOCK) {
     // First fill in common message elements
-    FillCommonMessageHeader(msg, hash_prefix, type | HAVE_BLOCK, obj_size);
+    FillCommonMessageHeader(msg, hash_prefix, type | flags, obj_size);
 }
 
 /**
@@ -216,7 +216,7 @@ static inline void FillBlockMessageHeader(UDPMessage& msg, const uint64_t hash_p
 static void RelayChunks(const uint256& blockhash, UDPMessageType type, const std::vector<unsigned char>& data, DataFECer& fec) {
     UDPMessage msg;
     uint64_t hash_prefix = blockhash.GetUint64(0);
-    FillBlockMessageHeader(msg, hash_prefix, type, data.size());
+    FillBlockMessageHeader(msg, hash_prefix, type, data.size(), (HAVE_BLOCK | TIP_BLOCK));
 
     const bool fBench = LogAcceptCategory(BCLog::BENCH);
     std::chrono::steady_clock::time_point t_start, t_uncoded, t_coded;
@@ -273,7 +273,7 @@ static void RelayChunks(const uint256& blockhash, UDPMessageType type, const std
 static void SendLimitedDataChunks(const uint256& blockhash, UDPMessageType type, const std::vector<unsigned char>& data) {
     UDPMessage msg;
     uint64_t hash_prefix = blockhash.GetUint64(0);
-    FillBlockMessageHeader(msg, hash_prefix, type, data.size());
+    FillBlockMessageHeader(msg, hash_prefix, type, data.size(), (HAVE_BLOCK | TIP_BLOCK));
 
     RelayUncodedChunks(msg, data, std::numeric_limits<size_t>::max(), hash_prefix, 3); // Send 3 packets to each peer, in RR
 }
@@ -1153,6 +1153,8 @@ bool HandleBlockTxMessage(UDPMessage& msg, size_t length, const CService& node, 
 
     const bool is_blk_header_chunk  = (msg.header.msg_type & UDP_MSG_TYPE_TYPE_MASK) == MSG_TYPE_BLOCK_HEADER;
     const bool is_blk_content_chunk = (msg.header.msg_type & UDP_MSG_TYPE_TYPE_MASK) == MSG_TYPE_BLOCK_CONTENTS;
+    const bool they_have_block      = msg.header.msg_type & HAVE_BLOCK;
+    const bool tip_block            = msg.header.msg_type & TIP_BLOCK; // a block that was just inserted on the tip of the chain and was relayed 
 
     const uint64_t hash_prefix = msg.msg.block.hash_prefix; // Need a reference in a few places, but its packed, so we can't have one directly
     CService peer              = state.connection.fTrusted ? TRUSTED_PEER_DUMMY : node;
@@ -1231,14 +1233,13 @@ bool HandleBlockTxMessage(UDPMessage& msg, size_t length, const CService& node, 
          * maps. Hence, the node must be registered in perNodeChunkCount in
          * order for the erasing from chunks_avail to work.
          */
-        bool const they_have_block = msg.header.msg_type & HAVE_BLOCK;
         chunks_avail_it = state.chunks_avail.emplace(std::piecewise_construct,
                                                      std::forward_as_tuple(hash_prefix),
                                                      std::forward_as_tuple(they_have_block, n_chunks, is_blk_header_chunk)
             ).first;
     }
 
-    if (msg.header.msg_type & HAVE_BLOCK)
+    if (they_have_block)
         chunks_avail_it->second.SetAllAvailable();
     else {
         // By calling Set*ChunkAvailable before SendMessageToNode's
@@ -1322,12 +1323,13 @@ bool HandleBlockTxMessage(UDPMessage& msg, size_t length, const CService& node, 
             return true;
         }
 
-        if (is_blk_content_chunk)
+        if (is_blk_content_chunk && tip_block)
             DoBackgroundBlockProcessing(*it); // Kick off mempool scan (waits on us to unlock block_lock)
         /* The scan will work as long as !is_header_processing &&
          * !block.in_header && block.blk_initialized when the PartialBlockData
          * queued in block_process_queue is finally processed. Otherwise, it
-         * won't start. */
+         * won't start. Also, the scan is only useful for new (relayed)blocks
+         * inserted on the tip of the chain. Further notes below. */
     }
 
     FECDecoder& decoder = is_blk_header_chunk ? block.header_decoder : block.body_decoder;
@@ -1408,7 +1410,26 @@ bool HandleBlockTxMessage(UDPMessage& msg, size_t length, const CService& node, 
         // We do not RemovePartialBlock as we want ChunkAvailableSets to be there when UDPRelayBlock gets called
         // from inside ProcessBlockThread, so after we notify the ProcessNewBlockThread we cannot access block.
         block_lock.unlock();
-        DoBackgroundBlockProcessing(*it); // Decode block and call ProcessNewBlock
+
+        /* If this is a relayed block (from the tip of the chain), we kick-off
+         * the processing of the FEC object as soon as it is ready, regardless
+         * of which object it is. By doing so, if the header is the object that
+         * is decoded first (the usual case), the ProcessBlockThread will
+         * process the header right now and prepare (reserved space for) the
+         * chunk-coded block. Subsequently, as soon as the first body chunk
+         * comes, the process thread will start to prefill the chunk-coded block
+         * with txns from the mempool. In contrast, if this is a backfill block,
+         * we can wait until both header and body FEC objects are ready to be
+         * decoded. If we pushed the header earlier for such backfill (old)
+         * blocks, we would end up wasting a lot of memory with reserved
+         * chunk-coded blocks that would not be prefilled. */
+        if (tip_block) {
+            DoBackgroundBlockProcessing(*it);
+        } else {
+            if (block.is_header_processing && block.is_decodeable) {
+                DoBackgroundBlockProcessing(*it);
+            }
+        }
     }
 
     if (fBench && new_block) {
