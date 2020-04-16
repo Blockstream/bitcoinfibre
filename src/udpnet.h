@@ -53,6 +53,7 @@ static_assert(sizeof(UDPMessageHeader) == 17, "__attribute__((packed)) must work
 
 enum UDPBlockMessageFlags { // Put in the msg_type
     HAVE_BLOCK = (1 << 6),
+    TIP_BLOCK  = (1 << 7)  // mark that this is a block on the chain's tip (relayed)
 };
 
 struct __attribute__((packed)) UDPBlockMessage { // (also used for txn)
