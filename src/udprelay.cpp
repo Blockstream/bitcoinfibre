@@ -728,16 +728,26 @@ static void ProcessBlockThread() {
                     block.is_decodeable = true;
                 block.is_header_processing = false;
 
+                const uint256 blockHash = block.block_data.GetBlockHash();
+
+                if (fBench) {
+                    std::chrono::steady_clock::time_point header_provided(std::chrono::steady_clock::now());
+                    LogPrintf("UDP: Block %s - Got full header and shorttxids from %s in %lf %lf %lf ms\n", blockHash.ToString(), block.nodeHeaderRecvd.ToString(), to_millis_double(data_copied - decode_start), to_millis_double(header_deserialized - data_copied), to_millis_double(header_provided - header_deserialized));
+                } else
+	                LogPrintf("UDP: Block %s - Got full header and shorttxids from %s\n", blockHash.ToString(), block.nodeHeaderRecvd.ToString());
+
+                if (block.block_data.AreAllTxnsInMempool())
+                    LogPrintf("UDP: Block %s - Ready to be decoded (all txns available)\n", blockHash.ToString());
+                else if (block.block_data.IsBlockAvailable())
+                    LogPrintf("UDP: Block %s - Ready to be decoded (all uncoded chunks available)\n", blockHash.ToString());
+                else if (block.is_decodeable)
+                    LogPrintf("UDP: Block %s - Ready to be decoded (enough FEC chunks available)\n", blockHash.ToString());
+
                 if (block.is_decodeable)
                     more_work = true;
                 else
                     lock.unlock();
 
-                if (fBench) {
-                    std::chrono::steady_clock::time_point header_provided(std::chrono::steady_clock::now());
-                    LogPrintf("UDP: Got full header and shorttxids from %s in %lf %lf %lf ms\n", block.nodeHeaderRecvd.ToString(), to_millis_double(data_copied - decode_start), to_millis_double(header_deserialized - data_copied), to_millis_double(header_provided - header_deserialized));
-                } else
-                    LogPrintf("UDP: Got full header and shorttxids from %s\n", block.nodeHeaderRecvd.ToString());
             } else if (block.block_data.IsHeaderNull()) {
                 /* If we are not going to process the header data now, it is
                  * because we are either going to process block data or fill
@@ -915,7 +925,7 @@ static void ProcessBlockThread() {
                 }
                 if (lock && !more_work)
                     lock.unlock();
-                LogPrintf("UDP: Initialized block %s with %ld/%ld mempool-provided chunks (or more)\n", blockHash.ToString(), mempool_provided_chunks, total_chunk_count);
+                LogPrintf("UDP: Block %s - Initialized with %ld/%ld mempool-provided chunks (or more)\n", blockHash.ToString(), mempool_provided_chunks, total_chunk_count);
             }
         } while (more_work);
     }
