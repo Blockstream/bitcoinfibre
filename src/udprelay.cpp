@@ -742,6 +742,13 @@ static void ProcessBlockThread() {
                 else if (block.is_decodeable)
                     LogPrintf("UDP: Block %s - Ready to be decoded (enough FEC chunks available)\n", blockHash.ToString());
 
+                if (LogAcceptCategory(BCLog::FEC)) {
+                    size_t mempool_txns = block.block_data.GetMempoolCount();
+                    size_t n_blk_txns   = header.BlockTxCount();
+                    LogPrint(BCLog::FEC, "UDP: Block %s - Txns available: %ld/%ld  Txn hit ratio: %f\n",
+                             blockHash.ToString(), mempool_txns, n_blk_txns, (double) mempool_txns / n_blk_txns);
+                }
+
                 if (block.is_decodeable)
                     more_work = true;
                 else
@@ -925,6 +932,9 @@ static void ProcessBlockThread() {
                 if (lock && !more_work)
                     lock.unlock();
                 LogPrintf("UDP: Block %s - Initialized with %ld/%ld mempool-provided chunks (or more)\n", blockHash.ToString(), mempool_provided_chunks, total_chunk_count);
+                LogPrint(BCLog::FEC, "UDP: Block %s - Chunk hit ratio: %f\n",
+                         blockHash.ToString(),
+                         (double) mempool_provided_chunks /total_chunk_count);
             }
         } while (more_work);
     }
