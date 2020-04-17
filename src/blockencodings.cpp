@@ -587,6 +587,11 @@ bool PartiallyDownloadedChunkBlock::IsBlockAvailable() const {
     return allTxnFromMempool || !remainingChunks;
 }
 
+bool PartiallyDownloadedChunkBlock::AreAllTxnsInMempool() const {
+    assert(!header.IsNull());
+    return allTxnFromMempool;
+}
+
 bool PartiallyDownloadedChunkBlock::AreChunksAvailable() const {
     return !header.IsNull() && !allTxnFromMempool;
 }
