@@ -269,6 +269,8 @@ public:
     const std::vector<unsigned char>& GetCodedBlock() const { assert(AreChunksAvailable() && IsBlockAvailable()); return codedBlock; }
     uint256& GetBlockHash() const;
 
+    size_t GetMempoolCount() const { return mempool_count; }
+
     // Chunk-based methods are only callable if AreChunksAvailable()
     bool AreChunksAvailable() const;
     size_t GetChunkCount() const;
