@@ -636,6 +636,7 @@ static std::mutex block_process_mutex;
 static std::condition_variable block_process_cv;
 static std::atomic_bool block_process_shutdown(false);
 static std::queue<std::pair<std::pair<uint64_t, CService>, std::shared_ptr<PartialBlockData> > > block_process_queue;
+static size_t queue_size_warn = 10; // Print queue size when it exceeds this
 
 static void DoBackgroundBlockProcessing(const std::pair<std::pair<uint64_t, CService>, std::shared_ptr<PartialBlockData> >& block_data) {
     // If we just blindly call ProcessNewBlock here, we have a cs_main/cs_mapUDPNodes inversion
@@ -643,6 +644,10 @@ static void DoBackgroundBlockProcessing(const std::pair<std::pair<uint64_t, CSer
     // Instead we pass the processing back to ProcessNewBlockThread without cs_mapUDPNodes
     std::unique_lock<std::mutex> lock(block_process_mutex);
     block_process_queue.emplace(block_data);
+    if (block_process_queue.size() > queue_size_warn) {
+        LogPrint(BCLog::FEC, "Block process queue size: %ld\n",
+                 block_process_queue.size());
+    }
     lock.unlock();
     block_process_cv.notify_all();
 }
