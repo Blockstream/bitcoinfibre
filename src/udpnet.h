@@ -37,8 +37,8 @@ enum UDPMessageType {
     MSG_TYPE_TX_CONTENTS = 7,
 };
 
-static const uint8_t UDP_MSG_TYPE_FLAGS_MASK = 0b11000000;
-static const uint8_t UDP_MSG_TYPE_TYPE_MASK = 0b00111111;
+static const uint8_t UDP_MSG_TYPE_FLAGS_MASK = 0b11100000;
+static const uint8_t UDP_MSG_TYPE_TYPE_MASK = 0b00011111;
 
 struct __attribute__((packed)) UDPMessageHeader {
     uint64_t chk1;
@@ -52,6 +52,7 @@ static_assert(sizeof(UDPMessageHeader) == 17, "__attribute__((packed)) must work
 #define MAX_UDP_MESSAGE_LENGTH 1167
 
 enum UDPBlockMessageFlags { // Put in the msg_type
+    EMPTY_BLOCK = (1 << 5), // mark when block body is empty (only header is sent)
     HAVE_BLOCK = (1 << 6),
     TIP_BLOCK  = (1 << 7)  // mark that this is a block on the chain's tip (relayed)
 };
