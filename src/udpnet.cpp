@@ -1533,7 +1533,7 @@ static UDPMulticastInfo ParseUDPMulticastInfo(const std::string& s, const bool t
                         info.dscp  = atoi(s.substr(depth_end + 1));
                     } else {
                         info.dscp  = atoi(s.substr(depth_end + 1, dscp_end - depth_end - 1));
-                        info.interleave_size = atoi(s.substr(dscp_end + 1)) * 60 * info.bw / 8;
+                        info.interleave_size = atoi(s.substr(dscp_end + 1)) * info.bw / 8;
                     }
                 }
             }
