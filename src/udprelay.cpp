@@ -554,6 +554,9 @@ void UDPFillMessagesFromBlock(const CBlock& block, std::vector<UDPMessage>& msgs
      * the height explicitly, the receive node won't know the height and won't
      * be able to store the block in case it is received out-of-order. */
 
+    const bool empty_block = (headerAndIDs.ShortTxIdCount() == 0);
+    const uint8_t flags    = empty_block ? (HAVE_BLOCK | EMPTY_BLOCK) : HAVE_BLOCK;
+
     std::vector<unsigned char> header_data;
     header_data.reserve(2500 + 8 * block.vtx.size()); // Rather conservatively high estimate
     VectorOutputStream stream(&header_data, SER_NETWORK, PROTOCOL_VERSION);
@@ -574,18 +577,18 @@ void UDPFillMessagesFromBlock(const CBlock& block, std::vector<UDPMessage>& msgs
     int offset = msgs.size();
     msgs.resize(offset + n_header_chunks);
     for (size_t i = 0; i < n_header_chunks; i++) {
-        FillBlockMessageHeader(msgs[offset + i], hash_prefix, MSG_TYPE_BLOCK_HEADER, header_data.size());
+        FillBlockMessageHeader(msgs[offset + i], hash_prefix, MSG_TYPE_BLOCK_HEADER, header_data.size(), flags);
         CopyFECData(msgs[offset + i], header_fecer, i);
     }
 
     /* Don't send the chunk-coded block if the block does not have any
      * transaction other than the coinbase (which is sent in the header) */
-    if (headerAndIDs.ShortTxIdCount() == 0) {
+    if (empty_block) {
         /* Fill overhead header chunks */
         offset = msgs.size();
         msgs.resize(offset + header_overhead);
         for (size_t i = 0; i < header_overhead; i++) {
-            FillBlockMessageHeader(msgs[offset + i], hash_prefix, MSG_TYPE_BLOCK_HEADER, header_data.size());
+            FillBlockMessageHeader(msgs[offset + i], hash_prefix, MSG_TYPE_BLOCK_HEADER, header_data.size(), flags);
             CopyFECData(msgs[offset + i], header_fecer, n_header_chunks + i);
         }
         return;
@@ -608,7 +611,7 @@ void UDPFillMessagesFromBlock(const CBlock& block, std::vector<UDPMessage>& msgs
     offset = msgs.size();
     msgs.resize(offset + n_block_chunks);
     for (size_t i = 0; i < n_block_chunks; i++) {
-        FillBlockMessageHeader(msgs[offset + i], hash_prefix, MSG_TYPE_BLOCK_CONTENTS, chunk_coded_block.size());
+        FillBlockMessageHeader(msgs[offset + i], hash_prefix, MSG_TYPE_BLOCK_CONTENTS, chunk_coded_block.size(), flags);
         CopyFECData(msgs[offset + i], block_fecer, i);
     }
 
@@ -616,7 +619,7 @@ void UDPFillMessagesFromBlock(const CBlock& block, std::vector<UDPMessage>& msgs
     offset = msgs.size();
     msgs.resize(offset + header_overhead);
     for (size_t i = 0; i < header_overhead; i++) {
-        FillBlockMessageHeader(msgs[offset + i], hash_prefix, MSG_TYPE_BLOCK_HEADER, header_data.size());
+        FillBlockMessageHeader(msgs[offset + i], hash_prefix, MSG_TYPE_BLOCK_HEADER, header_data.size(), flags);
         CopyFECData(msgs[offset + i], header_fecer, n_header_chunks + i);
     }
 
@@ -624,7 +627,7 @@ void UDPFillMessagesFromBlock(const CBlock& block, std::vector<UDPMessage>& msgs
     offset = msgs.size();
     msgs.resize(offset + block_overhead);
     for (size_t i = 0; i < block_overhead; i++) {
-        FillBlockMessageHeader(msgs[offset + i], hash_prefix, MSG_TYPE_BLOCK_CONTENTS, chunk_coded_block.size());
+        FillBlockMessageHeader(msgs[offset + i], hash_prefix, MSG_TYPE_BLOCK_CONTENTS, chunk_coded_block.size(), flags);
         CopyFECData(msgs[offset + i], block_fecer, n_block_chunks + i);
     }
 
@@ -1153,7 +1156,8 @@ bool HandleBlockTxMessage(UDPMessage& msg, size_t length, const CService& node, 
     const bool is_blk_header_chunk  = (msg.header.msg_type & UDP_MSG_TYPE_TYPE_MASK) == MSG_TYPE_BLOCK_HEADER;
     const bool is_blk_content_chunk = (msg.header.msg_type & UDP_MSG_TYPE_TYPE_MASK) == MSG_TYPE_BLOCK_CONTENTS;
     const bool they_have_block      = msg.header.msg_type & HAVE_BLOCK;
-    const bool tip_block            = msg.header.msg_type & TIP_BLOCK; // a block that was just inserted on the tip of the chain and was relayed 
+    const bool tip_block            = msg.header.msg_type & TIP_BLOCK; // a block that was just inserted on the tip of the chain and was relayed
+    const bool empty_block          = msg.header.msg_type & EMPTY_BLOCK; // a block that comes entirely through the header
 
     const uint64_t hash_prefix = msg.msg.block.hash_prefix; // Need a reference in a few places, but its packed, so we can't have one directly
     CService peer              = state.connection.fTrusted ? TRUSTED_PEER_DUMMY : node;
@@ -1421,13 +1425,15 @@ bool HandleBlockTxMessage(UDPMessage& msg, size_t length, const CService& node, 
          * we can wait until both header and body FEC objects are ready to be
          * decoded. If we pushed the header earlier for such backfill (old)
          * blocks, we would end up wasting a lot of memory with reserved
-         * chunk-coded blocks that would not be prefilled. */
-        if (tip_block) {
+         * chunk-coded blocks that would not be prefilled. The exception is if
+         * the backfill block has an empty "body", i.e. contains only the
+         * coinbase txn, which comes in the header. Such empty blocks are sent
+         * through the header only, in which case the header must be processed
+         * as soon as ready. */
+        if (tip_block ||
+            (block.is_header_processing && (empty_block || block.is_decodeable))
+            ) {
             DoBackgroundBlockProcessing(*it);
-        } else {
-            if (block.is_header_processing && block.is_decodeable) {
-                DoBackgroundBlockProcessing(*it);
-            }
         }
     }
 
