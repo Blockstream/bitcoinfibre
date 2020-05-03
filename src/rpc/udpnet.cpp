@@ -1,6 +1,6 @@
 \
 // Copyright (c) 2017 Matt Corallo
-// Copyright (c) 2019 Blockstream
+// Copyright (c) 2019-2020 Blockstream
 // Unlike the rest of Bitcoin Core, this file is
 // distributed under the Affero General Public License (AGPL v3)
 
