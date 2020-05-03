@@ -543,7 +543,7 @@ void UDPFillMessagesFromBlock(const CBlock& block, std::vector<UDPMessage>& msgs
     const uint256 hashBlock(block.GetHash());
     const uint64_t hash_prefix = hashBlock.GetUint64(0);
 
-    /* FIBRE block header */
+    /* Block header */
     CBlockHeaderAndLengthShortTxIDs headerAndIDs(block, codec_version_t::default_version, true);
     headerAndIDs.setBlockHeight(height);
     /* NOTE: it is not mandatory to include the block height along
