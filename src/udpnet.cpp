@@ -1,5 +1,5 @@
 // Copyright (c) 2016, 2017 Matt Corallo
-// Copyright (c) 2019 Blockstream
+// Copyright (c) 2019-2020 Blockstream
 // Unlike the rest of Bitcoin Core, this file is
 // distributed under the Affero General Public License (AGPL v3)
 
@@ -1633,19 +1633,19 @@ std::vector<std::pair<unsigned short, uint64_t> > GetUDPInboundPorts()
         size_t bw_end = s.find(',', group_end + 1);
 
         if (port_end == std::string::npos || (group_end != std::string::npos && bw_end != std::string::npos)) {
-            LogPrintf("Failed to parse -udpport option, not starting FIBRE\n");
+            LogPrintf("Failed to parse -udpport option, not starting Bitcoin Satellite\n");
             return std::vector<std::pair<unsigned short, uint64_t> >();
         }
 
         int64_t port = atoi64(s.substr(0, port_end));
         if (port != (unsigned short)port || port == 0) {
-            LogPrintf("Failed to parse -udpport option, not starting FIBRE\n");
+            LogPrintf("Failed to parse -udpport option, not starting Bitcoin Satellite\n");
             return std::vector<std::pair<unsigned short, uint64_t> >();
         }
 
         int64_t group = atoi64(s.substr(port_end + 1, group_end - port_end - 1));
         if (group < 0 || res.count(group)) {
-            LogPrintf("Failed to parse -udpport option, not starting FIBRE\n");
+            LogPrintf("Failed to parse -udpport option, not starting Bitcoin Satellite\n");
             return std::vector<std::pair<unsigned short, uint64_t> >();
         }
 
@@ -1653,7 +1653,7 @@ std::vector<std::pair<unsigned short, uint64_t> > GetUDPInboundPorts()
         if (group_end != std::string::npos) {
             bw = atoi64(s.substr(group_end + 1));
             if (bw < 0) {
-                LogPrintf("Failed to parse -udpport option, not starting FIBRE\n");
+                LogPrintf("Failed to parse -udpport option, not starting Bitcoin Satellite\n");
                 return std::vector<std::pair<unsigned short, uint64_t> >();
             }
         }
@@ -1664,7 +1664,7 @@ std::vector<std::pair<unsigned short, uint64_t> > GetUDPInboundPorts()
     std::vector<std::pair<unsigned short, uint64_t> > v;
     for (size_t i = 0; i < res.size(); i++) {
         if (!res.count(i)) {
-            LogPrintf("Failed to parse -udpport option, not starting FIBRE\n");
+            LogPrintf("Failed to parse -udpport option, not starting Bitcoin Satellite\n");
             return std::vector<std::pair<unsigned short, uint64_t> >();
         }
         v.push_back(res[i]);
