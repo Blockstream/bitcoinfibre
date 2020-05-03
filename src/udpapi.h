@@ -2,7 +2,7 @@
 // Unlike the rest of Bitcoin Core, this file is
 // distributed under the Affero General Public License (AGPL v3)
 
-// This is the external API to FIBRE for use in RPC/validation/etc
+// This is the external API to Bitcoin Satellite for use in RPC/validation/etc
 
 #ifndef BITCOIN_UDPAPI_H
 #define BITCOIN_UDPAPI_H

@@ -1,7 +1,14 @@
-Bitcoin Core integration/staging tree
+Bitcoin Satellite
 =====================================
 
-https://bitcoincore.org
+This project is a fork from [FIBRE (Fast Internet Bitcoin Relay
+Engine)](https://github.com/bitcoinfibre/bitcoinfibre) and, consequently, also a
+fork of [Bitcoin Core](https://bitcoincore.org). It features a version of the
+bitcoind application with support for satellite-optimized one-way transport of
+blocks sent over UDP with multicast addressing. It is designed to be used by the
+transmitters and receivers of the Blockstream Satellite network.
+
+https://blockstream.com/satellite
 
 What is Bitcoin?
 ----------------
