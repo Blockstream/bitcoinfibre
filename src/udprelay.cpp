@@ -1,5 +1,5 @@
 // Copyright (c) 2016, 2017 Matt Corallo
-// Copyright (c) 2019 Blockstream
+// Copyright (c) 2019-2020 Blockstream
 // Unlike the rest of Bitcoin Core, this file is
 // distributed under the Affero General Public License (AGPL v3)
 
@@ -544,7 +544,7 @@ void UDPFillMessagesFromBlock(const CBlock& block, std::vector<UDPMessage>& msgs
     const uint256 hashBlock(block.GetHash());
     const uint64_t hash_prefix = hashBlock.GetUint64(0);
 
-    /* FIBRE block header */
+    /* Block header */
     CBlockHeaderAndLengthShortTxIDs headerAndIDs(block, codec_version_t::default_version, true);
     headerAndIDs.setBlockHeight(height);
     /* NOTE: it is not mandatory to include the block height along
