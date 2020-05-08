@@ -237,6 +237,7 @@ struct UDPMulticastInfo {
     int ttl;               /** time-to-live desired for multicast packets */
     uint64_t bw;           /** target throughput in bps */
     int depth;             /** backfill depth - no. of blocks to iterate over */
+    int offset;            /** offset within the backfill as starting point */
     int interleave_size;   /** determines the depth of the sub-window of blocks
                             *  within the backfill window whose FEC chunks are
                             *  intereleaved. This depth is given in terms of the

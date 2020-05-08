@@ -481,13 +481,22 @@ static bool InitializeUDPMulticast(std::vector<int> &udp_socks,
             tx_addr_ifindex_vec.push_back(addr_ifindex_pair);
             tx_addr_ifindex_set.insert(addr_ifindex_pair);
 
-            LogPrintf("UDP: multicast tx %lu-%lu -  multiaddr: %s interface: %s ttl: %d depth: %d, interleave: %d\n",
+            LogPrintf("UDP: multicast tx %lu-%lu:\n"
+                      "    - multiaddr: %s\n"
+                      "    - interface: %s\n"
+                      "    - ttl: %d\n"
+                      "    - dscp: %u\n"
+                      "    - depth: %d\n"
+                      "    - offset: %d\n"
+                      "    - interleave: %d\n",
                       mcast_info.physical_idx,
                       mcast_info.logical_idx,
                       mcast_info.mcast_ip,
                       mcast_info.ifname,
                       mcast_info.ttl,
+                      mcast_info.dscp,
                       mcast_info.depth,
+                      mcast_info.offset,
                       mcast_info.interleave_size);
         }
 
@@ -1134,11 +1143,28 @@ static void MulticastBackfillThread(const CService& mcastNode,
 
     const int backfill_depth = info->depth;
 
-    const CBlockIndex *lastBlock;
+    const CBlockIndex *pindex;
     {
         LOCK(cs_main);
-        lastBlock = ::ChainActive().Tip();
-        assert(lastBlock);
+        pindex = ::ChainActive().Tip();
+        assert(pindex);
+
+        const int chain_height = ::ChainActive().Height();
+        LogPrint(BCLog::UDPMCAST, "UDP: Multicast Tx %lu-%lu - chain height: %d\n",
+                 info->physical_idx, info->logical_idx, chain_height);
+
+        /* Starting block height (bottom of the backfill window plus a
+         * configurable offset) */
+        int height;
+        if (backfill_depth == 0)
+            height = info->offset % (chain_height + 1);
+        else
+            height = chain_height - backfill_depth + 1 + (info->offset % backfill_depth);
+
+        LogPrint(BCLog::UDPMCAST, "UDP: Multicast Tx %lu-%lu - starting height: %d\n",
+                 info->physical_idx, info->logical_idx, height);
+        pindex = ::ChainActive()[height];
+        assert(pindex->nHeight == height);
     }
 
     /* Debug options */
@@ -1160,12 +1186,28 @@ static void MulticastBackfillThread(const CService& mcastNode,
     while (!send_messages_break) {
         /* Fill FEC chunk interleaving window */
         while ((block_window.size() < target_window_size) && (!send_messages_break)) {
-            /* Height of block to be inserted on the block window */
-            int height;
+            /* Fetch block from disk and generate its FEC chunks */
+            CBlock block;
+            assert(ReadBlockFromDisk(block, pindex, Params().GetConsensus()));
+            const auto res = block_window.insert(std::make_pair(pindex->nHeight, backfill_block()));
+            if (!res.second)
+                throw std::runtime_error("Failed to insert new block on backfill window");
+            const auto block_it = res.first;
+            UDPFillMessagesFromBlock(block, block_it->second.msgs, pindex->nHeight);
+            const uint256 block_hash(block.GetHash());
+
+            bytes_in_window += block_it->second.msgs.size() * FEC_CHUNK_SIZE;
+
+            LogPrint(BCLog::FEC, "UDP: Multicast Tx %lu-%lu - fill block %s (%20lu) - height %7d - %5d chunks\n",
+                     info->physical_idx, info->logical_idx,
+                     block_hash.ToString(), block_hash.GetUint64(0),
+                     pindex->nHeight, block_it->second.msgs.size());
+
+            /* Advance to the next block to be inserted in the block window */
             bool wrapped_around = false;
             {
                 LOCK(cs_main);
-                height = lastBlock->nHeight + 1;
+                int height = pindex->nHeight + 1;
                 const int chain_height = ::ChainActive().Height();
 
                 if ((height < chain_height - backfill_depth + 1) && (backfill_depth > 0))
@@ -1178,7 +1220,7 @@ static void MulticastBackfillThread(const CService& mcastNode,
                     wrapped_around = true;
                 }
 
-                lastBlock = ::ChainActive()[height];
+                pindex = ::ChainActive()[height];
             }
 
             if (debugMcast && wrapped_around) {
@@ -1188,23 +1230,6 @@ static void MulticastBackfillThread(const CService& mcastNode,
                 LogPrint(BCLog::UDPMCAST, "UDP: Multicast Tx %lu-%lu - cycle finished in %f secs\n",
                          info->physical_idx, info->logical_idx, backfill_cycle_duration.count());
             }
-
-            /* Fetch block from disk and generate its FEC chunks */
-            CBlock block;
-            assert(ReadBlockFromDisk(block, lastBlock, Params().GetConsensus()));
-            const auto res = block_window.insert(std::make_pair(height, backfill_block()));
-            if (!res.second)
-                throw std::runtime_error("Failed to insert new block on backfill window");
-            const auto block_it = res.first;
-            UDPFillMessagesFromBlock(block, block_it->second.msgs, height);
-            const uint256 block_hash(block.GetHash());
-
-            bytes_in_window += block_it->second.msgs.size() * FEC_CHUNK_SIZE;
-
-            LogPrint(BCLog::FEC, "UDP: Multicast Tx %lu-%lu - fill block %s (%20lu) - height %7d - %5d chunks\n",
-                     info->physical_idx, info->logical_idx,
-                     block_hash.ToString(), block_hash.GetUint64(0),
-                     height, block_it->second.msgs.size());
         }
 
         /* Send window of interleaved chunks */
@@ -1519,6 +1544,7 @@ static UDPMulticastInfo ParseUDPMulticastInfo(const std::string& s, const bool t
     info.bw              = 0;
     info.logical_idx     = 0; // default for multicast Rx, overriden for Tx
     info.depth           = 144;
+    info.offset          = 0;
     info.interleave_size = 0; // default is to disable interleaving
     info.dscp            = 0; // IPv4 DSCP used for multicast Tx
     info.trusted         = false;
@@ -1550,12 +1576,19 @@ static UDPMulticastInfo ParseUDPMulticastInfo(const std::string& s, const bool t
                 } else {
                     info.depth = atoi(s.substr(ttl_end + 1, depth_end - ttl_end - 1));
 
-                    const size_t dscp_end = s.find(',', depth_end + 1);
-                    if (dscp_end == std::string::npos) {
-                        info.dscp  = atoi(s.substr(depth_end + 1));
+                    const size_t offset_end = s.find(',', depth_end + 1);
+                    if (offset_end == std::string::npos) {
+                        info.offset  = atoi(s.substr(depth_end + 1));
                     } else {
-                        info.dscp  = atoi(s.substr(depth_end + 1, dscp_end - depth_end - 1));
-                        info.interleave_size = atoi(s.substr(dscp_end + 1)) * info.bw / 8;
+                        info.offset  = atoi(s.substr(depth_end + 1, offset_end - depth_end - 1));
+
+                        const size_t dscp_end = s.find(',', offset_end + 1);
+                        if (dscp_end == std::string::npos) {
+                            info.dscp  = atoi(s.substr(offset_end + 1));
+                        } else {
+                            info.dscp  = atoi(s.substr(offset_end + 1, dscp_end - offset_end - 1));
+                            info.interleave_size = atoi(s.substr(dscp_end + 1)) * info.bw / 8;
+                        }
                     }
                 }
             }
@@ -1563,6 +1596,16 @@ static UDPMulticastInfo ParseUDPMulticastInfo(const std::string& s, const bool t
 
         if (info.depth < 0) {
             LogPrintf("Failed to parse -udpmulticasttx option, depth must be >= 0\n");
+            return info;
+        }
+
+        if (info.offset < 0) {
+            LogPrintf("Failed to parse -udpmulticasttx option, offset must be >= 0\n");
+            return info;
+        }
+
+        if (info.depth > 0 && info.offset > info.depth) {
+            LogPrintf("Failed to parse -udpmulticasttx option, offset must be < depth\n");
             return info;
         }
 
