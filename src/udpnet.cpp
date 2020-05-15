@@ -1282,7 +1282,11 @@ static void MulticastTxnThread(const CService& mcastNode,
 
     /* Debug options */
     const bool debugMcast = LogAcceptCategory(BCLog::UDPMCAST);
-    const int stats_interval = 10;
+
+    int stats_interval = 300;
+    if (gArgs.IsArgSet("-udpmulticastloginterval") && (atoi(gArgs.GetArg("-udpmulticastloginterval", "")) > 0))
+        stats_interval = atoi(gArgs.GetArg("-udpmulticastloginterval", ""));
+
     int n_sent_txns = 0;
     std::chrono::steady_clock::time_point last_print = std::chrono::steady_clock::now();
 
