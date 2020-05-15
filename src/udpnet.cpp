@@ -1153,7 +1153,10 @@ static void MulticastBackfillThread(const CService& mcastNode,
     PerGroupMessageQueue& queue = it->second;
 
     std::map<int, backfill_block> block_window;
+    // Total number of **blocks** in parallel in the window
     const size_t target_window_size = std::max(info->interleave_size/FEC_CHUNK_SIZE, 1);
+    // Total number of **bytes** in the window
+    uint64_t bytes_in_window = 0;
 
     while (!send_messages_break) {
         /* Fill FEC chunk interleaving window */
@@ -1196,6 +1199,8 @@ static void MulticastBackfillThread(const CService& mcastNode,
             const auto block_it = res.first;
             UDPFillMessagesFromBlock(block, block_it->second.msgs, height);
             const uint256 block_hash(block.GetHash());
+
+            bytes_in_window += block_it->second.msgs.size() * FEC_CHUNK_SIZE;
 
             LogPrint(BCLog::FEC, "UDP: Multicast Tx %lu-%lu - fill block %s (%20lu) - height %7d - %5d chunks\n",
                      info->physical_idx, info->logical_idx,
@@ -1246,10 +1251,12 @@ static void MulticastBackfillThread(const CService& mcastNode,
                 assert(b_largest != nullptr);
                 LogPrint(BCLog::UDPMCAST,
                          "UDP: Multicast Tx %lu-%lu - Block Window:\n"
-                         "\t\tMin Height:    %7d - Sent %4d / %4d chunks\n"
-                         "\t\tMax Height:    %7d - Sent %4d / %4d chunks\n"
-                         "\t\tLargest Block: %7d - Sent %4d / %4d chunks\n",
+                         "        Size:          %9.2f MB\n"
+                         "        Min Height:    %7d - Sent %4d / %4d chunks\n"
+                         "        Max Height:    %7d - Sent %4d / %4d chunks\n"
+                         "        Largest Block: %7d - Sent %4d / %4d chunks\n",
                          info->physical_idx, info->logical_idx,
+                         ((double) bytes_in_window / (1048576)),
                          min_height, b_min_height->idx, b_min_height->msgs.size(),
                          max_height, b_max_height->idx, b_max_height->msgs.size(),
                          height_largest_block, b_largest->idx, b_largest->msgs.size()
@@ -1260,10 +1267,12 @@ static void MulticastBackfillThread(const CService& mcastNode,
 
         /* Cleanup blocks that have been fully transmitted */
         for (auto it = block_window.cbegin(); it != block_window.cend();) {
-            if (it->second.idx == it->second.msgs.size())
+            if (it->second.idx == it->second.msgs.size()) {
+                bytes_in_window -= it->second.msgs.size() * FEC_CHUNK_SIZE;
                 it = block_window.erase(it);
-            else
+            } else {
                 ++it;
+            }
         }
     }
 }
