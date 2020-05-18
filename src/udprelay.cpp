@@ -744,9 +744,9 @@ static void ProcessBlockThread() {
 
                 if (fBench) {
                     std::chrono::steady_clock::time_point header_provided(std::chrono::steady_clock::now());
-                    LogPrintf("UDP: Block %s - Got full header and shorttxids from %s in %lf %lf %lf ms\n", blockHash.ToString(), block.nodeHeaderRecvd.ToString(), to_millis_double(data_copied - decode_start), to_millis_double(header_deserialized - data_copied), to_millis_double(header_provided - header_deserialized));
+                    LogPrintf("UDP: Block %s (height %7d) - Got full header and shorttxids from %s in %lf %lf %lf ms\n", blockHash.ToString(), block.block_data.getBlockHeight(), block.nodeHeaderRecvd.ToString(), to_millis_double(data_copied - decode_start), to_millis_double(header_deserialized - data_copied), to_millis_double(header_provided - header_deserialized));
                 } else
-	                LogPrintf("UDP: Block %s - Got full header and shorttxids from %s\n", blockHash.ToString(), block.nodeHeaderRecvd.ToString());
+                    LogPrintf("UDP: Block %s (height %7d) - Got full header and shorttxids from %s\n", blockHash.ToString(), block.block_data.getBlockHeight(), block.nodeHeaderRecvd.ToString());
 
                 if (block.block_data.AreAllTxnsInMempool())
                     LogPrintf("UDP: Block %s - Ready to be decoded (all txns available)\n", blockHash.ToString());
