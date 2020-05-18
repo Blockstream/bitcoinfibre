@@ -681,7 +681,11 @@ static void ProcessBlockThread() {
                 if (fBench)
                     decode_start = std::chrono::steady_clock::now();
 
-                for (uint32_t i = 0; i < DIV_CEIL(block.header_len, sizeof(UDPBlockMessage::data)); i++) {
+                const uint32_t n_header_chunks = DIV_CEIL(block.header_len, sizeof(UDPBlockMessage::data));
+
+                block.header_data.resize(n_header_chunks * sizeof(UDPBlockMessage::data));
+
+                for (uint32_t i = 0; i < n_header_chunks; i++) {
                     const void* data_ptr = block.header_decoder.GetDataPtr(i);
                     assert(data_ptr);
                     memcpy(&block.header_data[i * sizeof(UDPBlockMessage::data)], data_ptr, sizeof(UDPBlockMessage::data));
@@ -976,7 +980,6 @@ bool PartialBlockData::Init(const UDPMessage& msg) {
     if (obj_length > MAX_BLOCK_SERIALIZED_SIZE * MAX_CHUNK_CODED_BLOCK_SIZE_FACTOR)
         return false;
     if ((msg.header.msg_type & UDP_MSG_TYPE_TYPE_MASK) == MSG_TYPE_BLOCK_HEADER) {
-        header_data.resize(DIV_CEIL(obj_length, sizeof(UDPBlockMessage::data)) * sizeof(UDPBlockMessage::data));
         header_decoder = FECDecoder(obj_length);
         header_len = obj_length;
         header_initialized = true;
@@ -1367,7 +1370,6 @@ bool HandleBlockTxMessage(UDPMessage& msg, size_t length, const CService& node, 
         memcpy(block.block_data.GetChunk(msg.msg.block.chunk_id), msg.msg.block.data, sizeof(UDPBlockMessage::data));
         block.block_data.MarkChunkAvailable(msg.msg.block.chunk_id);
     }
-    //TODO: Also pre-copy header data into header_data here, if its a non-FEC chunk
 
     if (!decoder.ProvideChunk(msg.msg.block.data, msg.msg.block.chunk_id)) {
         // Bad chunk id, maybe FEC is upset? Don't disconnect in case it can be random
