@@ -1117,7 +1117,7 @@ static void printChunkStats(const uint64_t hash_prefix, const int sockfd,
             double tot_duration = to_millis_double(chunkCountIt->second.t_last -
                                                    chunkCountIt->second.t_first);
 
-            LogPrint(BCLog::FEC, "FEC chunks: block %20lu, socket %d, ",
+            LogPrint(BCLog::FEC, "FEC chunks: block %016lx, socket %d, ",
                      chunkCountIt->first.first,
                      chunkCountIt->first.second);
             LogPrint(BCLog::FEC, "Total %4du/%4dr, ",
@@ -1592,9 +1592,11 @@ UniValue AllBlkChunkStatsToJSON() {
     for (const auto& b : mapPartialBlocks) {
         std::unique_lock<std::mutex> block_lock(b.second->state_mutex);
         const uint64_t hash_prefix = b.first.first;
-        const BlkChunkStats s      = GetBlkChunkStats(*b.second);
-        UniValue info              = BlkChunkStatsToJSON(s);
-        o.__pushKV(std::to_string(hash_prefix), info);
+        char hex_hash_prefix[17];
+        snprintf(hex_hash_prefix, sizeof(hex_hash_prefix), "%016lx", hash_prefix);
+        const BlkChunkStats s = GetBlkChunkStats(*b.second);
+        UniValue info       = BlkChunkStatsToJSON(s);
+        o.__pushKV(hex_hash_prefix, info);
     }
     return o;
 }
