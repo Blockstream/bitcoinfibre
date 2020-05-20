@@ -762,7 +762,10 @@ static void ProcessBlockThread() {
                              blockHash.ToString(), mempool_txns, n_blk_txns, (double) mempool_txns / n_blk_txns);
                 }
 
-                if (block.is_decodeable)
+                // Do more work if we can already decode the block or in case we
+                // should try to fill in the erasures based on mempool txns that
+                // we already have (for new blocks, i.e., tip blocks)
+                if (block.is_decodeable || (block.blk_initialized && block.tip_blk))
                     more_work = true;
                 else
                     lock.unlock();
@@ -1338,7 +1341,7 @@ bool HandleBlockTxMessage(UDPMessage& msg, size_t length, const CService& node, 
         /* The scan will work as long as !is_header_processing &&
          * !block.in_header && block.blk_initialized when the PartialBlockData
          * queued in block_process_queue is finally processed. Otherwise, it
-         * won't start. Also, the scan is only useful for new (relayed)blocks
+         * won't start. Also, the scan is only useful for new (relayed) blocks
          * inserted on the tip of the chain. Further notes below. */
     }
 
