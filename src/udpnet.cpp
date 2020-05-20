@@ -1180,7 +1180,7 @@ static void MulticastBackfillThread(const CService& mcastNode,
 
     std::map<int, backfill_block> block_window;
     // Total number of **blocks** in parallel in the window
-    const size_t target_window_size = std::max(info->interleave_size/FEC_CHUNK_SIZE, 1);
+    const size_t target_window_size = std::max(info->interleave_size, 1);
     // Total number of **bytes** in the window
     uint64_t bytes_in_window = 0;
 
@@ -1588,7 +1588,7 @@ static UDPMulticastInfo ParseUDPMulticastInfo(const std::string& s, const bool t
                             info.dscp  = atoi(s.substr(offset_end + 1));
                         } else {
                             info.dscp  = atoi(s.substr(offset_end + 1, dscp_end - offset_end - 1));
-                            info.interleave_size = atoi(s.substr(dscp_end + 1)) * info.bw / 8;
+                            info.interleave_size = atoi(s.substr(dscp_end + 1));
                         }
                     }
                 }
