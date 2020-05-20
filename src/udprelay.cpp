@@ -1089,13 +1089,17 @@ static bool HandleTx(UDPMessage& msg, size_t length, const CService& node, UDPCo
  *
  * Print whenever sufficient time has elapsed since the last chunk received for
  * a given block and from a given socket. This sufficient time is either an
- * interval significantly higher than the average chunk arrival interval, or the
- * arbitrarily large value of 5 seconds, whatever is the largest. Note that, if
- * the same block is received on multiple sockets, independent stats will be
- * printed for each socket.
+ * interval significantly higher than the average chunk arrival interval, or an
+ * arbitrarily large value configurable via option -udpfecstatstimeout (default
+ * is 10 min), whatever is the largest. Note that, if the same block is received
+ * on multiple sockets, independent stats will be printed for each socket.
  */
 static void printChunkStats(const uint64_t hash_prefix, const int sockfd,
                             const std::map<std::pair<uint64_t, int>, BlockChunkCount>::iterator& currentIt) {
+    double min_timeout_ms = 600000;
+    if (gArgs.IsArgSet("-udpfecstatstimeout") && (atoi(gArgs.GetArg("-udpfecstatstimeout", "")) > 0))
+        min_timeout_ms = atoi(gArgs.GetArg("-udpfecstatstimeout", "")) * 1000;
+
     std::chrono::steady_clock::time_point t_now(std::chrono::steady_clock::now());
     for (auto chunkCountIt = mapChunkCount.cbegin(); chunkCountIt != mapChunkCount.cend();)
     {
@@ -1108,7 +1112,7 @@ static void printChunkStats(const uint64_t hash_prefix, const int sockfd,
         }
 
         const double elapsed_since_last_rx = to_millis_double(t_now - chunkCountIt->second.t_last);
-        const double timeout = std::max<double>(300000, (3*chunkCountIt->second.avg_chunk_interval));
+        const double timeout = std::max<double>(min_timeout_ms, (3*chunkCountIt->second.avg_chunk_interval));
         const uint32_t tot_received = chunkCountIt->second.header_rcvd + chunkCountIt->second.data_rcvd;
         if (tot_received > 1 && elapsed_since_last_rx > timeout) {
             double dec_duration = to_millis_double(chunkCountIt->second.t_decode -
