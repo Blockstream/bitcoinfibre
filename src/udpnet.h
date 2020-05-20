@@ -240,8 +240,7 @@ struct UDPMulticastInfo {
     int offset;            /** offset within the backfill as starting point */
     int interleave_size;   /** determines the depth of the sub-window of blocks
                             *  within the backfill window whose FEC chunks are
-                            *  intereleaved. This depth is given in terms of the
-                            *  total size of all blocks in the sub-window. */
+                            *  interleaved (sent in parallel). */
     uint16_t physical_idx; /** index of destination IP - net interface pair */
     uint16_t logical_idx;  /** logical idx for streams sharing physical idx */
     int txn_per_sec;       /** txns to send per second (0 to disable) */
