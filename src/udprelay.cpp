@@ -979,6 +979,9 @@ bool PartialBlockData::Init(const UDPMessage& msg) {
     const uint32_t obj_length  = msg.msg.block.obj_length;
     if (obj_length > MAX_BLOCK_SERIALIZED_SIZE * MAX_CHUNK_CODED_BLOCK_SIZE_FACTOR)
         return false;
+
+    tip_blk = msg.header.msg_type & TIP_BLOCK;
+
     if ((msg.header.msg_type & UDP_MSG_TYPE_TYPE_MASK) == MSG_TYPE_BLOCK_HEADER) {
         header_decoder = FECDecoder(obj_length);
         header_len = obj_length;
