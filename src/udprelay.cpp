@@ -279,7 +279,7 @@ static void SendLimitedDataChunks(const uint256& blockhash, UDPMessageType type,
 
 static std::unique_ptr<std::thread> process_block_thread;
 
-void UDPRelayBlock(const CBlock& block) {
+void UDPRelayBlock(const CBlock& block, int nHeight) {
     std::chrono::steady_clock::time_point start;
     const bool fBench = LogAcceptCategory(BCLog::BENCH);
     if (fBench)
@@ -332,6 +332,7 @@ void UDPRelayBlock(const CBlock& block) {
 
         boost::optional<ChunkCodedBlock> codedBlock;
         CBlockHeaderAndLengthShortTxIDs headerAndIDs(block, codec_version_t::default_version, true);
+        headerAndIDs.setBlockHeight(nHeight);
         std::vector<unsigned char> header_data;
         header_data.reserve(2500 + 8 * block.vtx.size()); // Rather conservatively high estimate
         VectorOutputStream stream(&header_data, SER_NETWORK, PROTOCOL_VERSION);
