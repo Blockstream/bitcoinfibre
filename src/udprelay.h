@@ -10,8 +10,6 @@
 class CBlock;
 class CTransaction;
 
-void UDPRelayBlock(const CBlock& block);
-
 void BlockRecvInit();
 
 void BlockRecvShutdown();
