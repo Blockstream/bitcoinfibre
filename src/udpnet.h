@@ -123,6 +123,7 @@ struct PartialBlockData {
     std::atomic_bool is_decodeable; // Indicates decoder.DecodeReady() && !in_header
     std::atomic_bool is_header_processing; // Indicates in_header && !initialized but header is ready
     std::atomic_bool packet_awaiting_lock; // Indicates there is a packet ready to process that needs state_mutex
+    std::atomic_bool awaiting_processing; // Indicates the block has been pushed to the processing queue already
 
     std::mutex state_mutex;
     // Background thread is preparing to, and is submitting to core

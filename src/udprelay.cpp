@@ -674,6 +674,7 @@ static void ProcessBlockThread() {
 
         bool more_work;
         std::unique_lock<std::mutex> lock(block.state_mutex);
+        block.awaiting_processing = false;
         do {
             more_work = false;
             if (block.is_header_processing) {
@@ -1001,8 +1002,9 @@ PartialBlockData::PartialBlockData(const CService& node, const UDPMessage& msg, 
         timeHeaderRecvd(packet_recv), nodeHeaderRecvd(node),
         in_header(true), blk_initialized(false), header_initialized(false),
         is_decodeable(false), is_header_processing(false),
-        packet_awaiting_lock(false), currentlyProcessing(false),
-        blk_len(0), header_len(0), block_data(&mempool)
+        packet_awaiting_lock(false), awaiting_processing(false),
+        currentlyProcessing(false), blk_len(0), header_len(0),
+        block_data(&mempool)
     {
        bool const ret = Init(msg);
        assert(ret);
@@ -1336,13 +1338,24 @@ bool HandleBlockTxMessage(UDPMessage& msg, size_t length, const CService& node, 
             return true;
         }
 
-        if (is_blk_content_chunk && tip_block)
+        /* If this is the first body chunk, and we've processed the header
+         * already, we can kick off the processing whereby the the erasures of
+         * the FEC-coded block are filled based on mempool txns. This processing
+         * will start as long as !block.in_header && block.blk_initialized when
+         * the PartialBlockData queued in block_process_queue is finally
+         * processed. Otherwise, it won't start. Also, if the header is still
+         * waiting on the block_process_queue to be processed, the
+         * erasure-filling process will start automatically right after the
+         * header processing, now that we have the first body chunk (i.e.,
+         * block.blk_initialized). In this case, we don't even need to push the
+         * block into the processing queue again (and we won't given that
+         * awaiting_processing would still be true in this case). Importantly,
+         * note the scan is only useful for new (relayed) blocks inserted on the
+         * tip of the chain. Further notes below. */
+        if (is_blk_content_chunk && tip_block && !block.awaiting_processing) {
+            block.awaiting_processing = true;
             DoBackgroundBlockProcessing(*it); // Kick off mempool scan (waits on us to unlock block_lock)
-        /* The scan will work as long as !is_header_processing &&
-         * !block.in_header && block.blk_initialized when the PartialBlockData
-         * queued in block_process_queue is finally processed. Otherwise, it
-         * won't start. Also, the scan is only useful for new (relayed) blocks
-         * inserted on the tip of the chain. Further notes below. */
+        }
     }
 
     FECDecoder& decoder = is_blk_header_chunk ? block.header_decoder : block.body_decoder;
@@ -1419,10 +1432,6 @@ bool HandleBlockTxMessage(UDPMessage& msg, size_t length, const CService& node, 
             }
         }
 
-        // We do not RemovePartialBlock as we want ChunkAvailableSets to be there when UDPRelayBlock gets called
-        // from inside ProcessBlockThread, so after we notify the ProcessNewBlockThread we cannot access block.
-        block_lock.unlock();
-
         /* If this is a relayed block (from the tip of the chain), we kick-off
          * the processing of the FEC object as soon as it is ready, regardless
          * of which object it is. By doing so, if the header is the object that
@@ -1439,11 +1448,16 @@ bool HandleBlockTxMessage(UDPMessage& msg, size_t length, const CService& node, 
          * coinbase txn, which comes in the header. Such empty blocks are sent
          * through the header only, in which case the header must be processed
          * as soon as ready. */
-        if (tip_block ||
-            (block.is_header_processing && (empty_block || block.is_decodeable))
-            ) {
+        if ((tip_block ||
+             (block.is_header_processing && (empty_block || block.is_decodeable)))
+            && !block.awaiting_processing) {
+            block.awaiting_processing = true;
             DoBackgroundBlockProcessing(*it);
         }
+
+        // We do not RemovePartialBlock as we want ChunkAvailableSets to be there when UDPRelayBlock gets called
+        // from inside ProcessBlockThread, so after we notify the ProcessNewBlockThread we cannot access block.
+        block_lock.unlock();
     }
 
     if (fBench && new_block) {
