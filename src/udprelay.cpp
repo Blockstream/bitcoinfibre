@@ -756,7 +756,7 @@ static void ProcessBlockThread() {
                 else if (block.is_decodeable)
                     LogPrintf("UDP: Block %s - Ready to be decoded (enough FEC chunks available)\n", blockHash.ToString());
 
-                if (LogAcceptCategory(BCLog::FEC)) {
+                if (block.tip_blk && LogAcceptCategory(BCLog::FEC)) {
                     size_t mempool_txns = block.block_data.GetMempoolCount();
                     size_t n_blk_txns   = header.BlockTxCount();
                     LogPrint(BCLog::FEC, "UDP: Block %s - Txns available: %ld/%ld  Txn hit ratio: %f\n",
