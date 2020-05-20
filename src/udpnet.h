@@ -136,6 +136,7 @@ struct PartialBlockData {
     FECDecoder header_decoder; // Note that this may have been std::move()d if (currentlyProcessing)
     FECDecoder body_decoder; // Note that this may have been std::move()d if (currentlyProcessing)
     PartiallyDownloadedChunkBlock block_data;
+    bool tip_blk; // Whether this is a block at the tip of the chain or an old/repeated block
 
     // nodes with chunks_avail set -> packets that were useful, packets provided
     std::map<CService, std::pair<uint32_t, uint32_t>> perNodeChunkCount;
