@@ -3985,7 +3985,7 @@ bool Chainstate::AcceptBlock(const std::shared_ptr<const CBlock>& pblock, BlockV
     // Header is valid/has work, merkle tree and segwit merkle tree are good...RELAY NOW
     // (but if it does not build on our best tip, let the SendMessages loop relay it)
     if (!IsInitialBlockDownload() && fHasMoreOrSameWork)
-        UDPRelayBlock(block); // TODO: Do this via NewPoWValidBlock!
+        UDPRelayBlock(block, pindex->nHeight); // TODO: Do this via NewPoWValidBlock!
     if (!IsInitialBlockDownload() && m_chain.Tip() == pindex->pprev)
         GetMainSignals().NewPoWValidBlock(pindex, pblock);
 

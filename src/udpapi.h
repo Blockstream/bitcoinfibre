@@ -40,7 +40,7 @@ struct UDPConnectionStats {
 };
 void GetUDPConnectionList(std::vector<UDPConnectionStats>& connections_list);
 
-void UDPRelayBlock(const CBlock& block);
+void UDPRelayBlock(const CBlock& block, int nHeight = -1);
 
 UniValue BlkChunkStatsToJSON(int target_height);
 UniValue MaxMinBlkChunkStatsToJSON();
