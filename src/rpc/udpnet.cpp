@@ -228,6 +228,39 @@ UniValue getchunkstats(const JSONRPCRequest& request)
     }
 }
 
+UniValue gettxwindowinfo(const JSONRPCRequest& request) {
+    RPCHelpMan{"gettxwindowinfo",
+        "\nGet info from the multicast Tx block-interleave window.\n",
+        {
+            {"physical_idx", RPCArg::Type::NUM, RPCArg::Optional::NO, "Physical stream index"},
+            {"logical_idx", RPCArg::Type::NUM, RPCArg::Optional::NO, "Logical stream index"},
+        },
+        RPCResults{
+             RPCResult{
+                 "{\n"
+                 "  height : {       (json object)\n"
+                 "    \"index\" : n  (numeric) Index of chunk to be transmitted next\n"
+                 "    \"total\" : n  (numeric) Total number of chunks\n"
+                 "  }\n"
+                 "  ...\n"
+                 "}\n"
+             }
+        },
+        RPCExamples{
+            HelpExampleCli("gettxwindowinfo", "0 0")
+            + HelpExampleRpc("gettxwindowinfo", "0 0")
+        }
+    }.Check(request);
+    int phy_idx = request.params[0].get_int();
+    int log_idx = request.params[1].get_int();
+
+    UniValue info = TxWindowInfoToJSON(phy_idx, log_idx);
+    if (info.isNull())
+        throw JSONRPCError(RPC_INVALID_PARAMS, "Tx stream does not exist");
+
+    return info;
+}
+
 static const CRPCCommand commands[] =
 { //  category              name                      actor (function)         argNames
   //  --------------------- ------------------------  -----------------------  ----------
@@ -235,6 +268,7 @@ static const CRPCCommand commands[] =
     { "udpnetwork",         "addudpnode",             &addudpnode,             {"node", "local_magic", "remote_magic", "ultimately_trusted", "command", "group"} },
     { "udpnetwork",         "disconnectudpnode",      &disconnectudpnode,      {"node"} },
     { "udpnetwork",         "getchunkstats",          &getchunkstats,          {"height"} },
+    { "udpnetwork",         "gettxwindowinfo",        &gettxwindowinfo,        {"physical_idx", "logical_idx"} }
 };
 
 void RegisterUDPNetRPCCommands(CRPCTable &t)

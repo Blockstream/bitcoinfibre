@@ -44,5 +44,6 @@ void UDPRelayBlock(const CBlock& block, int nHeight = -1);
 UniValue BlkChunkStatsToJSON(int target_height);
 UniValue MaxMinBlkChunkStatsToJSON();
 UniValue AllBlkChunkStatsToJSON();
+UniValue TxWindowInfoToJSON(int phy_idx, int log_idx);
 
 #endif
