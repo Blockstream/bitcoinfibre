@@ -1196,18 +1196,23 @@ static void MulticastBackfillThread(const CService& mcastNode,
             CBlock block;
             assert(ReadBlockFromDisk(block, pindex, Params().GetConsensus()));
             const auto res = block_window.insert(std::make_pair(pindex->nHeight, backfill_block()));
-            if (!res.second)
-                throw std::runtime_error("Failed to insert new block on backfill window");
-            const auto block_it = res.first;
-            UDPFillMessagesFromBlock(block, block_it->second.msgs, pindex->nHeight);
-            const uint256 block_hash(block.GetHash());
+            /* It's perfectly possible that the block already exists in the
+             * interleave window. The block index could be back on a block that
+             * is still being transmitted. In this case, don't fill the block in
+             * the window, but do advance the block index. */
+            if (res.second) {
+                const auto block_it = res.first;
+                UDPFillMessagesFromBlock(block, block_it->second.msgs, pindex->nHeight);
+                const uint256 block_hash(block.GetHash());
 
-            bytes_in_window += block_it->second.msgs.size() * FEC_CHUNK_SIZE;
+                bytes_in_window += block_it->second.msgs.size() * FEC_CHUNK_SIZE;
 
-            LogPrint(BCLog::FEC, "UDP: Multicast Tx %lu-%lu - fill block %s (%20lu) - height %7d - %5d chunks\n",
-                     info->physical_idx, info->logical_idx,
-                     block_hash.ToString(), block_hash.GetUint64(0),
-                     pindex->nHeight, block_it->second.msgs.size());
+                LogPrint(BCLog::FEC, "UDP: Multicast Tx %lu-%lu - "
+                         "fill block %s (%20lu) - height %7d - %5d chunks\n",
+                         info->physical_idx, info->logical_idx,
+                         block_hash.ToString(), block_hash.GetUint64(0),
+                         pindex->nHeight, block_it->second.msgs.size());
+            }
 
             /* Advance to the next block to be inserted in the block window */
             bool wrapped_around = false;
