@@ -17,6 +17,10 @@
 #include <thread>
 #include <boost/optional.hpp>
 
+#if BOOST_VERSION < 105600
+#include <boost/utility/in_place_factory.hpp> // for boost::in_place
+#endif
+
 #include <boost/thread.hpp>
 
 #define to_millis_double(t) (std::chrono::duration_cast<std::chrono::duration<double, std::chrono::milliseconds::period> >(t).count())
@@ -148,6 +152,15 @@ struct DataFECer {
         fec_chunks(fec_chunks_in),
         fec_data(std::piecewise_construct, std::forward_as_tuple(new FECChunkType[fec_chunks]), std::forward_as_tuple(fec_chunks)),
         enc(std::move(decoder), &data, &fec_data) {}
+
+#if BOOST_VERSION < 105600
+    // This is only necessary in order to construct this via a boost::in_place,
+    // which is pre-c++11 and can only take arguments by value
+    DataFECer(FECDecoder* decoder, const std::vector<unsigned char>& data, size_t fec_chunks_in) :
+        fec_chunks(fec_chunks_in),
+        fec_data(std::piecewise_construct, std::forward_as_tuple(new FECChunkType[fec_chunks]), std::forward_as_tuple(fec_chunks)),
+        enc(std::move(*decoder), &data, &fec_data) {}
+#endif
 };
 
 static void CopyFECData(UDPMessage& msg, DataFECer& fec, size_t array_idx, bool overwrite_chunk = false) {
@@ -353,7 +366,11 @@ void UDPRelayBlock(const CBlock& block, int nHeight) {
             header_fecer.enc.PrefillChunks();
 
             if (!skipEncode) {
+#if BOOST_VERSION >= 105600
                 codedBlock.emplace(block, headerAndIDs);
+#else
+                codedBlock = boost::in_place(block, headerAndIDs);
+#endif
                 chunk_coded_block = &codedBlock->GetCodedBlock();
             }
             if (!chunk_coded_block->empty()) {
@@ -365,9 +382,18 @@ void UDPRelayBlock(const CBlock& block, int nHeight) {
                     // was initialized and fed FEC/data, meaning even if no FEC
                     // chunks were used to reconstruct the FECDecoder object is
                     // fully primed to be converted to a FECEncoder!
+#if BOOST_VERSION >= 105600
                     block_fecer.emplace(std::move(partial_block_ptr->body_decoder), *chunk_coded_block, data_fec_chunks);
+#else
+                    // this moves body_decoder into the block_fecer
+                    block_fecer = boost::in_place(&partial_block_ptr->body_decoder, *chunk_coded_block, data_fec_chunks);
+#endif
                 } else {
+#if BOOST_VERSION >= 105600
                     block_fecer.emplace(*chunk_coded_block, data_fec_chunks);
+#else
+                    block_fecer = boost::in_place(*chunk_coded_block, data_fec_chunks);
+#endif
                 }
                 block_fecer->enc.PrefillChunks();
             }
@@ -397,7 +423,11 @@ void UDPRelayBlock(const CBlock& block, int nHeight) {
 
         if (!inUDPProcess) { // We sent header before calculating any block stuff
             if (!skipEncode) {
+#if BOOST_VERSION >= 105600
                 codedBlock.emplace(block, headerAndIDs);
+#else
+                codedBlock = boost::in_place(block, headerAndIDs);
+#endif
                 chunk_coded_block = &codedBlock->GetCodedBlock();
             }
 
@@ -416,7 +446,11 @@ void UDPRelayBlock(const CBlock& block, int nHeight) {
 
         if (!inUDPProcess) { // We sent header before calculating any block stuff
             if (!chunk_coded_block->empty()) {
+#if BOOST_VERSION >= 105600
                 block_fecer.emplace(*chunk_coded_block, data_fec_chunks);
+#else
+                block_fecer = boost::in_place(*chunk_coded_block, data_fec_chunks);
+#endif
             }
         }
 
