@@ -34,6 +34,12 @@
 #include <boost/thread.hpp>
 #include <poll.h>
 
+#include <boost/optional.hpp>
+
+#if BOOST_VERSION < 105600
+#include <boost/utility/in_place_factory.hpp> // for boost::in_place
+#endif
+
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
@@ -1338,7 +1344,11 @@ static void MulticastTxnThread(const CService& mcastNode,
 
     /* Use a bloom filter to keep track of txns already sent */
     boost::optional<CRollingBloomFilter> sent_txn_bloom;
+#if BOOST_VERSION >= 105600
     sent_txn_bloom.emplace(500000, 0.001); // Hold 500k (~24*6 blocks of txn) txn
+#else
+    sent_txn_bloom = boost::in_place(500000, 0.001); // Hold 500k (~24*6 blocks of txn) txn
+#endif
 
     auto it = mapTxQueues.find(info->group);
     assert(it != mapTxQueues.end());
