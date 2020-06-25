@@ -83,8 +83,8 @@ public:
     FECEncoder(FECDecoder&& decoder, const std::vector<unsigned char>* dataIn, std::pair<std::unique_ptr<FECChunkType[]>, std::vector<uint32_t>>* fec_chunksIn);
     ~FECEncoder();
 
-    FECEncoder(const FECEncoder&) =delete;
-    FECEncoder(FECEncoder&&) =delete;
+    FECEncoder(const FECEncoder&) = delete;
+    FECEncoder(FECEncoder&&) = delete;
 
     /**
      * After BuildChunk(i), fec_chunks->first[i] will be filled with FEC data
