@@ -1244,7 +1244,6 @@ bool HandleBlockTxMessage(UDPMessage& msg, size_t length, const CService& node, 
     const bool is_blk_header_chunk  = (msg.header.msg_type & UDP_MSG_TYPE_TYPE_MASK) == MSG_TYPE_BLOCK_HEADER;
     const bool is_blk_content_chunk = (msg.header.msg_type & UDP_MSG_TYPE_TYPE_MASK) == MSG_TYPE_BLOCK_CONTENTS;
     const bool they_have_block      = msg.header.msg_type & HAVE_BLOCK;
-    const bool tip_block            = msg.header.msg_type & TIP_BLOCK; // a block that was just inserted on the tip of the chain and was relayed
     const bool empty_block          = msg.header.msg_type & EMPTY_BLOCK; // a block that comes entirely through the header
 
     const uint64_t hash_prefix = msg.msg.block.hash_prefix; // Need a reference in a few places, but its packed, so we can't have one directly
@@ -1428,7 +1427,7 @@ bool HandleBlockTxMessage(UDPMessage& msg, size_t length, const CService& node, 
          * awaiting_processing would still be true in this case). Importantly,
          * note the scan is only useful for new (relayed) blocks inserted on the
          * tip of the chain. Further notes below. */
-        if (is_blk_content_chunk && tip_block && !block.awaiting_processing) {
+        if (is_blk_content_chunk && block.tip_blk && !block.awaiting_processing) {
             block.awaiting_processing = true;
             DoBackgroundBlockProcessing(*it); // Kick off mempool scan (waits on us to unlock block_lock)
         }
@@ -1538,10 +1537,27 @@ bool HandleBlockTxMessage(UDPMessage& msg, size_t length, const CService& node, 
          * through the header only, in which case the header must be processed
          * as soon as ready.
          *
+         * Note also that it's perfectly possible that we start receiving a
+         * block from a tip block object, but fail to complete it, and then we
+         * complete it based on the redundant (non-tip) block. From the tip
+         * object, we could have completed either the header or the body
+         * already. If we completed the header, we already processed it, as it
+         * was processed immediately. So now we could be getting the body from a
+         * non-tip block, and it's possible that flag block.is_header_processing
+         * is false because the header has already been decoded, rather than
+         * because it's not ready yet. So the missing piece is to check also
+         * whether the header has already been processed (i.e. block.in_header
+         * is false) when the body becomes decodable.
+         *
+         * To avoid confusion, instead of taking the "tip-block flag" from the
+         * current packet, we always read it from the value initialized on the
+         * partial block (i.e., block.tip_blk below). This way, the partial
+         * block that started from a tip block remains like so.
          */
         if (!block.awaiting_processing &&
             (block.tip_blk ||
-             (block.is_header_processing && (!block.chain_lookup || empty_block || block.is_decodeable)))
+             (block.is_header_processing && (!block.chain_lookup || empty_block || block.is_decodeable)) ||
+             (block.is_decodeable && !block.in_header)) // if for some reason we've processed the header of the non-tip block already
             ) {
             block.awaiting_processing = true;
             DoBackgroundBlockProcessing(*it);
