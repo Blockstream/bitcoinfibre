@@ -424,7 +424,6 @@ ReadStatus PartiallyDownloadedChunkBlock::InitData(const CBlockHeaderAndLengthSh
         start = std::chrono::steady_clock::now();
 
     codec_version = comprblock.codec_version;
-    height        = comprblock.height;
 
     if (comprblock.txlens.size() != comprblock.shorttxids.size())
         return READ_STATUS_INVALID;
