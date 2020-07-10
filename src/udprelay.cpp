@@ -754,6 +754,11 @@ static void ProcessBlockThread() {
                 if (fBench)
                     header_deserialized = std::chrono::steady_clock::now();
 
+                /* We may not process the header yet (depending on conditions
+                 * checked below), but at least we can extract the block height
+                 * from the header and save it on the partial block. */
+                block.height = header.getBlockHeight();
+
                 /* Do we have the block already?  */
                 if (!block.chain_lookup) {
                     const CBlockIndex* pblockindex;
@@ -810,9 +815,9 @@ static void ProcessBlockThread() {
 
                 if (fBench) {
                     std::chrono::steady_clock::time_point header_provided(std::chrono::steady_clock::now());
-                    LogPrintf("UDP: Block %s (height %7d) - Got full header and shorttxids from %s in %lf %lf %lf ms\n", blockHash.ToString(), block.block_data.getBlockHeight(), block.nodeHeaderRecvd.ToString(), to_millis_double(data_copied - decode_start), to_millis_double(header_deserialized - data_copied), to_millis_double(header_provided - header_deserialized));
+                    LogPrintf("UDP: Block %s (height %7d) - Got full header and shorttxids from %s in %lf %lf %lf ms\n", blockHash.ToString(), block.height, block.nodeHeaderRecvd.ToString(), to_millis_double(data_copied - decode_start), to_millis_double(header_deserialized - data_copied), to_millis_double(header_provided - header_deserialized));
                 } else
-                    LogPrintf("UDP: Block %s (height %7d) - Got full header and shorttxids from %s\n", blockHash.ToString(), block.block_data.getBlockHeight(), block.nodeHeaderRecvd.ToString());
+                    LogPrintf("UDP: Block %s (height %7d) - Got full header and shorttxids from %s\n", blockHash.ToString(), block.height, block.nodeHeaderRecvd.ToString());
 
                 if (block.block_data.AreAllTxnsInMempool())
                     LogPrintf("UDP: Block %s - Ready to be decoded (all txns available)\n", blockHash.ToString());
@@ -935,7 +940,7 @@ static void ProcessBlockThread() {
                          * valid */
                         bool ooob_saved = false;
                         if (outoforder_and_valid)
-                            ooob_saved = StoreOoOBlock(Params(), pdecoded_block, force_requested, block.block_data.getBlockHeight());
+                            ooob_saved = StoreOoOBlock(Params(), pdecoded_block, force_requested, block.height);
 
                         std::lock_guard<std::recursive_mutex> udpNodesLock(cs_mapUDPNodes);
 
@@ -1586,7 +1591,7 @@ struct ChunkStats {
 
 BlkChunkStats GetBlkChunkStats(const PartialBlockData& b) EXCLUSIVE_LOCKS_REQUIRED(cs_mapUDPNodes) {
     BlkChunkStats s;
-    s.height          = b.block_data.getBlockHeight();
+    s.height          = b.height;
     s.header_rcvd     = b.header_decoder.GetChunksRcvd();
     s.body_rcvd       = b.body_decoder.GetChunksRcvd();
     const bool h_init = b.header_initialized;
@@ -1623,8 +1628,8 @@ UniValue BlkChunkStatsToJSON(const int target_height) {
     std::unique_lock<std::recursive_mutex> lock(cs_mapUDPNodes);
     for (const auto& b : mapPartialBlocks) {
         std::unique_lock<std::mutex> block_lock(b.second->state_mutex);
-        const int height = b.second->block_data.getBlockHeight();
-        if (height == target_height) {
+        const int height = b.second->height;
+        if (height != -1 && height == target_height) {
             const BlkChunkStats s = GetBlkChunkStats(*b.second);
             return BlkChunkStatsToJSON(s);
         }
