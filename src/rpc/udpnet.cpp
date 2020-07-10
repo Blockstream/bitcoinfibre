@@ -163,7 +163,7 @@ UniValue disconnectudpnode(const JSONRPCRequest& request)
 
 static std::string StatsDescriptionString()
 {
-    return "  \"height\": n,                  (numeric) Block height\n"
+    return "  \"height\": n,                  (numeric) Block height (if already decoded)\n"
         "  \"header_chunks\": \"rx / exp\",  (string)  Header FEC chunks received / expected\n"
         "  \"body_chunks\": \"rx / exp\",    (string)  Body FEC chunks received / expected\n"
         "  \"progress\": \"x%\"              (string)  Percentage of chunks received\n";
@@ -174,11 +174,11 @@ UniValue getchunkstats(const JSONRPCRequest& request)
     RPCHelpMan{"getchunkstats",
     "\nReturns chunk statistics of current partial blocks.\n",
     {
-        {"height", RPCArg::Type::NUM, RPCArg::Optional::OMITTED, "Height of the partial block of interest. If set to 0, show stats of all current partial blocks."},
+        {"height", RPCArg::Type::NUM, RPCArg::Optional::OMITTED, "Height of the partial block of interest. If set to 0, shows all current partial blocks."},
     },
     {
         RPCResult{
-        "if height is not provided",
+        "if height is omitted",
         "{\n"
         "\"min_blk\": {                    (json object)\n"
         + StatsDescriptionString()
