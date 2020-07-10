@@ -163,6 +163,7 @@ public:
     // Dummy for deserialization
     CBlockHeaderAndLengthShortTxIDs() {}
 
+    int getBlockHeight() const { return height; };
     void setBlockHeight(int h) { height = h; }
     size_t ShortTxIdCount() const { return shorttxids.size(); }
 
@@ -219,7 +220,6 @@ private:
 
     // this is initialized to what we read off the network in InitData()
     codec_version_t codec_version = codec_version_t::default_version;
-    int height = -1; // either -1 or the block height advertised by the peer
 
     // Things used in the iterative fill-from-mempool:
     std::map<size_t, size_t>::iterator fill_coding_index_offsets_it;
@@ -257,8 +257,6 @@ public:
     // but can happen after MarkChunkAvailable
     unsigned char* GetChunk(size_t chunk);
     void MarkChunkAvailable(size_t chunk);
-
-    int getBlockHeight() const { return height; };
 };
 
 #endif // BITCOIN_BLOCKENCODINGS_H
