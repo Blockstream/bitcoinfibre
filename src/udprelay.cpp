@@ -12,6 +12,8 @@
 #include <streams.h>
 #include <validation.h>
 #include <version.h>
+#include <net.h>
+#include <net_processing.h>
 
 #include <queue>
 #include <condition_variable>
@@ -1110,7 +1112,9 @@ static bool HandleTx(UDPMessage& msg, size_t length, const CService& node, UDPCo
             stream >> CTxCompressor(tx, codec_version);
             LOCK(cs_main);
             CValidationState state;
-            AcceptToMemoryPool(mempool, state, tx, nullptr, nullptr, false, 0);
+            if (AcceptToMemoryPool(mempool, state, tx, nullptr, nullptr, false, 0)) {
+                RelayTransaction(tx->GetHash(), *g_connman);
+            }
         } catch (std::exception& e) {
             LogPrintf("UDP: Tx decode failed for tx %lu from %s: %s\n", msg.msg.block.hash_prefix, node.ToString(), e.what());
         }
