@@ -1506,17 +1506,20 @@ static void LaunchMulticastBackfillThreads() {
     for (const auto& node : mapMulticastNodes) {
         auto& info = node.second;
         if (info.tx) {
-            mcast_tx_threads.emplace_back([&info, &node] {
-                    char name[50];
-                    sprintf(name, "udpblkbackfill %d-%d", info.physical_idx,
-                            info.logical_idx);
-                    TraceThread(
-                        name,
-                        std::bind(MulticastBackfillThread,
-                                  std::get<0>(node.first), &info)
-                        );
-                });
-
+            // Thread for transmission of FEC-coded blocks
+            if (info.interleave_size > 0) {
+                mcast_tx_threads.emplace_back([&info, &node] {
+                        char name[50];
+                        sprintf(name, "udpblkbackfill %d-%d", info.physical_idx,
+                                info.logical_idx);
+                        TraceThread(
+                            name,
+                            std::bind(MulticastBackfillThread,
+                                      std::get<0>(node.first), &info)
+                            );
+                    });
+            }
+            // Thread for transmission of mempool txns
             if (info.txn_per_sec > 0) {
                 mcast_tx_threads.emplace_back([&info, &node] {
                         char name[50];
@@ -1607,7 +1610,7 @@ static UDPMulticastInfo ParseUDPMulticastInfo(const std::string& s, const bool t
     info.logical_idx     = 0; // default for multicast Rx, overriden for Tx
     info.depth           = 144;
     info.offset          = 0;
-    info.interleave_size = 0; // default is to disable interleaving
+    info.interleave_size = 1; // send one block at a time (no interleaving)
     info.dscp            = 0; // IPv4 DSCP used for multicast Tx
     info.trusted         = false;
 
