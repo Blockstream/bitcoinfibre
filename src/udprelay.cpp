@@ -131,7 +131,7 @@ static void RelayUncodedChunks(UDPMessage& msg, const std::vector<unsigned char>
         }
 
         for (const auto& node : multicast_nodes()) {
-            if (node.second.tx) {
+            if (node.second.tx && node.second.interleave_size > 0) {
                 SendMessage(msg,
                             sizeof(UDPMessageHeader) + sizeof(UDPBlockMessage),
                             high_prio, std::get<0>(node.first),
@@ -191,15 +191,16 @@ static void RelayFECedChunks(UDPMessage& msg, DataFECer& fec, const size_t high_
 
         /* Send over unicast services */
         for (auto it = mapUDPNodes.begin(); it != mapUDPNodes.end(); it++) {
-            CopyFECData(msg, fec, i, true /*regenerate chunk on index i*/);
-            if (it->second.connection.udp_mode == udp_mode_t::unicast)
+            if (it->second.connection.udp_mode == udp_mode_t::unicast) {
+                CopyFECData(msg, fec, i, true /*regenerate chunk on index i*/);
                 SendMessageToNode(msg, sizeof(UDPMessageHeader) + sizeof(UDPBlockMessage), high_prio, hash_prefix, it);
+            }
         }
 
         /* Send over each multicast Tx (outbound) service */
         for (const auto& node : multicast_nodes()) {
-            CopyFECData(msg, fec, i, true /*regenerate chunk on index i*/);
-            if (node.second.tx) {
+            if (node.second.tx && node.second.interleave_size > 0) {
+                CopyFECData(msg, fec, i, true /*regenerate chunk on index i*/);
                 SendMessage(msg,
                             sizeof(UDPMessageHeader) + sizeof(UDPBlockMessage),
                             high_prio, std::get<0>(node.first),
