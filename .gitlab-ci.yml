@@ -3,8 +3,8 @@ variables:
   DOCKER_IMAGE: $DOCKER_REGISTRY/satellite/bitcoinsatellite:latest
 
 builder:
-  stage: .pre
   image: docker
+  stage: .pre
   only:
     changes:
       - docker/builder.docker
@@ -16,6 +16,7 @@ builder:
 
 test:
   image: $DOCKER_IMAGE
+  stage: test
   script:
     - set -e
     - ./autogen.sh
@@ -25,11 +26,28 @@ test:
 
 xcompile-aarch64:
   image: $DOCKER_IMAGE
+  stage: build
   script:
     - set -e
     - ./autogen.sh
     - ./configure --disable-wallet --prefix=/src/depends/aarch64-linux-gnu --enable-glibc-back-compat --enable-reduce-exports LDFLAGS=-static-libstdc++
-    - make -j$(nproc) CXXFLAGS='-pipe -O2  -fvisibility=hidden  -DLINUX_ARM -DHAVE_ARM_NEON_H -DGF256_TRY_NEON'
+    - make -j$(nproc) CXXFLAGS='-g -O2 -DLINUX_ARM -DHAVE_ARM_NEON_H'
+  only:
+    refs:
+      - web
+  artifacts:
+    paths:
+      - src/bitcoind
+      - src/bitcoin-cli
+
+xcompile-armhf:
+  image: $DOCKER_IMAGE
+  stage: build
+  script:
+    - set -e
+    - ./autogen.sh
+    - ./configure --disable-wallet --prefix=/src/depends/arm-linux-gnueabihf --enable-glibc-back-compat --enable-reduce-exports LDFLAGS=-static-libstdc++
+    - make -j$(nproc) CXXFLAGS='-g -O2 -DLINUX_ARM'
   only:
     refs:
       - web
