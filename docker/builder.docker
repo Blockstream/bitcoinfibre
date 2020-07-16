@@ -3,10 +3,20 @@ MAINTAINER Blockstream Satellite
 
 RUN apt update && apt install -y git bsdmainutils libboost-thread-dev \
 	libboost-system-dev libboost-program-options-dev libboost-chrono-dev \
-	libboost-test-dev libboost-filesystem-dev gcc-aarch64-linux-gnu \
-	g++-aarch64-linux-gnu binutils-aarch64-linux-gnu ccache
+	libboost-test-dev libboost-filesystem-dev ccache
+
+# aarch64 build tools
+RUN apt install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu \
+	binutils-aarch64-linux-gnu
+
+# armhf build tools
+RUN apt install -y gcc-arm-linux-gnueabihf g++-arm-linux-gnueabihf \
+	binutils-arm-linux-gnueabihf
+
+# build depends for aarch64 and armhf
 RUN mkdir src && cd src && \
-	git clone https://github.com/bitcoinfibre/bitcoinfibre && \
-	mv bitcoinfibre/depends . && rm -r bitcoinfibre && \
-	cd depends && make HOST=aarch64-linux-gnu NO_QT=1
+	git clone https://github.com/Blockstream/bitcoinsatellite && \
+	mv bitcoinsatellite/depends . && rm -r bitcoinsatellite && \
+	cd depends && make HOST=aarch64-linux-gnu NO_QT=1 && \
+	make HOST=arm-linux-gnueabihf NO_QT=1
 
