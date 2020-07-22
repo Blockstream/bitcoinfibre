@@ -721,12 +721,12 @@ static void ProcessBlockThread() {
 
                 const uint32_t n_header_chunks = DIV_CEIL(block.header_len, sizeof(UDPBlockMessage::data));
 
-                block.header_data.resize(n_header_chunks * sizeof(UDPBlockMessage::data));
+                std::vector<unsigned char> header_data(n_header_chunks * sizeof(UDPBlockMessage::data));
 
                 for (uint32_t i = 0; i < n_header_chunks; i++) {
                     const void* data_ptr = block.header_decoder.GetDataPtr(i);
                     assert(data_ptr);
-                    memcpy(&block.header_data[i * sizeof(UDPBlockMessage::data)], data_ptr, sizeof(UDPBlockMessage::data));
+                    memcpy(&header_data[i * sizeof(UDPBlockMessage::data)], data_ptr, sizeof(UDPBlockMessage::data));
                 }
 
                 std::chrono::steady_clock::time_point data_copied;
@@ -735,7 +735,7 @@ static void ProcessBlockThread() {
 
                 CBlockHeaderAndLengthShortTxIDs header;
                 try {
-                    VectorInputStream stream(&block.header_data, SER_NETWORK, PROTOCOL_VERSION);
+                    VectorInputStream stream(&header_data, SER_NETWORK, PROTOCOL_VERSION);
                     stream >> header;
                 } catch (std::ios_base::failure& e) {
                     lock.unlock();
