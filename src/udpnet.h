@@ -133,7 +133,6 @@ struct PartialBlockData {
 
     uint32_t blk_len; // length of chunk-coded block being downloaded
     uint32_t header_len; // length of CBlockHeaderAndLengthShortTxIDs (aka "block header") being downloaded
-    std::vector<unsigned char> header_data; // Serialized block header (CBlockHeaderAndLengthShortTxIDs)
     FECDecoder header_decoder; // Note that this may have been std::move()d if (currentlyProcessing)
     FECDecoder body_decoder; // Note that this may have been std::move()d if (currentlyProcessing)
     PartiallyDownloadedChunkBlock block_data;
