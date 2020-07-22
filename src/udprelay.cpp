@@ -754,6 +754,34 @@ static void ProcessBlockThread() {
                 if (fBench)
                     header_deserialized = std::chrono::steady_clock::now();
 
+                /* Do we have the block already?  */
+                if (!block.chain_lookup) {
+                    const CBlockIndex* pblockindex;
+                    {
+                        LOCK(cs_main);
+                        pblockindex = LookupBlockIndex(header.header.GetHash());
+                    }
+                    block.chain_lookup = true;
+                    if (pblockindex) {
+                        /* We do have the block already. Drop the partial block
+                         * immediately and add it to setBlocksReceived, so that its
+                         * subsequent chunks are ignored.*/
+                        lock.unlock();
+                        std::lock_guard<std::recursive_mutex> udpNodesLock(cs_mapUDPNodes);
+                        setBlocksReceived.insert(process_block.first);
+                        RemovePartialBlock(process_block.first);
+                        break;
+                    }
+                }
+
+                /* Continue with the processing of a non-tip (repeated) block
+                 * only if the body is also decodable or empty. This is to save
+                 * memory, given that as soon as we call ProvideHeaderData
+                 * below, significant amounts of memory are preallocated. */
+                const bool non_empty_block = (header.ShortTxIdCount() != 0);
+                if (!block.tip_blk && non_empty_block && !block.is_decodeable)
+                    break;
+
                 ReadStatus decode_status = block.ProvideHeaderData(header);
                 if (decode_status != READ_STATUS_OK) {
                     lock.unlock();
@@ -1040,8 +1068,8 @@ PartialBlockData::PartialBlockData(const CService& node, const UDPMessage& msg, 
         in_header(true), blk_initialized(false), header_initialized(false),
         is_decodeable(false), is_header_processing(false),
         packet_awaiting_lock(false), awaiting_processing(false),
-        currentlyProcessing(false), blk_len(0), header_len(0),
-        block_data(&mempool)
+        chain_lookup(false), currentlyProcessing(false), blk_len(0),
+        header_len(0), block_data(&mempool)
     {
        bool const ret = Init(msg);
        assert(ret);
@@ -1479,21 +1507,37 @@ bool HandleBlockTxMessage(UDPMessage& msg, size_t length, const CService& node, 
          * the processing of the FEC object as soon as it is ready, regardless
          * of which object it is. By doing so, if the header is the object that
          * is decoded first (the usual case), the ProcessBlockThread will
-         * process the header right now and prepare (reserved space for) the
+         * process the header immediately and prepare (reserved space for) the
          * chunk-coded block. Subsequently, as soon as the first body chunk
          * comes, the process thread will start to prefill the chunk-coded block
-         * with txns from the mempool. In contrast, if this is a backfill block,
-         * we can wait until both header and body FEC objects are ready to be
-         * decoded. If we pushed the header earlier for such backfill (old)
-         * blocks, we would end up wasting a lot of memory with reserved
-         * chunk-coded blocks that would not be prefilled. The exception is if
-         * the backfill block has an empty "body", i.e. contains only the
+         * with txns from the mempool.
+         *
+         * In contrast, if this is a backfill block, we can wait until both
+         * header and body FEC objects are ready to be decoded. If we pushed the
+         * header right now, we would end up wasting a lot of memory with
+         * reserved chunk-coded blocks that would not be prefilled (only tip
+         * blocks are prefilled). In fact, the current implementation of the
+         * ProcessBlockThread won't even allow this to happen. Nevertheless,
+         * there are two main reasons to consider the early processing of a
+         * non-tip block header:
+         *
+         * 1) We need to decode the header in order to find out if we already
+         * have the corresponding block. If we do have the block already, we can
+         * ignore subsequent chunks of the block and, with that, save
+         * significant processing. We can push the header FEC object for
+         * processing just so that the chain is looked up. After that, we can
+         * wait until the body is decodable to process the header again.
+         *
+         * 2) If the backfill block has an empty "body", i.e. contains only the
          * coinbase txn, which comes in the header. Such empty blocks are sent
          * through the header only, in which case the header must be processed
-         * as soon as ready. */
-        if ((tip_block ||
-             (block.is_header_processing && (empty_block || block.is_decodeable)))
-            && !block.awaiting_processing) {
+         * as soon as ready.
+         *
+         */
+        if (!block.awaiting_processing &&
+            (block.tip_blk ||
+             (block.is_header_processing && (!block.chain_lookup || empty_block || block.is_decodeable)))
+            ) {
             block.awaiting_processing = true;
             DoBackgroundBlockProcessing(*it);
         }
