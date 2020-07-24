@@ -9,6 +9,9 @@ builder:
     changes:
       - docker/builder.docker
       - depends/**/*
+  except:
+    refs:
+      - web
   script:
     - docker build -f docker/builder.docker -t $DOCKER_IMAGE .
     - echo "$CI_BUILD_TOKEN" | docker login -u gitlab-ci-token --password-stdin $DOCKER_REGISTRY
