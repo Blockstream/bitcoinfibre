@@ -1383,14 +1383,11 @@ UniValue TxWindowInfoToJSON(int phy_idx, int log_idx) {
 static void MulticastTxnThread(const CService& mcastNode,
                                const UDPMulticastInfo *info) {
     assert(info->txn_per_sec > 0);
-    double txn_per_sec = (double) info->txn_per_sec;
 
     /* Start only after the initial sync */
     while (::ChainstateActive().IsInitialBlockDownload() && !send_messages_break)
         std::this_thread::sleep_for(std::chrono::milliseconds(50));
 
-    // if IsInitialBlockDownload() is false, chainActive.Tip()->pprev will
-    // return nullptr and trip the assert below
     if (send_messages_break) return;
 
     /* Debug options */
@@ -1403,7 +1400,7 @@ static void MulticastTxnThread(const CService& mcastNode,
     int n_sent_txns = 0;
     std::chrono::steady_clock::time_point last_print = std::chrono::steady_clock::now();
 
-    /* Use a bloom filter to keep track of txns already sent */
+    /* Use a rolling bloom filter to keep track of the txns already sent */
     boost::optional<CRollingBloomFilter> sent_txn_bloom;
 #if BOOST_VERSION >= 105600
     sent_txn_bloom.emplace(500000, 0.001); // Hold 500k (~24*6 blocks of txn) txn
@@ -1415,89 +1412,91 @@ static void MulticastTxnThread(const CService& mcastNode,
     assert(it != mapTxQueues.end());
     PerGroupMessageQueue& queue = it->second;
 
-    /* The txn transmission quota is based on the elapsed interval since
-     * last time txns were sent, which is the "txn quota of seconds". */
-    double txn_quota_sec = 0;
-    int txn_tx_quota = 0;
-    std::chrono::steady_clock::time_point last_tx_time = std::chrono::steady_clock::now();
+    /* Rate-limit the txn transmissions */
+    Throttle throttle(info->txn_per_sec);
+    throttle.SetMaxQuota(2*info->txn_per_sec);
 
     while (!send_messages_break) {
         /* Txn transmission quota (number of txns to transmit now) */
-        std::chrono::steady_clock::time_point const now = std::chrono::steady_clock::now();
-        txn_quota_sec += to_seconds(now - last_tx_time);
-        last_tx_time = now;
-        txn_tx_quota = txn_quota_sec * txn_per_sec;
+        const uint32_t txn_tx_quota = throttle.GetQuota();
 
-        if (txn_tx_quota > 0) {
-            /* We will send txns now, so we must remove the corresponding
-             * interval from the quota of seconds. Any residual interval will be
-             * left in the quota. This way, we avoid roundoff errors. */
-            txn_quota_sec -= txn_tx_quota / txn_per_sec;
+        // Sleep until we have at least one second of txns
+        if (txn_tx_quota < info->txn_per_sec) {
+            const uint32_t wait_ms = throttle.EstimateWait(info->txn_per_sec);
+            std::this_thread::sleep_for(std::chrono::milliseconds(wait_ms));
+            continue;
+        }
 
-            std::vector<CTransactionRef> txn_to_send;
-            txn_to_send.reserve(txn_tx_quota);
-            {
-                std::set<uint256> txids_to_send;
-                LOCK(mempool.cs);
-                for (const auto& iter : mempool.mapTx.get<ancestor_score>()) {
-                    if (txn_to_send.size() >= (unsigned int)txn_tx_quota)
-                        break;
-                    if (txids_to_send.count(iter.GetTx().GetHash()) || sent_txn_bloom->contains(iter.GetTx().GetHash()))
-                        continue;
+        /* Consume the quota. Not necessairly we will have this many txns to
+         * send, but consume the full quota to avoid accumulation. */
+        throttle.UseQuota(txn_tx_quota);
 
-                    std::vector<CTransactionRef> to_add{iter.GetSharedTx()};
-                    while (!to_add.empty()) {
-                        bool has_dep = false;
-                        /* If any input of the transaction references a txn that
-                         * is also in the mempool, and which has not been sent
-                         * previously, then add this parent txn also to the list
-                         * of txns to be sent over multicast */
-                        for (const CTxIn& txin : to_add.back()->vin) {
-                            CTxMemPool::txiter init = mempool.mapTx.find(txin.prevout.hash);
-                            if (init != mempool.mapTx.end() && !txids_to_send.count(txin.prevout.hash) &&
-                                !sent_txn_bloom->contains(txin.prevout.hash)) {
-                                to_add.emplace_back(init->GetSharedTx());
-                                has_dep = true;
-                            }
+        /* Get mempool txns to send now */
+        std::vector<CTransactionRef> txn_to_send;
+        txn_to_send.reserve(txn_tx_quota);
+        {
+            std::set<uint256> txids_to_send;
+            LOCK(mempool.cs);
+            for (const auto& iter : mempool.mapTx.get<ancestor_score>()) {
+                if (txn_to_send.size() >= (unsigned int)txn_tx_quota)
+                    break;
+                if (txids_to_send.count(iter.GetTx().GetHash()) || sent_txn_bloom->contains(iter.GetTx().GetHash()))
+                    continue;
+
+                std::vector<CTransactionRef> to_add{iter.GetSharedTx()};
+                while (!to_add.empty()) {
+                    bool has_dep = false;
+                    /* If any input of the transaction references a txn that
+                     * is also in the mempool, and which has not been sent
+                     * previously, then add this parent txn also to the list
+                     * of txns to be sent over multicast */
+                    for (const CTxIn& txin : to_add.back()->vin) {
+                        CTxMemPool::txiter init = mempool.mapTx.find(txin.prevout.hash);
+                        if (init != mempool.mapTx.end() && !txids_to_send.count(txin.prevout.hash) &&
+                            !sent_txn_bloom->contains(txin.prevout.hash)) {
+                            to_add.emplace_back(init->GetSharedTx());
+                            has_dep = true;
                         }
-                        if (!has_dep) {
-                            if (txids_to_send.insert(to_add.back()->GetHash()).second) {
-                                sent_txn_bloom->insert(to_add.back()->GetHash());
-                                txn_to_send.emplace_back(std::move(to_add.back()));
-                            }
-                            to_add.pop_back();
+                    }
+                    if (!has_dep) {
+                        if (txids_to_send.insert(to_add.back()->GetHash()).second) {
+                            sent_txn_bloom->insert(to_add.back()->GetHash());
+                            txn_to_send.emplace_back(std::move(to_add.back()));
                         }
+                        to_add.pop_back();
                     }
                 }
             }
+        }
 
-            for (const CTransactionRef& tx : txn_to_send) {
-                std::vector<std::pair<UDPMessage, size_t>> msgs;
-                UDPFillMessagesFromTx(*tx, msgs);
-                for (const auto& msg_info : msgs) {
-                    const UDPMessage& msg = msg_info.first;
-                    const size_t msg_size = msg_info.second;
-                    SendMessage(msg, sizeof(UDPMessageHeader) + udp_blk_msg_header_size + msg_size, queue, queue.buffs[2], mcastNode, multicast_checksum_magic);
-                }
+        for (const CTransactionRef& tx : txn_to_send) {
+            if (send_messages_break)
+                break;
 
-                if (debugMcast) {
-                    n_sent_txns++;
-                    const auto now = std::chrono::steady_clock::now();
-                    const double timeDeltaMillis = to_millis_double(now - last_print);
-                    if (timeDeltaMillis > 1000*stats_interval) {
-                        LogPrint(BCLog::UDPMCAST,
-                                 "UDP: Multicast Tx %lu-%lu - sent %4d txns "
-                                 "in %5.2f secs (current quota: %5.2f)\n",
-                                 info->physical_idx, info->logical_idx,
-                                 n_sent_txns, timeDeltaMillis/1000,
-                                 (txn_quota_sec * txn_per_sec));
-                        last_print = now;
-                        n_sent_txns = 0;
-                    }
+            std::vector<std::pair<UDPMessage, size_t>> msgs;
+            UDPFillMessagesFromTx(*tx, msgs);
+            for (const auto& msg_info : msgs) {
+                if (send_messages_break)
+                    break;
+                const UDPMessage& msg = msg_info.first;
+                const size_t msg_size = msg_info.second;
+                SendMessage(msg, msg_size, queue, queue.buffs[2], mcastNode, multicast_checksum_magic);
+            }
+
+            if (debugMcast) {
+                n_sent_txns++;
+                const auto now = std::chrono::steady_clock::now();
+                const double timeDeltaMillis = to_millis_double(now - last_print);
+                if (timeDeltaMillis > 1000*stats_interval) {
+                    LogPrint(BCLog::UDPMCAST,
+                             "UDP: Multicast Tx %lu-%lu - sent %4d txns "
+                             "in %5.2f secs\n",
+                             info->physical_idx, info->logical_idx,
+                             n_sent_txns, timeDeltaMillis/1000);
+                    last_print = now;
+                    n_sent_txns = 0;
                 }
             }
-        } else {
-            std::this_thread::sleep_for(std::chrono::milliseconds(200));
         }
     }
 }

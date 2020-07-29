@@ -234,6 +234,7 @@ BITCOIN_CORE_H = \
   sync.h \
   threadinterrupt.h \
   threadsafety.h \
+  throttle.h \
   timedata.h \
   torcontrol.h \
   txdb.h \
@@ -397,6 +398,7 @@ libbitcoin_node_a_SOURCES = \
   script/sigcache.cpp \
   shutdown.cpp \
   signet.cpp \
+  throttle.cpp \
   timedata.cpp \
   torcontrol.cpp \
   txdb.cpp \
