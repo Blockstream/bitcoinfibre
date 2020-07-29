@@ -510,7 +510,8 @@ void UDPFillMessagesFromTx(const CTransaction& tx, std::vector<std::pair<UDPMess
 
     for (size_t i = 0; i < data_chunks; i++) {
         FillCommonMessageHeader(msgs[i].first, hash_prefix, MSG_TYPE_TX_CONTENTS, data.size());
-        msgs[i].second = CopyMessageData(msgs[i].first, data, data_chunks, i);
+        const size_t chunk_size = CopyMessageData(msgs[i].first, data, data_chunks, i);
+        msgs[i].second = sizeof(UDPMessageHeader) + udp_blk_msg_header_size + chunk_size;
     }
 }
 
