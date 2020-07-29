@@ -276,6 +276,7 @@ BITCOIN_TESTS =\
   test/sync_tests.cpp \
   test/system_tests.cpp \
   test/util_threadnames_tests.cpp \
+  test/throttle_tests.cpp \
   test/timedata_tests.cpp \
   test/torcontrol_tests.cpp \
   test/transaction_tests.cpp \
