@@ -261,6 +261,43 @@ UniValue gettxwindowinfo(const JSONRPCRequest& request) {
     return info;
 }
 
+UniValue gettxqueueinfo(const JSONRPCRequest& request) {
+    RPCHelpMan{"gettxqueueinfo",
+        "\nGet information from the UDP Tx queues.\n",
+        {
+        },
+        RPCResults{
+             RPCResult{
+                 "{\n"
+                 "  \"Group 0\" : {          (json object)\n"
+                 "    \"Buffer 0\" : {       (json object)\n"
+                 "      \"tx_bytes\"    : n  (numeric) Bytes transmitted through the ring buffer\n"
+                 "      \"tx_pkts\"     : n  (numeric) Packets transmitted through the ring buffer\n"
+                 "      \"pkt_per_sec\" : n  (numeric) Packets transmitted per second on average\n"
+                 "      \"bitrate\"     : n  (numeric) Average bitrate (in bps) of the ring buffer\n"
+                 "    }\n"
+                 "    \"Buffer 1\" : {       (json object)\n"
+                 "        ...\n"
+                 "    }\n"
+                 "    ... (all buffers)\n"
+                 "  }\n"
+                 "  ... (all queue groups)\n"
+                 "}\n"
+             }
+        },
+        RPCExamples{
+            HelpExampleCli("gettxqueueinfo", "")
+            + HelpExampleRpc("gettxqueueinfo", "")
+        }
+    }.Check(request);
+
+    UniValue info = TxQueueInfoToJSON();
+    if (info.isNull())
+        throw JSONRPCError(RPC_INVALID_PARAMS, "Could not find any Tx queue");
+
+    return info;
+}
+
 static const CRPCCommand commands[] =
 { //  category              name                      actor (function)         argNames
   //  --------------------- ------------------------  -----------------------  ----------
@@ -268,7 +305,8 @@ static const CRPCCommand commands[] =
     { "udpnetwork",         "addudpnode",             &addudpnode,             {"node", "local_magic", "remote_magic", "ultimately_trusted", "command", "group"} },
     { "udpnetwork",         "disconnectudpnode",      &disconnectudpnode,      {"node"} },
     { "udpnetwork",         "getchunkstats",          &getchunkstats,          {"height"} },
-    { "udpnetwork",         "gettxwindowinfo",        &gettxwindowinfo,        {"physical_idx", "logical_idx"} }
+    { "udpnetwork",         "gettxwindowinfo",        &gettxwindowinfo,        {"physical_idx", "logical_idx"} },
+    { "udpnetwork",         "gettxqueueinfo",         &gettxqueueinfo,         {} }
 };
 
 void RegisterUDPNetRPCCommands(CRPCTable &t)
