@@ -275,7 +275,6 @@ struct UDPConnectionState {
 
 extern std::recursive_mutex cs_mapUDPNodes;
 extern std::map<CService, UDPConnectionState> mapUDPNodes;
-extern std::atomic<uint64_t> min_per_node_mbps; // Used to determine header FEC chunk count
 extern bool maybe_have_write_nodes;
 extern uint64_t const multicast_checksum_magic;
 

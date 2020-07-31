@@ -8,6 +8,8 @@
 
 #include <udpnet.h>
 #include <udprelay.h>
+#include <throttle.h>
+#include <ringbuffer.h>
 
 #include <chainparams.h>
 #include <consensus/validation.h>
@@ -62,7 +64,6 @@ static std::vector<int> udp_socks; // The sockets we use to send/recv (bound to 
 
 std::recursive_mutex cs_mapUDPNodes;
 std::map<CService, UDPConnectionState> mapUDPNodes;
-std::atomic<uint64_t> min_per_node_mbps(1024);
 bool maybe_have_write_nodes;
 
 static std::map<int64_t, std::tuple<CService, uint64_t, size_t> > nodesToRepeatDisconnect;
@@ -138,27 +139,20 @@ static struct timeval timer_interval;
 
 // ~10MB of outbound messages pending
 static const size_t PENDING_MESSAGES_BUFF_SIZE = 8192;
-static const double max_tx_group_turn_duration = 0.2; // seconds
 static std::atomic_bool send_messages_break(false);
-std::mutex send_messages_mutex;
-std::condition_variable send_messages_wake_cv;
-struct PendingMessagesBuff {
-    std::tuple<CService, UDPMessage, unsigned int, uint64_t> messagesPendingRingBuff[PENDING_MESSAGES_BUFF_SIZE];
-    std::atomic<uint16_t> nextPendingMessage, nextUndefinedMessage;
-    PendingMessagesBuff() : nextPendingMessage(0), nextUndefinedMessage(0) {}
+std::mutex non_empty_queues_cv_mutex;
+std::condition_variable non_empty_queues_cv;
+
+struct RingBufferElement {
+    CService service;
+    UDPMessage msg;
+    unsigned int length;
+    uint64_t magic;
 };
-struct MessageStateCache {
-    ssize_t buff_id;
-    uint16_t nextPendingMessage;
-    uint16_t nextUndefinedMessage;
-};
-struct PerQueueSendState {
-    MessageStateCache buff_state;
-    std::chrono::steady_clock::time_point next_send;
-    std::chrono::steady_clock::time_point last_send;
-};
+
 struct PerGroupMessageQueue {
-    std::array<PendingMessagesBuff, 4> buffs;
+    std::array<RingBuffer<RingBufferElement>, 4> buffs;
+    ssize_t buff_id; // active buffer
     /* Three message queues (buffers) per group:
      * 0) high priority
      * 1) best-effort (non priority)
@@ -171,20 +165,26 @@ struct PerGroupMessageQueue {
 
     /* Find the next buffer with data available for transmission, while
      * respecting buffer priorities. */
-    inline MessageStateCache NextBuff() {
+    inline void NextBuff() {
         for (size_t i = 0; i < buffs.size(); i++) {
-            uint16_t next_undefined_message = buffs[i].nextUndefinedMessage;
-            uint16_t next_pending_message = buffs[i].nextPendingMessage;
-            if (next_undefined_message != next_pending_message)
-                return {(ssize_t)i, next_pending_message, next_undefined_message};
+            if (!buffs[i].IsEmpty()) {
+                buff_id = i;
+                return;
+            }
         }
-        return {-1, 0, 0};
+        buff_id = -1;
     }
 
     uint64_t bw;
     bool multicast;
-    struct PerQueueSendState state;
-    PerGroupMessageQueue() : bw(0), multicast(false) {}
+    bool unlimited; // when non rate-limited (limited by a blocking socket instead)
+    Throttle ratelimiter;
+    std::chrono::steady_clock::time_point next_send;
+    PerGroupMessageQueue() : buff_id(-1), bw(0), multicast(false), unlimited(0),
+                             ratelimiter(0) {
+        for (unsigned int i = 0; i < buffs.size(); i++)
+            buffs[i].EnableStats(1.0, 0.1); // Average the past ~10 secs
+    }
     PerGroupMessageQueue(PerGroupMessageQueue&& q) =delete;
 };
 static std::map<size_t, PerGroupMessageQueue> mapTxQueues;
@@ -948,39 +948,27 @@ static void timer_func(evutil_socket_t fd, short event, void* arg) {
     }
 }
 
-static inline void SendMessage(const UDPMessage& msg, const unsigned int length, PerGroupMessageQueue& queue, PendingMessagesBuff& buff, const CService& service, const uint64_t magic) {
-    std::unique_lock<std::mutex> lock(send_messages_mutex);
-    while (!send_messages_break &&
-           buff.nextPendingMessage == ((buff.nextUndefinedMessage + 1) % PENDING_MESSAGES_BUFF_SIZE)) {
-        lock.unlock();
-        std::this_thread::sleep_for(std::chrono::milliseconds(5));
-        lock.lock();
-    }
-
-    if (send_messages_break) return;
-
-    const uint16_t next_undefined_message_cache = buff.nextUndefinedMessage;
-    const uint16_t next_pending_message_cache = buff.nextPendingMessage;
-
-    std::tuple<CService, UDPMessage, unsigned int, uint64_t>& new_msg = buff.messagesPendingRingBuff[next_undefined_message_cache];
-    std::get<0>(new_msg) = service;
-    memcpy(&std::get<1>(new_msg), &msg, length);
-    std::get<2>(new_msg) = length;
-    std::get<3>(new_msg) = magic;
-
-    bool need_notify = next_undefined_message_cache == next_pending_message_cache;
-    buff.nextUndefinedMessage = (next_undefined_message_cache + 1) % PENDING_MESSAGES_BUFF_SIZE;
-
+static inline void SendMessage(const UDPMessage& msg, const unsigned int length, PerGroupMessageQueue& queue, RingBuffer<RingBufferElement>& buff, const CService& service, const uint64_t magic) {
+    std::unique_lock<std::mutex> lock(non_empty_queues_cv_mutex);
+    const bool was_empty = buff.IsEmpty();
     lock.unlock();
-    if (need_notify)
-        send_messages_wake_cv.notify_all();
+
+    buff.WriteElement([&](RingBufferElement& elem) {
+            elem.service = service;
+            elem.length  = length;
+            elem.magic   = magic;
+            memcpy(&elem.msg, &msg, length);
+        });
+
+    if (was_empty)
+        non_empty_queues_cv.notify_all();
 }
 
 void SendMessage(const UDPMessage& msg, const unsigned int length, bool high_prio, const CService& service, const uint64_t magic, size_t group) {
     assert(length <= sizeof(UDPMessage));
     assert(mapTxQueues.count(group));
     PerGroupMessageQueue& queue = mapTxQueues[group];
-    PendingMessagesBuff& buff   = high_prio ? queue.buffs[0] : queue.buffs[1];
+    RingBuffer<RingBufferElement>& buff = high_prio ? queue.buffs[0] : queue.buffs[1];
     SendMessage(msg, length, queue, buff, service, magic);
 }
 
@@ -988,18 +976,12 @@ void SendMessage(const UDPMessage& msg, const unsigned int length, bool high_pri
     SendMessage(msg, length, high_prio, node.first, node.second.connection.remote_magic, node.second.connection.group);
 }
 
-static inline bool fill_cache(const std::chrono::steady_clock::time_point& now) {
+static inline bool IsAnyQueueReady() {
     bool have_work = false;
-
     for (auto& q : mapTxQueues) {
         PerGroupMessageQueue& queue = q.second;
-        PerQueueSendState& state    = queue.state;
-
-        if (state.next_send > now)
-            continue;
-
-        state.buff_state = queue.NextBuff();
-        if (state.buff_state.buff_id != -1) {
+        queue.NextBuff();
+        if (queue.buff_id != -1) {
             have_work = true;
             break;
         }
@@ -1007,7 +989,8 @@ static inline bool fill_cache(const std::chrono::steady_clock::time_point& now) 
     return have_work;
 }
 
-static const int ip_udp_header_size = 8 + 20; // Min IPv4 header + UDP header
+// Maximum number of consecutive transmissions from the same queue
+static int max_consecutive_tx = 10;
 
 static void do_send_messages() {
 #ifndef WIN32
@@ -1023,117 +1006,189 @@ static void do_send_messages() {
     }
 #endif
 
-    /* Initialize state of Tx queues */
+    // Keep one poll configuration for each queue */
+    std::map<ssize_t, int> map_pollfd;
+    struct pollfd *pfds;
+    const int nfds = mapTxQueues.size();
+    pfds = (struct pollfd *) calloc(nfds, sizeof(struct pollfd));
+
+    /* Initialize state of the Tx queues and the corresponding pollfd structs */
     const std::chrono::steady_clock::time_point t_now(std::chrono::steady_clock::now());
+    int i_pollfd = 0;
     for (auto& q : mapTxQueues) {
-        q.second.state.buff_state = {-1, 0, 0};
-        q.second.state.next_send  = t_now;
-        q.second.state.last_send  = t_now;
+        q.second.next_send    = t_now;
+        q.second.buff_id      = -1;
+        pfds[i_pollfd].fd     = udp_socks[q.first];
+        pfds[i_pollfd].events = POLLOUT;
+        map_pollfd[q.first]   = i_pollfd;
+        assert(pfds[i_pollfd].revents == 0);
+        i_pollfd++;
     }
 
     while (true) {
         if (send_messages_break)
             return;
-        std::chrono::steady_clock::time_point sleep_until(std::chrono::steady_clock::now() + std::chrono::minutes(60));
+        /* If all queues are rate-limited, keep track of the next upcoming
+         * transmission time and, by the end of this loop, sleep until this time
+         * comes. Start with a timestamp far into the future and reduce the
+         * timestamp for each queue. If there is any non rate-limited (i.e.,
+         * unlimited) queue, this sleeping mechanism will be effectively
+         * disabled, as t_next_tx will always converge to the current time in
+         * subsequent calls to std::min. In this case (with unlimited queues),
+         * the sleeping is handled through blocking calls to poll() instead of
+         * using "sleep_until(t_next_tx)".
+         *
+         * Ideally, either all queues are rate-limited or all unlimited. Mixing
+         * rate-limited with unlimited queues won't lead to efficient
+         * sleeping. */
+        std::chrono::steady_clock::time_point t_next_tx(
+            std::chrono::steady_clock::now() + std::chrono::minutes(60));
 
         /* Iterate over Tx queues and schedule transmissions */
+        bool maybe_all_empty = true; // unless told otherwise
+        bool maybe_all_full = true; // likewise, unless told otherwise
+
         for (auto& q : mapTxQueues) {
             PerGroupMessageQueue& queue   = q.second;
-            PerQueueSendState& send_state = queue.state;
             const size_t group            = q.first;
             const std::chrono::steady_clock::time_point t_now(std::chrono::steady_clock::now());
 
-            if (send_state.next_send > t_now) {
-                sleep_until = std::min(sleep_until, send_state.next_send);
+            if (queue.next_send > t_now) {
+                t_next_tx = std::min(t_next_tx, queue.next_send);
                 continue;
             }
 
             /* Search a higher priority non-empty buffer if... */
-            if (send_state.buff_state.buff_id != 0 || // we are not currently in the highest priority buffer
-                send_state.buff_state.nextPendingMessage == send_state.buff_state.nextUndefinedMessage) { // ...or we're out of known messages
-                send_state.buff_state = queue.NextBuff();
+            if (queue.buff_id != 0 || // we are not currently in the highest priority buffer
+                queue.buffs[queue.buff_id].IsEmpty()) { // ...the current buffer is empty
+                queue.NextBuff();
             }
 
-            if (send_state.buff_state.buff_id == -1)
+            if (queue.buff_id == -1) { // all buffers of this group are empty
                 continue;
+            }
 
-            PendingMessagesBuff* buff = &queue.buffs[send_state.buff_state.buff_id];
-            std::tuple<CService, UDPMessage, unsigned int, uint64_t>& msg = buff->messagesPendingRingBuff[send_state.buff_state.nextPendingMessage];
+            // Read from the ring buffer and send over the network
+            RingBuffer<RingBufferElement>* buff = &queue.buffs[queue.buff_id];
 
-            while (send_state.buff_state.buff_id != -1) {
-                if (queue.multicast) {
-                    assert((std::get<1>(msg).header.msg_type & UDP_MSG_TYPE_TYPE_MASK) == MSG_TYPE_BLOCK_HEADER ||
-                           (std::get<1>(msg).header.msg_type & UDP_MSG_TYPE_TYPE_MASK) == MSG_TYPE_BLOCK_CONTENTS ||
-                           (std::get<1>(msg).header.msg_type & UDP_MSG_TYPE_TYPE_MASK) == MSG_TYPE_TX_CONTENTS);
+            int consecutive_tx = 0;     // packets tx'ed consecutively from this queue
+            bool wouldblock = false;
+            /* Keep going as long as... */
+            while ((queue.buff_id != -1) && // the queue has messages to transmit
+                   (queue.unlimited || queue.ratelimiter.HasQuota(sizeof(UDPMessage))) && // the output bitrate is OK
+                   (consecutive_tx < max_consecutive_tx)) { // we are not depriving other queues
+                // Get the next message for transmission
+                RingBufferElement& next_tx = buff->GetNextRead();
+
+                // Set the checksum and scramble the data
+                if (next_tx.msg.header.chk1 == 0 && next_tx.msg.header.chk2 == 0) {
+                    if (queue.multicast) {
+                        assert((next_tx.msg.header.msg_type & UDP_MSG_TYPE_TYPE_MASK) == MSG_TYPE_BLOCK_HEADER ||
+                               (next_tx.msg.header.msg_type & UDP_MSG_TYPE_TYPE_MASK) == MSG_TYPE_BLOCK_CONTENTS ||
+                               (next_tx.msg.header.msg_type & UDP_MSG_TYPE_TYPE_MASK) == MSG_TYPE_TX_CONTENTS);
+                    }
+                    FillChecksum(next_tx.magic, next_tx.msg, next_tx.length);
                 }
 
-                // Check if we can write into the socket
-                struct pollfd pollfd = {};
-                pollfd.fd            = udp_socks[group];
-                pollfd.events        = POLLOUT;
-                const int timeout_ms = 1;
-                int nRet = poll(&pollfd, 1, timeout_ms);
-                if (nRet == 0) {
-                    break; // Socket buffer is full. Move to the next Tx queue.
-                } else if (nRet < 0) {
-                    LogPrintf("UDP: socket polling of group %d failed: %s\n",
-                              group, strerror(errno));
-                    // TODO handle
-                }
-
-                FillChecksum(std::get<3>(msg), std::get<1>(msg), std::get<2>(msg));
-
+                // Set destination address
                 sockaddr_storage ss = {};
                 socklen_t addrlen;
-
-                if (std::get<0>(msg).IsIPv6()) {
+                if (next_tx.service.IsIPv6()) {
                     sockaddr_in6 *remoteaddr = (sockaddr_in6 *) &ss;
                     remoteaddr->sin6_family = AF_INET6;
-                    assert(std::get<0>(msg).GetIn6Addr(&remoteaddr->sin6_addr));
-                    remoteaddr->sin6_port = htons(std::get<0>(msg).GetPort());
+                    assert(next_tx.service.GetIn6Addr(&remoteaddr->sin6_addr));
+                    remoteaddr->sin6_port = htons(next_tx.service.GetPort());
                     addrlen = sizeof(sockaddr_in6);
                 } else {
                     sockaddr_in *remoteaddr = (sockaddr_in *) &ss;
                     remoteaddr->sin_family = AF_INET;
-                    assert(std::get<0>(msg).GetInAddr(&remoteaddr->sin_addr));
-                    remoteaddr->sin_port = htons(std::get<0>(msg).GetPort());
+                    assert(next_tx.service.GetInAddr(&remoteaddr->sin_addr));
+                    remoteaddr->sin_port = htons(next_tx.service.GetPort());
                     addrlen = sizeof(sockaddr_in);
                 }
 
-                ssize_t res = sendto(udp_socks[group], &std::get<1>(msg), std::get<2>(msg), 0, (sockaddr *) &ss, addrlen);
-                if (res != std::get<2>(msg)) {
-                    LogPrintf("UDP: sendto to group %d failed: %s\n",
-                              group, strerror(errno));
-                    continue; /* Try sending the message again */
+                // Try to transmit
+                ssize_t res = sendto(udp_socks[group], &next_tx.msg, next_tx.length, 0, (sockaddr *) &ss, addrlen);
+                if (res != next_tx.length) {
+                    /* Likely EAGAIN. Don't advance the buffer's read pointer
+                     * and try again later */
+                    if (errno == EAGAIN || errno == EWOULDBLOCK) {
+                        wouldblock = true;
+                    } else {
+                        LogPrintf("UDP: sendto to group %d failed: %s\n",
+                                  group, strerror(errno));
+                    }
+                    buff->AbortRead();
+                    break;
                 }
+                consecutive_tx++;
 
-                send_state.buff_state.nextPendingMessage = (send_state.buff_state.nextPendingMessage + 1) % PENDING_MESSAGES_BUFF_SIZE;
-                if (send_state.buff_state.nextPendingMessage == send_state.buff_state.nextUndefinedMessage) {
-                    buff->nextPendingMessage = send_state.buff_state.nextPendingMessage;
-                    send_state.buff_state = queue.NextBuff();
-                    if (send_state.buff_state.buff_id != -1)
-                        buff = &queue.buffs[send_state.buff_state.buff_id];
+                // Consume the transmission quota
+                if (!queue.unlimited)
+                    queue.ratelimiter.UseQuota(next_tx.length);
+
+                // Advance to the highest-priority non-empty buffer in this
+                // queue group
+                buff->ConfirmRead(next_tx.length);
+                if (buff->IsEmpty()) {
+                    queue.NextBuff();
+                    if (queue.buff_id != -1)
+                        buff = &queue.buffs[queue.buff_id];
                 }
-
-                msg = buff->messagesPendingRingBuff[send_state.buff_state.nextPendingMessage];
             }
 
-            send_state.last_send  = send_state.next_send;
-            send_state.next_send += std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::duration<double>(max_tx_group_turn_duration));
+            // If the transmission loop stopped before filling the socket
+            // buffer, it's likely that there is at least one non-full socket.
+            if (!wouldblock)
+                maybe_all_full = false;
 
-            if (send_state.buff_state.buff_id != -1)
-                buff->nextPendingMessage = send_state.buff_state.nextPendingMessage;
+            // If the transmission loop stopped before emptying this queue,
+            // there is definitely at least one non-empty queue.
+            if (queue.buff_id != -1)
+                maybe_all_empty = false;
 
-            sleep_until = std::min(sleep_until, send_state.next_send);
+            /* How long will it take until we have enough quota to send at least
+             * one MTU?
+             *
+             * NOTE: A non rate-limited queue sleeps on calls to poll() instead
+             * of sleeping based on the "queue.next_send" values. */
+            const uint32_t wait_ms = (queue.unlimited) ? 0 :
+                queue.ratelimiter.EstimateWait(sizeof(UDPMessage));
+
+            queue.next_send += std::chrono::milliseconds(wait_ms);
+            t_next_tx = std::min(t_next_tx, queue.next_send);
         }
 
-        std::chrono::steady_clock::time_point end(std::chrono::steady_clock::now());
-        if (sleep_until > end) { // No need to be aggressive here, fill_cache is useful to speed up per-queue loop anyway
-            if (fill_cache(end))
-                continue;
-            std::unique_lock<std::mutex> lock(send_messages_mutex);
-            if (!fill_cache(end))
-                send_messages_wake_cv.wait_until(lock, sleep_until);
+        // Wait until at least one socket is writable
+        if (maybe_all_full) {
+            int n_ready;
+            bool retry_poll = true;
+            while (retry_poll) {
+                n_ready = poll(pfds, nfds, -1 /* Wait indefinitely */);
+                retry_poll = (n_ready < 0) && (errno == EINTR);
+            }
+            if (n_ready == 0) {
+                LogPrintf("UDP: unexpected poll timeout\n");
+            } else if (n_ready < 0) {
+                LogPrintf("UDP: unexpected poll error: %s\n", strerror(errno));
+            }
+        }
+
+        // Wait until at least one queue has messages to send
+        if (maybe_all_empty) {
+            std::unique_lock<std::mutex> lock(non_empty_queues_cv_mutex);
+            if (!IsAnyQueueReady())
+                non_empty_queues_cv.wait(lock);
+        }
+
+        // Wait until the earliest scheduled transmission comes
+        //
+        // NOTE: if we just slept waiting for any queue to become non-empty, do
+        // not sleep now. There is a risk that "t_next_tx" was not set to a
+        // value other than its initialization value (far into the future).
+        std::chrono::steady_clock::time_point t_end(std::chrono::steady_clock::now());
+        if (t_next_tx > t_end && !maybe_all_empty) {
+            std::this_thread::sleep_until(t_next_tx);
         }
     }
 }
@@ -1538,29 +1593,45 @@ static std::map<size_t, PerGroupMessageQueue> init_tx_queues(const std::vector<s
                                                              const std::vector<UDPMulticastInfo>& multicast_list) {
     std::map<size_t, PerGroupMessageQueue> mapQueues; // map group number to group queue
 
-    /* Each unicast UDP groups has one queue, defined in order */
+    /* Each unicast UDP group has one queue, defined in order */
     for (size_t group = 0; group < group_list.size(); group++) {
         auto res = mapQueues.emplace(std::piecewise_construct,
                                      std::forward_as_tuple(group),
                                      std::forward_as_tuple());
         LogPrintf("UDP: Set bw for group %d: %d Mbps\n", group, group_list[group].second);
         assert(res.second);
-        res.first->second.bw        = group_list[group].second;
+        res.first->second.bw        = group_list[group].second; // in Mbps
         res.first->second.multicast = false;
+        res.first->second.unlimited = false; // rate-limit internally
+        // Set the throttling rate in bytes per sec
+        const double bytes_per_sec = static_cast<double>(group_list[group].second) * 1e6 / 8;
+        res.first->second.ratelimiter.SetRate(bytes_per_sec);
+        res.first->second.ratelimiter.SetMaxQuota(2*bytes_per_sec);
     }
 
     /* Multicast Rx instances don't have any Tx queue. Only multicast Tx
      * instances do. */
     for (const auto& info : multicast_list) {
         if (info.tx) {
-            assert(info.bw > 0);
             LogPrintf("UDP: Set bw for group %d: %d bps\n", info.group, info.bw);
             auto res = mapQueues.emplace(std::piecewise_construct,
                                          std::forward_as_tuple(info.group),
                                          std::forward_as_tuple());
             assert(res.second);
-            res.first->second.bw        = info.bw;
+            res.first->second.bw        = info.bw; // in bps
             res.first->second.multicast = true;
+
+            /* The multicast group can be rate-limited internally or externally
+             * (via a blocking socket). When the BW parameter is set to 0, let
+             * it be externally throttled. Otherwise, throttle internally. */
+            if (info.bw == 0) {
+                res.first->second.unlimited = true;
+            } else {
+                res.first->second.unlimited = false;
+                const double bytes_per_sec = static_cast<double>(info.bw) / 8;
+                res.first->second.ratelimiter.SetRate(bytes_per_sec);
+                res.first->second.ratelimiter.SetMaxQuota(2*bytes_per_sec);
+            }
         }
     }
 
@@ -1569,7 +1640,12 @@ static std::map<size_t, PerGroupMessageQueue> init_tx_queues(const std::vector<s
 
 static void send_messages_flush_and_break() {
     send_messages_break = true;
-    send_messages_wake_cv.notify_all();
+    non_empty_queues_cv.notify_all();
+    for (auto& q : mapTxQueues) {
+        for (unsigned int i = 0; i < q.second.buffs.size(); i++) {
+            q.second.buffs[i].AbortWrite();
+        }
+    }
 }
 
 static UDPMulticastInfo ParseUDPMulticastInfo(const std::string& s, const bool tx) {
@@ -1604,7 +1680,7 @@ static UDPMulticastInfo ParseUDPMulticastInfo(const std::string& s, const bool t
     /* Defaults */
     info.groupname       = "";
     info.ttl             = 3;
-    info.bw              = 0;
+    info.bw              = 0; // 0 leads to attempting the maximum speed
     info.logical_idx     = 0; // default for multicast Rx, overriden for Tx
     info.depth           = 144;
     info.offset          = 0;
@@ -1669,11 +1745,6 @@ static UDPMulticastInfo ParseUDPMulticastInfo(const std::string& s, const bool t
 
         if (info.depth > 0 && info.offset > info.depth) {
             LogPrintf("Failed to parse -udpmulticasttx option, offset must be < depth\n");
-            return info;
-        }
-
-        if (info.bw == 0) {
-            LogPrintf("Failed to parse -udpmulticasttx option, bw must be non-zero\n");
             return info;
         }
     } else {
@@ -1822,14 +1893,6 @@ static void OpenUDPConnectionTo(const CService& addr, const UDPConnectionInfo& i
     state.state = (info.udp_mode == udp_mode_t::multicast) ? STATE_INIT_COMPLETE : STATE_INIT;
     state.lastSendTime = 0;
     state.lastRecvTime = GetTimeMillis();
-
-    if (info.udp_mode == udp_mode_t::unicast) {
-        size_t group_count = 0;
-        for (const auto& it : mapUDPNodes)
-            if (it.second.connection.group == info.group)
-                group_count++;
-        min_per_node_mbps = std::min(min_per_node_mbps.load(), mapTxQueues[info.group].bw / group_count);
-    }
 
     if (info.udp_mode == udp_mode_t::multicast) {
         for (size_t i = 0; i < sizeof(state.last_pings) / sizeof(double); i++) {
