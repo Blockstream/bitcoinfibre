@@ -125,6 +125,7 @@ BITCOIN_TESTS =\
   test/rest_tests.cpp \
   test/result_tests.cpp \
   test/reverselock_tests.cpp \
+  test/ringbuffer_tests.cpp \
   test/rpc_tests.cpp \
   test/sanity_tests.cpp \
   test/scheduler_tests.cpp \
