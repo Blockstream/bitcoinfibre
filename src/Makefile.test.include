@@ -259,6 +259,7 @@ BITCOIN_TESTS =\
   test/random_tests.cpp \
   test/ref_tests.cpp \
   test/reverselock_tests.cpp \
+  test/ringbuffer_tests.cpp \
   test/rpc_tests.cpp \
   test/sanity_tests.cpp \
   test/scheduler_tests.cpp \
