@@ -1193,6 +1193,25 @@ static void do_send_messages() {
     }
 }
 
+UniValue TxQueueInfoToJSON()  {
+    UniValue ret(UniValue::VOBJ);
+    for (auto& q : mapTxQueues) {
+        UniValue q_info(UniValue::VOBJ);
+        // Buffer-specific information
+        for (int i = 0; i < 4; i++) {
+            UniValue b_info(UniValue::VOBJ);
+            auto stats = q.second.buffs[i].GetStats();
+            b_info.pushKV("tx_bytes", stats.rd_bytes);
+            b_info.pushKV("tx_pkts", stats.rd_count);
+            b_info.pushKV("pkt_per_sec", stats.rd_per_sec);
+            b_info.pushKV("bitrate", (stats.byterate * 8));
+            q_info.__pushKV("Buffer " + std::to_string(i), b_info);
+        }
+        ret.__pushKV("Group " + std::to_string(q.first), q_info);
+    }
+    return ret;
+}
+
 struct backfill_block {
     std::vector<UDPMessage> msgs;
     mutable size_t idx = 0; // index of next message to be transmitted
