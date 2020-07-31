@@ -1236,8 +1236,8 @@ static void MulticastBackfillThread(const CService& mcastNode,
     // return nullptr and trip the assert below
     if (send_messages_break) return;
 
+    /* Define the initial block height */
     const int backfill_depth = info->depth;
-
     const CBlockIndex *pindex;
     {
         LOCK(cs_main);
@@ -1248,8 +1248,8 @@ static void MulticastBackfillThread(const CService& mcastNode,
         LogPrint(BCLog::UDPMCAST, "UDP: Multicast Tx %lu-%lu - chain height: %d\n",
                  info->physical_idx, info->logical_idx, chain_height);
 
-        /* Starting block height (bottom of the backfill window plus a
-         * configurable offset) */
+        /* The starting block height is the bottom height of the backfill window
+         * plus a configurable offset */
         int height;
         if (backfill_depth == 0)
             height = info->offset % (chain_height + 1);
@@ -1262,14 +1262,12 @@ static void MulticastBackfillThread(const CService& mcastNode,
         assert(pindex->nHeight == height);
     }
 
-    /* Debug options */
-    const bool debugMcast = LogAcceptCategory(BCLog::UDPMCAST);
-    std::chrono::steady_clock::time_point t_cycle_start = std::chrono::steady_clock::now();
-
+    /* Tx Queue */
     auto it = mapTxQueues.find(info->group);
     assert(it != mapTxQueues.end());
     PerGroupMessageQueue& queue = it->second;
 
+    /* Block transmission window */
     const auto tx_idx_pair = std::make_pair(info->physical_idx, info->logical_idx);
     const auto res = block_window_map.insert(
         std::make_pair(tx_idx_pair, std::make_shared<backfill_block_window>())
@@ -1285,8 +1283,8 @@ static void MulticastBackfillThread(const CService& mcastNode,
      *
      * NOTE: This is the only thread that mutates the map and its
      * content. Hence, the mutex is only locked here on the segments that
-     * actually mutate the map. In contrast, when reading the map here, we do
-     * not lock the mutex, as we know no other thread is mutating the map.
+     * actually mutate the map. In contrast, when reading the map, we do not
+     * lock the mutex, as we know no other thread is mutating it.
      */
     std::unique_lock<std::mutex> lock(pblock_window->mutex, std::defer_lock);
 
@@ -1325,7 +1323,6 @@ static void MulticastBackfillThread(const CService& mcastNode,
             }
 
             /* Advance to the next block to be inserted in the block window */
-            bool wrapped_around = false;
             {
                 LOCK(cs_main);
                 int height = pindex->nHeight + 1;
@@ -1338,18 +1335,9 @@ static void MulticastBackfillThread(const CService& mcastNode,
                         height = 0;
                     else
                         height = chain_height - backfill_depth + 1;
-                    wrapped_around = true;
                 }
 
                 pindex = ::ChainActive()[height];
-            }
-
-            if (debugMcast && wrapped_around) {
-                std::chrono::steady_clock::time_point t_cycle_end(std::chrono::steady_clock::now());
-                std::chrono::duration<float> backfill_cycle_duration = t_cycle_end - t_cycle_start;
-                t_cycle_start = t_cycle_end;
-                LogPrint(BCLog::UDPMCAST, "UDP: Multicast Tx %lu-%lu - cycle finished in %f secs\n",
-                         info->physical_idx, info->logical_idx, backfill_cycle_duration.count());
             }
         }
 
@@ -1357,8 +1345,10 @@ static void MulticastBackfillThread(const CService& mcastNode,
         for (const auto& b : pblock_window->map) {
             if (send_messages_break)
                 break;
+
             assert(b.second.idx < b.second.msgs.size());
-            const UDPMessage& msg = b.second.msgs[b.second.idx];
+            const UDPMessage& msg      = b.second.msgs[b.second.idx];
+            const unsigned int msg_len = sizeof(UDPMessageHeader) + MAX_UDP_MESSAGE_LENGTH;
 
             // Update the index of the next message to be transmitted within the
             // protected block window map
@@ -1366,7 +1356,7 @@ static void MulticastBackfillThread(const CService& mcastNode,
             b.second.idx++;
             lock.unlock(); // safe to release (no other thread mutates the map)
 
-            SendMessage(msg, sizeof(UDPMessageHeader) + MAX_UDP_MESSAGE_LENGTH, queue, queue.buffs[3], mcastNode, multicast_checksum_magic);
+            SendMessage(msg, msg_len, queue, queue.buffs[3], mcastNode, multicast_checksum_magic);
         }
 
         /* Cleanup the blocks that have been fully transmitted */
