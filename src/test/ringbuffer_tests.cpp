@@ -23,10 +23,10 @@ BOOST_AUTO_TEST_CASE(test_ringbuffer_write)
     BOOST_CHECK(!buffer.IsEmpty());
 
     // Read element
-    int rd_val = buffer.GetNextRead();
+    int* rd_val = buffer.GetNextRead();
     buffer.ConfirmRead();
 
-    BOOST_CHECK(rd_val == new_val);
+    BOOST_CHECK(*rd_val == new_val);
     BOOST_CHECK(buffer.IsEmpty());
 }
 
@@ -83,10 +83,46 @@ BOOST_AUTO_TEST_CASE(test_ringbuffer_read_abort)
     BOOST_CHECK(!buffer.IsEmpty());
 
     // Try reading again and, this time, confirm
-    int rd_val = buffer.GetNextRead();
+    int* rd_val = buffer.GetNextRead();
     buffer.ConfirmRead();
 
-    BOOST_CHECK(rd_val == new_val);
+    BOOST_CHECK(*rd_val == new_val);
+    BOOST_CHECK(buffer.IsEmpty());
+}
+
+BOOST_AUTO_TEST_CASE(test_ringbuffer_read_proxy)
+{
+    struct Element {
+        int val;
+    };
+
+    RingBuffer<Element> buffer;
+
+    // Write element
+    int new_val = std::rand();
+    buffer.WriteElement([&](Element& elem) {
+        elem.val = new_val;
+    });
+
+    // Read element using the read proxy
+    {
+        ReadProxy<Element> rd_proxy(&buffer);
+        // When the read proxy object is destructed, it aborts the read
+    }
+
+    // Given that the read was not confirmed, the buffer should remain non-empty
+    BOOST_CHECK(!buffer.IsEmpty());
+
+    // Try reading again and, this time, confirm
+    ReadProxy<Element> rd_proxy(&buffer);
+    BOOST_CHECK(rd_proxy->val == new_val);
+    rd_proxy.ConfirmRead();
+
+    // After the confirmation through the read proxy, the object should become
+    // inaccessible
+    BOOST_CHECK(rd_proxy.GetObj() == nullptr);
+
+    // Given that the read was confirmed, the buffer should be empty
     BOOST_CHECK(buffer.IsEmpty());
 }
 
@@ -142,9 +178,9 @@ BOOST_AUTO_TEST_CASE(test_ringbuffer_stats)
         buffer.WriteElement([&](int& elem) {
             elem = new_val;
         });
-        int rd_val = buffer.GetNextRead();
+        int* rd_val = buffer.GetNextRead();
         buffer.ConfirmRead(sizeof(int));
-        BOOST_CHECK(rd_val == new_val);
+        BOOST_CHECK(*rd_val == new_val);
         std::this_thread::sleep_for(std::chrono::milliseconds(rd_period_ms));
     }
 
