@@ -1079,38 +1079,39 @@ static void do_send_messages() {
                    (queue.unlimited || queue.ratelimiter.HasQuota(sizeof(UDPMessage))) && // the output bitrate is OK
                    (consecutive_tx < max_consecutive_tx)) { // we are not depriving other queues
                 // Get the next message for transmission
-                RingBufferElement& next_tx = buff->GetNextRead();
+                ReadProxy<RingBufferElement> rd_proxy(buff);
+                RingBufferElement* next_tx = rd_proxy.GetObj();
 
                 // Set the checksum and scramble the data
-                if (next_tx.msg.header.chk1 == 0 && next_tx.msg.header.chk2 == 0) {
+                if (next_tx->msg.header.chk1 == 0 && next_tx->msg.header.chk2 == 0) {
                     if (queue.multicast) {
-                        assert((next_tx.msg.header.msg_type & UDP_MSG_TYPE_TYPE_MASK) == MSG_TYPE_BLOCK_HEADER ||
-                               (next_tx.msg.header.msg_type & UDP_MSG_TYPE_TYPE_MASK) == MSG_TYPE_BLOCK_CONTENTS ||
-                               (next_tx.msg.header.msg_type & UDP_MSG_TYPE_TYPE_MASK) == MSG_TYPE_TX_CONTENTS);
+                        assert((next_tx->msg.header.msg_type & UDP_MSG_TYPE_TYPE_MASK) == MSG_TYPE_BLOCK_HEADER ||
+                               (next_tx->msg.header.msg_type & UDP_MSG_TYPE_TYPE_MASK) == MSG_TYPE_BLOCK_CONTENTS ||
+                               (next_tx->msg.header.msg_type & UDP_MSG_TYPE_TYPE_MASK) == MSG_TYPE_TX_CONTENTS);
                     }
-                    FillChecksum(next_tx.magic, next_tx.msg, next_tx.length);
+                    FillChecksum(next_tx->magic, next_tx->msg, next_tx->length);
                 }
 
                 // Set destination address
                 sockaddr_storage ss = {};
                 socklen_t addrlen;
-                if (next_tx.service.IsIPv6()) {
+                if (next_tx->service.IsIPv6()) {
                     sockaddr_in6 *remoteaddr = (sockaddr_in6 *) &ss;
                     remoteaddr->sin6_family = AF_INET6;
-                    assert(next_tx.service.GetIn6Addr(&remoteaddr->sin6_addr));
-                    remoteaddr->sin6_port = htons(next_tx.service.GetPort());
+                    assert(next_tx->service.GetIn6Addr(&remoteaddr->sin6_addr));
+                    remoteaddr->sin6_port = htons(next_tx->service.GetPort());
                     addrlen = sizeof(sockaddr_in6);
                 } else {
                     sockaddr_in *remoteaddr = (sockaddr_in *) &ss;
                     remoteaddr->sin_family = AF_INET;
-                    assert(next_tx.service.GetInAddr(&remoteaddr->sin_addr));
-                    remoteaddr->sin_port = htons(next_tx.service.GetPort());
+                    assert(next_tx->service.GetInAddr(&remoteaddr->sin_addr));
+                    remoteaddr->sin_port = htons(next_tx->service.GetPort());
                     addrlen = sizeof(sockaddr_in);
                 }
 
                 // Try to transmit
-                ssize_t res = sendto(udp_socks[group], &next_tx.msg, next_tx.length, 0, (sockaddr *) &ss, addrlen);
-                if (res != next_tx.length) {
+                ssize_t res = sendto(udp_socks[group], &next_tx->msg, next_tx->length, 0, (sockaddr *) &ss, addrlen);
+                if (res != next_tx->length) {
                     /* Likely EAGAIN. Don't advance the buffer's read pointer
                      * and try again later */
                     if (errno == EAGAIN || errno == EWOULDBLOCK) {
@@ -1119,18 +1120,17 @@ static void do_send_messages() {
                         LogPrintf("UDP: sendto to group %d failed: %s\n",
                                   group, strerror(errno));
                     }
-                    buff->AbortRead();
                     break;
                 }
                 consecutive_tx++;
 
                 // Consume the transmission quota
                 if (!queue.unlimited)
-                    queue.ratelimiter.UseQuota(next_tx.length);
+                    queue.ratelimiter.UseQuota(next_tx->length);
 
                 // Advance to the highest-priority non-empty buffer in this
                 // queue group
-                buff->ConfirmRead(next_tx.length);
+                rd_proxy.ConfirmRead(next_tx->length);
                 if (buff->IsEmpty()) {
                     queue.NextBuff();
                     if (queue.buff_id != -1)
