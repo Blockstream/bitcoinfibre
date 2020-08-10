@@ -8,6 +8,10 @@
 
 static const size_t BUFF_DEPTH = 8192;
 
+
+/**
+ * @brief Ring buffer's read statistics
+ */
 struct RingBufferStats {
     uint64_t rd_bytes = 0;
     uint64_t rd_count = 0;
@@ -15,6 +19,62 @@ struct RingBufferStats {
     double byterate = 0;
 };
 
+
+template <typename T>
+class RingBuffer;
+
+
+/**
+ * @brief Ring buffer's read proxy
+ *
+ * Reads an element from the ring buffer while taking care of the read
+ * confirmation or abortion calls.
+ */
+template <typename T>
+struct ReadProxy {
+private:
+    RingBuffer<T>* m_buf;
+    T* m_obj;
+
+public:
+    ReadProxy(RingBuffer<T>* buf) : m_buf(buf), m_obj(buf->GetNextRead()) {}
+
+    ReadProxy(ReadProxy const&) = delete;
+
+    ReadProxy& operator=(ReadProxy const&) = delete;
+
+    ~ReadProxy()
+    {
+        if (m_obj != nullptr)
+            m_buf->AbortRead();
+    }
+
+    void ConfirmRead(unsigned int n_bytes = 0)
+    {
+        if (m_obj == nullptr)
+            return;
+        m_buf->ConfirmRead(n_bytes);
+        m_obj = nullptr;
+    }
+
+    T* GetObj()
+    {
+        return m_obj;
+    }
+
+    const T* operator->() const
+    {
+        return m_obj;
+    }
+};
+
+
+/**
+ * @brief General purpose ring buffer
+ *
+ * Thread-safe ring buffer implementation. Supports blocking writes (which block
+ * until there is space in the buffer) and tracking of read statistics.
+ */
 template <typename T>
 class RingBuffer
 {
@@ -163,11 +223,11 @@ public:
      * @brief Get the next element to be read from the buffer.
      * @return (T&) Reference to the element of type T.
      */
-    T& GetNextRead()
+    T* GetNextRead()
     {
         assert(!IsEmpty());
         m_mutex.lock(); // leave it locked until the read is confirmed/aborted
-        return m_buffer[m_read_ptr];
+        return &m_buffer[m_read_ptr];
     }
 
     /**
