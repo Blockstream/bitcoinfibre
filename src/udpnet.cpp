@@ -1224,7 +1224,16 @@ struct backfill_block_window {
     uint64_t bytes_in_window = 0;
 };
 
+struct backfill_txn_window {
+    std::mutex mutex;
+    uint64_t tx_count = 0;
+};
+
 std::map<std::pair<uint16_t, uint16_t>, std::shared_ptr<backfill_block_window>> block_window_map;
+std::map<std::pair<uint16_t, uint16_t>, backfill_txn_window> txn_window_map;
+
+std::mutex block_window_map_mutex;
+std::mutex txn_window_map_mutex;
 
 static void MulticastBackfillThread(const CService& mcastNode,
                                     const UDPMulticastInfo *info) {
@@ -1269,9 +1278,11 @@ static void MulticastBackfillThread(const CService& mcastNode,
 
     /* Block transmission window */
     const auto tx_idx_pair = std::make_pair(info->physical_idx, info->logical_idx);
+    std::unique_lock<std::mutex> window_map_lock(block_window_map_mutex);
     const auto res = block_window_map.insert(
         std::make_pair(tx_idx_pair, std::make_shared<backfill_block_window>())
         );
+    window_map_lock.unlock();
     if (!res.second)
         throw std::runtime_error("Couldn't add new block window");
     const auto pblock_window = res.first->second;
@@ -1415,6 +1426,7 @@ static UniValue TxWindowFullInfoToJSON(std::shared_ptr<backfill_block_window> pb
 }
 
 UniValue TxWindowInfoToJSON(int phy_idx, int log_idx) {
+    std::unique_lock<std::mutex> lock(block_window_map_mutex);
     if (phy_idx == -1 || log_idx == -1) {
         /* Print summarized information from all block windows */
         UniValue ret(UniValue::VOBJ);
@@ -1443,15 +1455,11 @@ static void MulticastTxnThread(const CService& mcastNode,
 
     if (send_messages_break) return;
 
-    /* Debug options */
-    const bool debugMcast = LogAcceptCategory(BCLog::UDPMCAST);
-
-    int stats_interval = 300;
-    if (gArgs.IsArgSet("-udpmulticastloginterval") && (atoi(gArgs.GetArg("-udpmulticastloginterval", "")) > 0))
-        stats_interval = atoi(gArgs.GetArg("-udpmulticastloginterval", ""));
-
-    int n_sent_txns = 0;
-    std::chrono::steady_clock::time_point last_print = std::chrono::steady_clock::now();
+    /* Txn transmission stats */
+    const auto tx_idx_pair = std::make_pair(info->physical_idx, info->logical_idx);
+    std::unique_lock<std::mutex> window_map_lock(txn_window_map_mutex);
+    auto& txn_window = txn_window_map[tx_idx_pair];
+    window_map_lock.unlock();
 
     /* Use a rolling bloom filter to keep track of the txns already sent */
     boost::optional<CRollingBloomFilter> sent_txn_bloom;
@@ -1536,22 +1544,24 @@ static void MulticastTxnThread(const CService& mcastNode,
                 SendMessage(msg, msg_size, queue, queue.buffs[2], mcastNode, multicast_checksum_magic);
             }
 
-            if (debugMcast) {
-                n_sent_txns++;
-                const auto now = std::chrono::steady_clock::now();
-                const double timeDeltaMillis = to_millis_double(now - last_print);
-                if (timeDeltaMillis > 1000*stats_interval) {
-                    LogPrint(BCLog::UDPMCAST,
-                             "UDP: Multicast Tx %lu-%lu - sent %4d txns "
-                             "in %5.2f secs\n",
-                             info->physical_idx, info->logical_idx,
-                             n_sent_txns, timeDeltaMillis/1000);
-                    last_print = now;
-                    n_sent_txns = 0;
-                }
-            }
+            std::unique_lock<std::mutex> lock(txn_window.mutex);
+            txn_window.tx_count++;
         }
     }
+}
+
+UniValue TxnTxInfoToJSON() {
+    std::unique_lock<std::mutex> lock(txn_window_map_mutex);
+    UniValue ret(UniValue::VOBJ);
+    for (auto& w : txn_window_map) {
+        const std::string key = std::to_string(w.first.first) + "-" +
+            std::to_string(w.first.second);
+        UniValue info(UniValue::VOBJ);
+        std::unique_lock<std::mutex> lock(w.second.mutex);
+        info.pushKV("tx_count", w.second.tx_count);
+        ret.__pushKV(key, info);
+    }
+    return ret;
 }
 
 static void LaunchMulticastBackfillThreads() {
