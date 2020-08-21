@@ -281,6 +281,34 @@ UniValue gettxwindowinfo(const JSONRPCRequest& request) {
     return info;
 }
 
+UniValue gettxntxinfo(const JSONRPCRequest& request) {
+    RPCHelpMan{"gettxntxinfo",
+        "\nGet information regarding multicast transmissions of mempool txns.\n",
+        {
+        },
+        RPCResults{
+             RPCResult{
+                 "{\n"
+                 "  physical_idx-logical_idx : {       (json object)\n"
+                 "    \"tx_count\" : n  (numeric) Total number of txns transmitted\n"
+                 "  }\n"
+                 "  ...\n"
+                 "}\n"
+             }
+        },
+        RPCExamples{
+            HelpExampleCli("gettxntxinfo", "")
+            + HelpExampleRpc("gettxntxinfo", "")
+        }
+    }.Check(request);
+
+    UniValue info = TxnTxInfoToJSON();
+    if (info.isNull())
+        throw JSONRPCError(RPC_INVALID_PARAMS, "Could not find any txn transmission stream");
+
+    return info;
+}
+
 UniValue gettxqueueinfo(const JSONRPCRequest& request) {
     RPCHelpMan{"gettxqueueinfo",
         "\nGet information from the UDP Tx queues.\n",
@@ -326,6 +354,7 @@ static const CRPCCommand commands[] =
     { "udpnetwork",         "disconnectudpnode",      &disconnectudpnode,      {"node"} },
     { "udpnetwork",         "getchunkstats",          &getchunkstats,          {"height"} },
     { "udpnetwork",         "gettxwindowinfo",        &gettxwindowinfo,        {"physical_idx", "logical_idx"} },
+    { "udpnetwork",         "gettxntxinfo",           &gettxntxinfo,           {} },
     { "udpnetwork",         "gettxqueueinfo",         &gettxqueueinfo,         {} }
 };
 

@@ -45,6 +45,7 @@ UniValue BlkChunkStatsToJSON(int target_height);
 UniValue MaxMinBlkChunkStatsToJSON();
 UniValue AllBlkChunkStatsToJSON();
 UniValue TxWindowInfoToJSON(int phy_idx, int log_idx);
+UniValue TxnTxInfoToJSON();
 UniValue TxQueueInfoToJSON();
 
 #endif
