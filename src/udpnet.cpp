@@ -1220,6 +1220,7 @@ struct backfill_block {
 struct backfill_block_window {
     std::map<int, backfill_block> map;
     std::mutex mutex;
+    uint64_t bytes_in_window = 0;
 };
 
 std::map<std::pair<uint16_t, uint16_t>, std::shared_ptr<backfill_block_window>> block_window_map;
@@ -1263,8 +1264,6 @@ static void MulticastBackfillThread(const CService& mcastNode,
     /* Debug options */
     const bool debugMcast = LogAcceptCategory(BCLog::UDPMCAST);
     std::chrono::steady_clock::time_point t_cycle_start = std::chrono::steady_clock::now();
-    std::chrono::steady_clock::time_point t_last_win_stats = std::chrono::steady_clock::now();
-    const int window_stats_interval = 60; // in seconds
 
     auto it = mapTxQueues.find(info->group);
     assert(it != mapTxQueues.end());
@@ -1280,8 +1279,6 @@ static void MulticastBackfillThread(const CService& mcastNode,
 
     // Total number of **blocks** in parallel in the window
     const size_t target_window_size = std::max(info->interleave_size, 1);
-    // Total number of **bytes** in the window
-    uint64_t bytes_in_window = 0;
 
     /* Protect pblock_window->map with a mutex
      *
@@ -1316,9 +1313,8 @@ static void MulticastBackfillThread(const CService& mcastNode,
                 // protected window of blocks
                 lock.lock();
                 UDPFillMessagesFromBlock(block, block_it->second.msgs, pindex->nHeight);
+                pblock_window->bytes_in_window += block_it->second.msgs.size() * FEC_CHUNK_SIZE;
                 lock.unlock(); // safe to release (no other thread mutates the map)
-
-                bytes_in_window += block_it->second.msgs.size() * FEC_CHUNK_SIZE;
 
                 LogPrint(BCLog::FEC, "UDP: Multicast Tx %lu-%lu - "
                          "fill block %s (%20lu) - height %7d - %5d chunks\n",
@@ -1372,58 +1368,11 @@ static void MulticastBackfillThread(const CService& mcastNode,
             SendMessage(msg, sizeof(UDPMessageHeader) + MAX_UDP_MESSAGE_LENGTH, queue, queue.buffs[3], mcastNode, multicast_checksum_magic);
         }
 
-        /* Print some info regarding blocks that are currently in the
-         * block-interleaving window */
-        if (debugMcast && target_window_size > 1) {
-            const auto t_now = std::chrono::steady_clock::now();
-            const double timeDeltaMillis = to_millis_double(t_now - t_last_win_stats);
-            if (timeDeltaMillis > 1000*window_stats_interval) {
-                int min_height   = std::numeric_limits<int>::max();
-                int max_height   = 0;
-                size_t max_n_chunks = 0;
-                int height_largest_block;
-                const backfill_block* b_min_height = nullptr;
-                const backfill_block* b_max_height = nullptr;
-                const backfill_block* b_largest    = nullptr;
-                for (const auto& b : pblock_window->map) {
-                    if (b.first < min_height) {
-                        min_height   = b.first;
-                        b_min_height = &b.second;
-                    }
-                    if (b.first > max_height) {
-                        max_height   = b.first;
-                        b_max_height = &b.second;
-                    }
-                    if (b.second.msgs.size() > max_n_chunks) {
-                        max_n_chunks         = b.second.msgs.size();
-                        height_largest_block = b.first;
-                        b_largest            = &b.second;
-                    }
-                }
-                assert(b_min_height != nullptr);
-                assert(b_max_height != nullptr);
-                assert(b_largest != nullptr);
-                LogPrint(BCLog::UDPMCAST,
-                         "UDP: Multicast Tx %lu-%lu - Block Window:\n"
-                         "        Size:          %9.2f MB\n"
-                         "        Min Height:    %7d - Sent %4d / %4d chunks\n"
-                         "        Max Height:    %7d - Sent %4d / %4d chunks\n"
-                         "        Largest Block: %7d - Sent %4d / %4d chunks\n",
-                         info->physical_idx, info->logical_idx,
-                         ((double) bytes_in_window / (1048576)),
-                         min_height, b_min_height->idx, b_min_height->msgs.size(),
-                         max_height, b_max_height->idx, b_max_height->msgs.size(),
-                         height_largest_block, b_largest->idx, b_largest->msgs.size()
-                    );
-                t_last_win_stats = t_now;
-            }
-        }
-
         /* Cleanup the blocks that have been fully transmitted */
         lock.lock();
         for (auto it = pblock_window->map.cbegin(); it != pblock_window->map.cend();) {
             if (it->second.idx == it->second.msgs.size()) {
-                bytes_in_window -= it->second.msgs.size() * FEC_CHUNK_SIZE;
+                pblock_window->bytes_in_window -= it->second.msgs.size() * FEC_CHUNK_SIZE;
                 it = pblock_window->map.erase(it);
             } else {
                 ++it;
@@ -1433,17 +1382,38 @@ static void MulticastBackfillThread(const CService& mcastNode,
     }
 }
 
-UniValue TxWindowInfoToJSON(int phy_idx, int log_idx) {
-    const auto tx_idx_pair = std::make_pair(phy_idx, log_idx);
-    const auto it = block_window_map.find(tx_idx_pair);
-    if (it == block_window_map.end())
-        return UniValue::VNULL;
-
+static UniValue TxWindowShortInfoToJSON(std::shared_ptr<backfill_block_window> pblock_window) {
     UniValue ret(UniValue::VOBJ);
-    const auto pblock_window = it->second;
-
     std::unique_lock<std::mutex> lock(pblock_window->mutex);
 
+    /* Find the minimum height, the maximum height, and the height corresponding
+     * to the largest block */
+    int min_height      = std::numeric_limits<int>::max();
+    int max_height      = 0;
+    size_t max_n_chunks = 0;
+    int height_largest_block = -1;
+    for (const auto& b : pblock_window->map) {
+        if (b.first < min_height)
+            min_height   = b.first;
+
+        if (b.first > max_height)
+            max_height   = b.first;
+
+        if (b.second.msgs.size() > max_n_chunks) {
+            max_n_chunks         = b.second.msgs.size();
+            height_largest_block = b.first;
+        }
+    }
+    ret.pushKV("size", ((double) pblock_window->bytes_in_window / (1048576)));
+    ret.pushKV("min", min_height);
+    ret.pushKV("max", max_height);
+    ret.pushKV("largest", height_largest_block);
+    return ret;
+}
+
+static UniValue TxWindowFullInfoToJSON(std::shared_ptr<backfill_block_window> pblock_window) {
+    UniValue ret(UniValue::VOBJ);
+    std::unique_lock<std::mutex> lock(pblock_window->mutex);
     for (const auto& b : pblock_window->map) {
         UniValue info(UniValue::VOBJ);
         info.pushKV("index", b.second.idx);
@@ -1451,6 +1421,25 @@ UniValue TxWindowInfoToJSON(int phy_idx, int log_idx) {
         ret.__pushKV(std::to_string(b.first), info);
     }
     return ret;
+}
+
+UniValue TxWindowInfoToJSON(int phy_idx, int log_idx) {
+    if (phy_idx == -1 || log_idx == -1) {
+        /* Print summarized information from all block windows */
+        UniValue ret(UniValue::VOBJ);
+        for (const auto& w : block_window_map) {
+            const std::string key = std::to_string(w.first.first) + "-" +
+                std::to_string(w.first.second);
+            ret.__pushKV(key, TxWindowShortInfoToJSON(w.second));
+        }
+        return ret;
+    } else {
+        /* Print full information from a specific block window */
+        const auto tx_idx_pair = std::make_pair(phy_idx, log_idx);
+        const auto it = block_window_map.find(tx_idx_pair);
+        if (it == block_window_map.end()) return UniValue::VNULL;
+        return TxWindowFullInfoToJSON(it->second);
+    }
 }
 
 static void MulticastTxnThread(const CService& mcastNode,
