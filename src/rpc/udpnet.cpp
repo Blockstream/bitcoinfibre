@@ -233,27 +233,47 @@ UniValue gettxwindowinfo(const JSONRPCRequest& request) {
     RPCHelpMan{"gettxwindowinfo",
         "\nGet info from the multicast Tx block-interleave window.\n",
         {
-            {"physical_idx", RPCArg::Type::NUM, RPCArg::Optional::NO, "Physical stream index"},
-            {"logical_idx", RPCArg::Type::NUM, RPCArg::Optional::NO, "Logical stream index"},
+            {"physical_idx", RPCArg::Type::NUM, RPCArg::Optional::OMITTED, "Physical stream index"},
+            {"logical_idx", RPCArg::Type::NUM, RPCArg::Optional::OMITTED, "Logical stream index"},
         },
         RPCResults{
              RPCResult{
+                 "When the physical and logical indexes are omitted:\n"
                  "{\n"
-                 "  height : {       (json object)\n"
-                 "    \"index\" : n  (numeric) Index of chunk to be transmitted next\n"
-                 "    \"total\" : n  (numeric) Total number of chunks\n"
+                 "  physical_idx-logical_idx : {       (json object)\n"
+                 "    \"size\"    : n  (numeric) Total amount (in MB) of FEC data stored in the window\n"
+                 "    \"min\"     : n  (numeric) Minimum height currently in the window\n"
+                 "    \"max\"     : n  (numeric) Maximum height currently in the window\n"
+                 "    \"largest\" : n  (numeric) Height of the largest block currently in the window\n"
+                 "  }\n"
+                 "  ...\n"
+                 "}\n"
+             },
+             RPCResult{
+                 "When the physical and logical indexes are specified:\n"
+                 "{\n"
+                 "  height : {       (json object) Height of a block in the window\n"
+                 "    \"index\" : n  (numeric) Index of next chunk to be transmitted from this block\n"
+                 "    \"total\" : n  (numeric) Total number of chunks from this block\n"
                  "  }\n"
                  "  ...\n"
                  "}\n"
              }
         },
         RPCExamples{
-            HelpExampleCli("gettxwindowinfo", "0 0")
-            + HelpExampleRpc("gettxwindowinfo", "0 0")
+            HelpExampleCli("gettxwindowinfo", "")
+            + HelpExampleRpc("gettxwindowinfo", "0, 0")
         }
     }.Check(request);
-    int phy_idx = request.params[0].get_int();
-    int log_idx = request.params[1].get_int();
+
+    if (request.params[1].isNull() && !request.params[0].isNull())
+        throw JSONRPCError(RPC_INVALID_PARAMS,
+                           "Both physical and logical indexes are required");
+
+    const int phy_idx = request.params[0].isNull() ? -1 :
+        request.params[0].get_int();
+    const int log_idx = request.params[1].isNull() ? -1 :
+        request.params[1].get_int();
 
     UniValue info = TxWindowInfoToJSON(phy_idx, log_idx);
     if (info.isNull())
