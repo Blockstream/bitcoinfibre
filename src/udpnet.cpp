@@ -61,6 +61,18 @@ double to_seconds(Duration d)
     return std::chrono::duration_cast<std::chrono::duration<double, std::chrono::seconds::period>>(d).count();
 }
 
+/**
+ * Copy string using strncpy while enforcing a null termination
+ *
+ * Copies at most count-1 from src to dest and places the terminating null
+ * character at the last dst position.
+ */
+static char *strncpy_wrapper(char *dest, const char *src, std::size_t count) {
+    strncpy(dest, src, count - 1);
+    dest[count - 1] = '\0';
+    return dest;
+}
+
 static std::vector<int> udp_socks; // The sockets we use to send/recv (bound to *:GetUDPInboundPorts()[*])
 
 std::recursive_mutex cs_mapUDPNodes;
@@ -1661,7 +1673,7 @@ static UDPMulticastInfo ParseUDPMulticastInfo(const std::string& s, const bool t
         LogPrintf("Failed to parse -udpmulticast option, net interface not set\n");
         return info;
     }
-    strncpy(info.ifname, s.substr(0, if_end).c_str(), IFNAMSIZ);
+    strncpy_wrapper(info.ifname, s.substr(0, if_end).c_str(), IFNAMSIZ);
 
     const size_t mcastaddr_end = s.find(',', if_end + 1);
     if (mcastaddr_end == std::string::npos) {
@@ -1677,7 +1689,7 @@ static UDPMulticastInfo ParseUDPMulticastInfo(const std::string& s, const bool t
         LogPrintf("Failed to parse -udpmulticast option, invalid port\n");
         return info;
     }
-    strncpy(info.mcast_ip, ip.c_str(), INET_ADDRSTRLEN);
+    strncpy_wrapper(info.mcast_ip, ip.c_str(), INET_ADDRSTRLEN);
 
     info.tx         = tx;
 
@@ -1775,7 +1787,7 @@ static UDPMulticastInfo ParseUDPMulticastInfo(const std::string& s, const bool t
             LogPrintf("Failed to parse -udpmulticast option, source (tx) IP empty\n");
             return info;
         }
-        strncpy(info.tx_ip, tx_ip.c_str(), INET_ADDRSTRLEN);
+        strncpy_wrapper(info.tx_ip, tx_ip.c_str(), INET_ADDRSTRLEN);
     }
 
     info.port = port; /* set non-zero port if successful */
