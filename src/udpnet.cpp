@@ -181,10 +181,7 @@ struct PerGroupMessageQueue {
     Throttle ratelimiter;
     std::chrono::steady_clock::time_point next_send;
     PerGroupMessageQueue() : buff_id(-1), bw(0), multicast(false), unlimited(0),
-                             ratelimiter(0) {
-        for (unsigned int i = 0; i < buffs.size(); i++)
-            buffs[i].EnableStats(1.0, 0.1); // Average the past ~10 secs
-    }
+                             ratelimiter(0) {}
     PerGroupMessageQueue(PerGroupMessageQueue&& q) =delete;
 };
 static std::map<size_t, PerGroupMessageQueue> mapTxQueues;
@@ -1203,8 +1200,6 @@ UniValue TxQueueInfoToJSON()  {
             auto stats = q.second.buffs[i].GetStats();
             b_info.pushKV("tx_bytes", stats.rd_bytes);
             b_info.pushKV("tx_pkts", stats.rd_count);
-            b_info.pushKV("pkt_per_sec", stats.rd_per_sec);
-            b_info.pushKV("bitrate", (stats.byterate * 8));
             q_info.__pushKV("Buffer " + std::to_string(i), b_info);
         }
         ret.__pushKV("Group " + std::to_string(q.first), q_info);
