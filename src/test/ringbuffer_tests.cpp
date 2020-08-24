@@ -162,15 +162,7 @@ BOOST_AUTO_TEST_CASE(test_ringbuffer_write_abort)
 BOOST_AUTO_TEST_CASE(test_ringbuffer_stats)
 {
     const int n_elem = 10;
-    const double rd_per_sec = 10.0;
-    const unsigned int rd_period_ms = (1000 / rd_per_sec);
-
     RingBuffer<int> buffer;
-
-    // Update rate measurements sufficiently fast
-    const double update_interval = 1.0 / rd_per_sec;
-    const double ewma_beta = 1.0 / n_elem; // average approx. all elements
-    buffer.EnableStats(update_interval, ewma_beta);
 
     // Write and read a few elements
     for (int i = 0; i < n_elem; i++) {
@@ -181,37 +173,12 @@ BOOST_AUTO_TEST_CASE(test_ringbuffer_stats)
         int* rd_val = buffer.GetNextRead();
         buffer.ConfirmRead(sizeof(int));
         BOOST_CHECK(*rd_val == new_val);
-        std::this_thread::sleep_for(std::chrono::milliseconds(rd_period_ms));
     }
 
     const RingBufferStats& stats = buffer.GetStats();
 
     BOOST_CHECK(stats.rd_bytes == (n_elem * sizeof(int)));
     BOOST_CHECK(stats.rd_count == n_elem);
-    BOOST_TEST(stats.rd_per_sec == rd_per_sec, tt::tolerance(0.1));
-    BOOST_TEST(stats.byterate == (rd_per_sec * sizeof(int)),
-        tt::tolerance(0.1));
-}
-
-BOOST_AUTO_TEST_CASE(test_ringbuffer_stats_disabled)
-{
-    const int n_elem = 10;
-    RingBuffer<int> buffer;
-
-    // Write some elements
-    for (int i = 0; i < n_elem; i++) {
-        int new_val = std::rand();
-        buffer.WriteElement([&](int& elem) {
-            elem = new_val;
-        });
-    }
-
-    const RingBufferStats& stats = buffer.GetStats();
-
-    BOOST_CHECK(stats.rd_bytes == 0);
-    BOOST_CHECK(stats.rd_count == 0);
-    BOOST_TEST(stats.rd_per_sec == 0);
-    BOOST_CHECK(stats.byterate == 0);
 }
 
 BOOST_AUTO_TEST_SUITE_END()
