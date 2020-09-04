@@ -41,8 +41,8 @@ static const uint8_t UDP_MSG_TYPE_FLAGS_MASK = 0b11100000;
 static const uint8_t UDP_MSG_TYPE_TYPE_MASK = 0b00011111;
 
 struct __attribute__((packed)) UDPMessageHeader {
-    uint64_t chk1;
-    uint64_t chk2;
+    uint64_t chk1 = 0;
+    uint64_t chk2 = 0;
     uint8_t msg_type; // A UDPMessageType + flags
 };
 static_assert(sizeof(UDPMessageHeader) == 17, "__attribute__((packed)) must work");

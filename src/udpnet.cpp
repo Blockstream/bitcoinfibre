@@ -749,8 +749,10 @@ static void read_socket_func(evutil_socket_t fd, short event, void* arg) {
 
     if (it == mapUDPNodes.end())
         return;
-    if (!CheckChecksum(it->second.connection.local_magic, msg, res))
+    if (!CheckChecksum(it->second.connection.local_magic, msg, res)) {
+        LogPrintf("UDP: Checksum error on message from %s\n", it->first.ToString());
         return;
+    }
 
     UDPConnectionState& state = it->second;
 

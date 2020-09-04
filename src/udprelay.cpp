@@ -211,6 +211,8 @@ static void RelayFECedChunks(UDPMessage& msg, DataFECer& fec, const size_t high_
 }
 
 static inline void FillCommonMessageHeader(UDPMessage& msg, const uint64_t hash_prefix, uint8_t type, const size_t obj_size) {
+    msg.header.chk1            = 0;
+    msg.header.chk2            = 0;
     msg.header.msg_type        = type;
     msg.msg.block.hash_prefix  = htole64(hash_prefix);
     msg.msg.block.obj_length   = htole32(obj_size);
