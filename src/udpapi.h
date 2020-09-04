@@ -47,5 +47,6 @@ UniValue AllBlkChunkStatsToJSON();
 UniValue TxWindowInfoToJSON(int phy_idx, int log_idx);
 UniValue TxnTxInfoToJSON();
 UniValue TxQueueInfoToJSON();
+void MulticastTxBlock(const int height);
 
 #endif
