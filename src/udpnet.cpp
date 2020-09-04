@@ -1607,6 +1607,45 @@ static void LaunchMulticastBackfillThreads() {
     }
 }
 
+/**
+ * Send a specific block chosen by height over all UDP Multicast Tx streams
+ *
+ * Make sure to send different FEC chunks over each stream and send each chunk
+ * through the best-effort queue (second highest in priority).
+ *
+ * This function is used by the "txblock" RPC call.
+ */
+void MulticastTxBlock(const int height) {
+    const CBlockIndex *pindex;
+    {
+        LOCK(cs_main);
+        pindex = ::ChainActive()[height];
+        assert(pindex->nHeight == height);
+    }
+
+    CBlock block;
+    assert(ReadBlockFromDisk(block, pindex, Params().GetConsensus()));
+
+    LogPrintf("MulticastTxBlock: sending block %s\n",
+              block.GetHash().ToString());
+
+    for (const auto& node : multicast_nodes()) {
+        if (!node.second.tx || node.second.interleave_size <= 0)
+            continue;
+
+        // Each node gets a different set of FEC chunks
+        std::vector<UDPMessage> msgs;
+        UDPFillMessagesFromBlock(block, msgs, pindex->nHeight);
+
+        for (const auto& msg : msgs) {
+            SendMessage(msg,
+                        sizeof(UDPMessageHeader) + sizeof(UDPBlockMessage),
+                        false /* low priority */, std::get<0>(node.first),
+                        multicast_checksum_magic, node.second.group);
+        }
+    }
+}
+
 static std::map<size_t, PerGroupMessageQueue> init_tx_queues(const std::vector<std::pair<unsigned short, uint64_t> >& group_list,
                                                              const std::vector<UDPMulticastInfo>& multicast_list) {
     std::map<size_t, PerGroupMessageQueue> mapQueues; // map group number to group queue
