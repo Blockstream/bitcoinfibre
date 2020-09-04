@@ -347,6 +347,26 @@ UniValue gettxqueueinfo(const JSONRPCRequest& request) {
     return info;
 }
 
+UniValue txblock(const JSONRPCRequest& request)
+{
+    RPCHelpMan{"txblock",
+    "Transmit a chosen block over all active UDP multicast Tx streams.\n"
+    "\nSends a different set of FEC chunks over each Tx stream.\n",
+    {
+        {"height", RPCArg::Type::NUM, RPCArg::Optional::NO, "Block height."},
+    },
+    RPCResults{},
+    RPCExamples{
+        HelpExampleCli("txblock", "600000")
+        + HelpExampleRpc("txblock", "600000")
+    }
+    }.Check(request);
+
+    MulticastTxBlock(request.params[0].get_int());
+
+    return NullUniValue;
+}
+
 static const CRPCCommand commands[] =
 { //  category              name                      actor (function)         argNames
   //  --------------------- ------------------------  -----------------------  ----------
@@ -356,7 +376,8 @@ static const CRPCCommand commands[] =
     { "udpnetwork",         "getchunkstats",          &getchunkstats,          {"height"} },
     { "udpnetwork",         "gettxwindowinfo",        &gettxwindowinfo,        {"physical_idx", "logical_idx"} },
     { "udpnetwork",         "gettxntxinfo",           &gettxntxinfo,           {} },
-    { "udpnetwork",         "gettxqueueinfo",         &gettxqueueinfo,         {} }
+    { "udpnetwork",         "gettxqueueinfo",         &gettxqueueinfo,         {} },
+    { "udpnetwork",         "txblock",                &txblock,                {"height"} }
 };
 
 void RegisterUDPNetRPCCommands(CRPCTable &t)
