@@ -1056,7 +1056,7 @@ static void do_send_messages() {
 
         /* Iterate over Tx queues and schedule transmissions */
         bool maybe_all_empty = true; // unless told otherwise
-        bool maybe_all_full = true; // likewise, unless told otherwise
+        bool maybe_all_full  = (mapTxQueues.size() > 0); // likewise
 
         for (auto& q : mapTxQueues) {
             PerGroupMessageQueue& queue   = q.second;
