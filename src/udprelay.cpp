@@ -37,8 +37,6 @@ static std::unordered_set<uint64_t> setBlocksRelayed;
 // of packets into more ProcessNewBlock calls, so we have to keep a separate
 // set here.
 static std::set<std::pair<uint64_t, CService>> setBlocksReceived;
-// Keep track of used vs. received block chunks
-static std::map<std::pair<uint64_t, int>, BlockChunkCount> mapChunkCount;
 
 static std::map<std::pair<uint64_t, CService>, std::shared_ptr<PartialBlockData> >::iterator RemovePartialBlock(std::map<std::pair<uint64_t, CService>, std::shared_ptr<PartialBlockData> >::iterator it) {
     uint64_t const hash_prefix = it->first.first;
@@ -908,8 +906,7 @@ static void ProcessBlockThread() {
                         /* NOTE: the chunk count printed next is not necessarily
                          * accurate. It reflects the count up to when the block
                          * is decoded. However, further chunks may still be
-                         * received after the block is decoded. The count kept
-                         * at `mapChunkCount` is more reliable. */
+                         * received after the block is decoded. */
                         LogPrintf("UDP: Block %s reconstructed from %s with %u chunks in %lf ms (%u recvd from %u peers)\n", decoded_block.GetHash().ToString(), block.nodeHeaderRecvd.ToString(), total_chunks_used, to_millis_double(std::chrono::steady_clock::now() - block.timeHeaderRecvd), total_chunks_recvd, chunksProvidedByNode.size());
                         for (const std::pair<CService, std::pair<uint32_t, uint32_t> >& provider : chunksProvidedByNode)
                             LogPrintf("UDP:    %u/%u used from %s\n", provider.second.first, provider.second.second, provider.first.ToString());
@@ -1161,71 +1158,9 @@ static bool HandleTx(UDPMessage& msg, size_t length, const CService& node, UDPCo
     return true;
 }
 
-/* Print chunk stats
- *
- * Print whenever sufficient time has elapsed since the last chunk received for
- * a given block and from a given socket. This sufficient time is either an
- * interval significantly higher than the average chunk arrival interval, or an
- * arbitrarily large value configurable via option -udpfecstatstimeout (default
- * is 10 min), whatever is the largest. Note that, if the same block is received
- * on multiple sockets, independent stats will be printed for each socket.
- */
-static void printChunkStats(const uint64_t hash_prefix, const int sockfd,
-                            const std::map<std::pair<uint64_t, int>, BlockChunkCount>::iterator& currentIt) {
-    double min_timeout_ms = 600000;
-    if (gArgs.IsArgSet("-udpfecstatstimeout") && (atoi(gArgs.GetArg("-udpfecstatstimeout", "")) > 0))
-        min_timeout_ms = atoi(gArgs.GetArg("-udpfecstatstimeout", "")) * 1000;
-
-    std::chrono::steady_clock::time_point t_now(std::chrono::steady_clock::now());
-    for (auto chunkCountIt = mapChunkCount.cbegin(); chunkCountIt != mapChunkCount.cend();)
-    {
-        /* Don't process the map entry that is currently being processed by the
-         * caller. Otherwise, it is possible that the entry is removed from the
-         * map and the caller ends up with an invalidated iterator.  */
-        if (chunkCountIt == currentIt) {
-            ++chunkCountIt;
-            continue;
-        }
-
-        const double elapsed_since_last_rx = to_millis_double(t_now - chunkCountIt->second.t_last);
-        const double timeout = std::max<double>(min_timeout_ms, (3*chunkCountIt->second.avg_chunk_interval));
-        const uint32_t tot_received = chunkCountIt->second.header_rcvd + chunkCountIt->second.data_rcvd;
-        if (tot_received > 1 && elapsed_since_last_rx > timeout) {
-            double dec_duration = to_millis_double(chunkCountIt->second.t_decode -
-                                                   chunkCountIt->second.t_first);
-            double tot_duration = to_millis_double(chunkCountIt->second.t_last -
-                                                   chunkCountIt->second.t_first);
-
-            LogPrint(BCLog::FEC, "FEC chunks: block %016lx, socket %d, ",
-                     chunkCountIt->first.first,
-                     chunkCountIt->first.second);
-            LogPrint(BCLog::FEC, "Total %4du/%4dr, ",
-                     (chunkCountIt->second.data_used +
-                      chunkCountIt->second.header_used),
-                     (chunkCountIt->second.data_rcvd +
-                      chunkCountIt->second.header_rcvd));
-            LogPrint(BCLog::FEC, "Header %4du/%4dr/%4dd, ",
-                     chunkCountIt->second.header_used,
-                     chunkCountIt->second.header_rcvd,
-                     chunkCountIt->second.header_to_decode);
-            LogPrint(BCLog::FEC, "Body: %4du/%4dr/%4dd, ",
-                     chunkCountIt->second.data_used,
-                     chunkCountIt->second.data_rcvd,
-                     chunkCountIt->second.data_to_decode);
-            LogPrint(BCLog::FEC, "%9.2f ms/%9.2f ms/%9.2f ms\n",
-                     tot_duration, dec_duration,
-                     chunkCountIt->second.avg_chunk_interval);
-
-            chunkCountIt = mapChunkCount.erase(chunkCountIt);
-        } else
-            ++chunkCountIt;
-    }
-}
-
 bool HandleBlockTxMessage(UDPMessage& msg, size_t length, const CService& node, UDPConnectionState& state, const std::chrono::steady_clock::time_point& packet_process_start, const int sockfd) {
     //TODO: There are way too many damn tree lookups here...either cut them down or increase parallelism
     const bool fBench = LogAcceptCategory(BCLog::BENCH);
-    const bool debugFec = LogAcceptCategory(BCLog::FEC);
     std::chrono::steady_clock::time_point start;
     if (fBench)
         start = std::chrono::steady_clock::now();
@@ -1260,33 +1195,6 @@ bool HandleBlockTxMessage(UDPMessage& msg, size_t length, const CService& node, 
 
     // Number of chunks that the data object (before FEC enconding) would occupy
     const size_t n_chunks = DIV_CEIL(msg.msg.block.obj_length, sizeof(UDPBlockMessage::data));
-
-    /* Track all received chunks */
-    std::map<std::pair<uint64_t, int>, BlockChunkCount>::iterator mapChunkCountIt;
-    if (debugFec) {
-        std::chrono::steady_clock::time_point t_chunk_rcvd(std::chrono::steady_clock::now());
-
-        mapChunkCountIt = mapChunkCount.emplace(std::make_pair(hash_prefix, sockfd),
-                                                BlockChunkCount()).first;
-
-        if (is_blk_header_chunk)
-            mapChunkCountIt->second.header_rcvd++;
-        else
-            mapChunkCountIt->second.data_rcvd++;
-
-        /* Compute average chunk interval (consider that we can't compute the
-         * interval for the first chunk received) */
-        const uint32_t tot_received = mapChunkCountIt->second.header_rcvd + mapChunkCountIt->second.data_rcvd;
-        if (tot_received > 1) {
-            const double chunk_interval = to_millis_double(t_chunk_rcvd - mapChunkCountIt->second.t_last);
-            mapChunkCountIt->second.accum_chunk_interval += chunk_interval;
-            mapChunkCountIt->second.avg_chunk_interval = mapChunkCountIt->second.accum_chunk_interval / (tot_received -1);
-        }
-
-        mapChunkCountIt->second.t_last = t_chunk_rcvd;
-
-        printChunkStats(hash_prefix, sockfd, mapChunkCountIt);
-    }
 
     if (setBlocksRelayed.count(msg.msg.block.hash_prefix) || setBlocksReceived.count(hash_peer_pair))
         return true;
@@ -1480,12 +1388,6 @@ bool HandleBlockTxMessage(UDPMessage& msg, size_t length, const CService& node, 
 
     // Keep track of chunks that are actually used for decoding
     perNodeChunkCountIt->second.first++;
-    if (debugFec) {
-        if (is_blk_header_chunk)
-            mapChunkCountIt->second.header_used++;
-        else
-            mapChunkCountIt->second.data_used++;
-    }
 
     if (state.connection.fTrusted) {
         BlockMsgHToLE(msg);
@@ -1500,15 +1402,6 @@ bool HandleBlockTxMessage(UDPMessage& msg, size_t length, const CService& node, 
             block.is_header_processing = true;
         else
             block.is_decodeable = true;
-
-        if (debugFec) {
-            if (block.in_header)
-                mapChunkCountIt->second.header_to_decode = mapChunkCountIt->second.header_rcvd;
-            else {
-                mapChunkCountIt->second.data_to_decode = mapChunkCountIt->second.data_rcvd;
-                mapChunkCountIt->second.t_decode       = std::chrono::steady_clock::now();
-            }
-        }
 
         /* If this is a relayed block (from the tip of the chain), we kick-off
          * the processing of the FEC object as soon as it is ready, regardless
