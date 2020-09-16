@@ -93,26 +93,6 @@ enum UDPState {
     STATE_INIT_COMPLETE = STATE_GOT_SYN | STATE_GOT_SYN_ACK, // We can now send data to this peer
 };
 
-struct BlockChunkCount {
-    uint32_t data_rcvd = 0;   // number of received block contents (data) chunks
-    uint32_t data_used = 0;   // number of used block contents (data) chunks
-    uint32_t header_rcvd = 0; // number of received block header chunks
-    uint32_t header_used = 0; // number of used block header chunks
-    uint32_t data_to_decode = 0;   // number of data chunks until able to decode
-    uint32_t header_to_decode = 0; // number of header chunks until able to decode
-    std::chrono::steady_clock::time_point t_first = std::chrono::steady_clock::now();  // time first chunk received
-    std::chrono::steady_clock::time_point t_decode = std::chrono::steady_clock::now(); // time when ready to decode
-    std::chrono::steady_clock::time_point t_last = std::chrono::steady_clock::now();   // last time chunk received
-    double accum_chunk_interval = 0; // accumulator for average interval computation
-    double avg_chunk_interval = 0;   // average interval between chunks
-    /* NOTE: not all chunks received before the block becomes decodable are
-     * effectively used. Some chunks can be known already, in which case they
-     * are dropped (not used). Thus, not necessarily the count of
-     * `data_to_decode` ends up being equal to `data_used`, although often it
-     * will be, especially if the sender always sends random (non repeated)
-     * chunk ids. The same holds for `header_to_decode` and `header_used`. */
-};
-
 struct PartialBlockData {
     const std::chrono::steady_clock::time_point timeHeaderRecvd;
     const CService nodeHeaderRecvd;
