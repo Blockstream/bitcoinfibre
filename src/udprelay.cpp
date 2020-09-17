@@ -46,6 +46,15 @@ static std::map<std::pair<uint64_t, CService>, std::shared_ptr<PartialBlockData>
         std::map<CService, UDPConnectionState>::iterator nodeIt = mapUDPNodes.find(node.first);
         if (nodeIt == mapUDPNodes.end())
             continue;
+
+        // Copy hit ratios saved within the PartialBlockData into the node's
+        // UDPConnectionState, which later becomes available for read through
+        // the getfechitratio RPC
+        if (it->second->txn_hit_ratio != -1 && it->second->chunk_hit_ratio) {
+            nodeIt->second.last_txn_hit_ratio = it->second->txn_hit_ratio;
+            nodeIt->second.last_chunk_hit_ratio = it->second->chunk_hit_ratio;
+        }
+
         std::map<uint64_t, ChunksAvailableSet>::iterator chunks_avail_it = nodeIt->second.chunks_avail.find(hash_prefix);
         if (chunks_avail_it == nodeIt->second.chunks_avail.end())
             continue; // Peer reconnected at some point
@@ -827,11 +836,18 @@ static void ProcessBlockThread() {
                 else if (block.is_decodeable)
                     LogPrintf("UDP: Block %s - Ready to be decoded (enough FEC chunks available)\n", blockHash.ToString());
 
-                if (block.tip_blk && LogAcceptCategory(BCLog::FEC)) {
+                if (block.tip_blk) {
                     size_t mempool_txns = block.block_data.GetMempoolCount();
-                    size_t n_blk_txns   = header.BlockTxCount();
+                    size_t n_blk_txns   = header.BlockShortTxCount();
+                    block.txn_hit_ratio = (double) mempool_txns / n_blk_txns;
                     LogPrint(BCLog::FEC, "UDP: Block %s - Txns available: %ld/%ld  Txn hit ratio: %f\n",
-                             blockHash.ToString(), mempool_txns, n_blk_txns, (double) mempool_txns / n_blk_txns);
+                             blockHash.ToString(), mempool_txns, n_blk_txns, block.txn_hit_ratio);
+                    // When all txns are available in the mempool, the FEC-coded
+                    // block is not even decoded. The block is decoded directly
+                    // based on the local txns. However, mark as if all chunks
+                    // were available for consistency with the txn hit ratio.
+                    if (block.block_data.AreAllTxnsInMempool())
+                        block.chunk_hit_ratio = 1.0;
                 }
 
                 // Do more work if we can already decode the block or in case we
@@ -1016,12 +1032,17 @@ static void ProcessBlockThread() {
                         std::this_thread::yield();
                     }
                 }
+
+                double chunk_hit_ratio = (double) mempool_provided_chunks / total_chunk_count;
+
+                if (lock)
+                    block.chunk_hit_ratio = chunk_hit_ratio;
+
                 if (lock && !more_work)
                     lock.unlock();
                 LogPrintf("UDP: Block %s - Initialized with %ld/%ld mempool-provided chunks (or more)\n", blockHash.ToString(), mempool_provided_chunks, total_chunk_count);
                 LogPrint(BCLog::FEC, "UDP: Block %s - Chunk hit ratio: %f\n",
-                         blockHash.ToString(),
-                         (double) mempool_provided_chunks /total_chunk_count);
+                         blockHash.ToString(), chunk_hit_ratio);
             }
         } while (more_work);
     }
@@ -1603,4 +1624,24 @@ UniValue AllBlkChunkStatsToJSON() {
         o.__pushKV(hex_hash_prefix, info);
     }
     return o;
+}
+
+/* Get the most recent FEC hit ratios: the chunk and txn hit ratios
+ *
+ * The ratio refers to the number FEC chunks or txns already available for
+ * incoming compact blocks in relation to the total number of chunks or txns in
+ * the block. */
+UniValue FecHitRatioToJson() {
+    UniValue ret(UniValue::VOBJ);
+    std::unique_lock<std::recursive_mutex> lock(cs_mapUDPNodes);
+    for (auto it = mapUDPNodes.begin(); it != mapUDPNodes.end(); it++) {
+        if (it->second.last_txn_hit_ratio != -1 &&
+            it->second.last_chunk_hit_ratio != -1) {
+            UniValue info(UniValue::VOBJ);
+            info.pushKV("txn_ratio", it->second.last_txn_hit_ratio);
+            info.pushKV("chunk_ratio", it->second.last_chunk_hit_ratio);
+            ret.__pushKV(it->first.ToString(), info);
+        }
+    }
+    return ret;
 }
