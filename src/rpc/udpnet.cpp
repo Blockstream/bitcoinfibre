@@ -346,6 +346,39 @@ UniValue gettxqueueinfo(const JSONRPCRequest& request) {
     return info;
 }
 
+UniValue getfechitratio(const JSONRPCRequest& request) {
+    RPCHelpMan{"getfechitratio",
+        "\nGet the last FEC hit ratios achieved on reception of blocks coming via UDP.\n"
+        "\nNew blocks are relayed over UDP connections using compact block format. On\n"
+        "reception of such a cmpctblock, the node tries to form the original block and\n"
+        "tries to prefill the block's txns based on the mempool transactions that it\n"
+        "already has. Furthermore, the receiving node tries to prefill the FEC chunks\n"
+        "corresponding to the FEC-coded version of the original block, which is sent\n"
+        "after the cmpctblock. The hit ratios indicate the number of txns or FEC chunks\n"
+        "already available locally in relation to the total number of txns or FEC chunks\n"
+        "composing the block.\n",
+        {
+        },
+        RPCResults{
+             RPCResult{
+                 "{\n"
+                 "  \"peer address\" : {   (json object)\n"
+                 "    \"txn_ratio\"   : n  (numeric) Txns already available / total txns\n"
+                 "    \"chunk_ratio\" : n  (numeric) FEC chunks prefilled / total chunks\n"
+                 "  }\n"
+                 "  ... (all UDP peers)\n"
+                 "}\n"
+             }
+        },
+        RPCExamples{
+            HelpExampleCli("getfechitratio", "")
+            + HelpExampleRpc("getfechitratio", "")
+        }
+    }.Check(request);
+
+    return FecHitRatioToJson();
+}
+
 UniValue txblock(const JSONRPCRequest& request)
 {
     RPCHelpMan{"txblock",
@@ -376,6 +409,7 @@ static const CRPCCommand commands[] =
     { "udpnetwork",         "gettxwindowinfo",        &gettxwindowinfo,        {"physical_idx", "logical_idx"} },
     { "udpnetwork",         "gettxntxinfo",           &gettxntxinfo,           {} },
     { "udpnetwork",         "gettxqueueinfo",         &gettxqueueinfo,         {} },
+    { "udpnetwork",         "getfechitratio",         &getfechitratio,         {} },
     { "udpnetwork",         "txblock",                &txblock,                {"height"} }
 };
 

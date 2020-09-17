@@ -120,6 +120,10 @@ struct PartialBlockData {
 
     int height = -1; // Block height
 
+    // Temporary storage of hit ratios for new (tip) blocks
+    double txn_hit_ratio = -1;
+    double chunk_hit_ratio = -1;
+
     // nodes with chunks_avail set -> packets that were useful, packets provided
     std::map<CService, std::pair<uint32_t, uint32_t>> perNodeChunkCount;
 
@@ -244,9 +248,11 @@ struct UDPConnectionState {
     std::map<uint64_t, ChunksAvailableSet> chunks_avail;
     uint64_t tx_in_flight_hash_prefix, tx_in_flight_msg_size;
     std::unique_ptr<FECDecoder> tx_in_flight;
+    double last_txn_hit_ratio;
+    double last_chunk_hit_ratio;
 
     UDPConnectionState() : connection({}), state(0), protocolVersion(0), lastSendTime(0), lastRecvTime(0), lastPingTime(0), last_ping_location(0),
-        tx_in_flight_hash_prefix(0), tx_in_flight_msg_size(0)
+        tx_in_flight_hash_prefix(0), tx_in_flight_msg_size(0), last_txn_hit_ratio(-1), last_chunk_hit_ratio(-1)
         { for (size_t i = 0; i < sizeof(last_pings) / sizeof(double); i++) last_pings[i] = -1; }
 };
 #define PROTOCOL_VERSION_MIN(ver) (((ver) >> 16) & 0xffff)
