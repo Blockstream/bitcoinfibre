@@ -204,8 +204,13 @@ struct UDPConnectionInfo {
 };
 
 struct UDPMulticastStats {
-    std::chrono::steady_clock::time_point lastRxTime = std::chrono::steady_clock::now();
-    int64_t rcvdBytes = 0;
+    uint64_t rcvd_bytes = 0;
+    // Fields used for bitrate computations (on debug prints and on the
+    // getudpmulticastinfo RPC):
+    uint64_t last_rcvd_bytes_print = 0;
+    uint64_t last_rcvd_bytes_rpc = 0;
+    std::chrono::steady_clock::time_point t_last_print = std::chrono::steady_clock::now();
+    std::chrono::steady_clock::time_point t_last_rpc = std::chrono::steady_clock::now();
 };
 
 struct UDPMulticastInfo {
