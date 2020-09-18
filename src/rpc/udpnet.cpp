@@ -19,7 +19,7 @@ using namespace std;
 UniValue getudppeerinfo(const JSONRPCRequest& request)
 {
     RPCHelpMan{"getudppeerinfo",
-        "\nReturns data about each connected UDP peer as a json array of objects.\n",
+        "\nReturns data about each connected UDP unicast peer as a json array of objects.\n",
         {},
         RPCResult{
             "[\n"
@@ -158,6 +158,37 @@ UniValue disconnectudpnode(const JSONRPCRequest& request)
     CloseUDPConnectionTo(addr);
 
     return NullUniValue;
+}
+
+UniValue getudpmulticastinfo(const JSONRPCRequest& request) {
+    RPCHelpMan{"getudpmulticastinfo",
+        "\nRetrieve information about the UDP multicast Rx instances.\n",
+        {
+        },
+        RPCResults{
+             RPCResult{
+                 "{\n"
+                 "  \"peer address\" : {   (json object)\n"
+                 "    \"bitrate\"    : (string) Incoming bit rate\n"
+                 "    \"group\"      : (numeric) UDP group number\n"
+                 "    \"groupname\"  : (string) Group label set on option udpmulticast\n"
+                 "    \"ifname\"     : (string) Network interface name\n"
+                 "    \"mcast_ip\"   : (string) Multicast IP address this group listens to\n"
+                 "    \"port\"       : (numeric) UDP port this group listens to\n"
+                 "    \"rcvd_bytes\" : (numeric) Number of bytes received so far\n"
+                 "    \"trusted\"    : (boolean) Whether the sending peer is trusted\n"
+                 "  }\n"
+                 "  ... (all UDP peers)\n"
+                 "}\n"
+             }
+        },
+        RPCExamples{
+            HelpExampleCli("getudpmulticastinfo", "")
+            + HelpExampleRpc("getudpmulticastinfo", "")
+        }
+    }.Check(request);
+
+    return UdpMulticastRxInfoToJson();
 }
 
 static std::string StatsDescriptionString()
@@ -405,6 +436,7 @@ static const CRPCCommand commands[] =
     { "udpnetwork",         "getudppeerinfo",         &getudppeerinfo,         {} },
     { "udpnetwork",         "addudpnode",             &addudpnode,             {"node", "local_magic", "remote_magic", "ultimately_trusted", "command", "group"} },
     { "udpnetwork",         "disconnectudpnode",      &disconnectudpnode,      {"node"} },
+    { "udpnetwork",         "getudpmulticastinfo",    &getudpmulticastinfo,    {} },
     { "udpnetwork",         "getchunkstats",          &getchunkstats,          {"height"} },
     { "udpnetwork",         "gettxwindowinfo",        &gettxwindowinfo,        {"physical_idx", "logical_idx"} },
     { "udpnetwork",         "gettxntxinfo",           &gettxntxinfo,           {} },

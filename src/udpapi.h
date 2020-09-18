@@ -46,6 +46,7 @@ UniValue MaxMinBlkChunkStatsToJSON();
 UniValue AllBlkChunkStatsToJSON();
 UniValue FecHitRatioToJson();
 
+UniValue UdpMulticastRxInfoToJson();
 UniValue TxWindowInfoToJSON(int phy_idx, int log_idx);
 UniValue TxnTxInfoToJSON();
 UniValue TxQueueInfoToJSON();
