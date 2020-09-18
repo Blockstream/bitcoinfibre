@@ -82,7 +82,7 @@ bool maybe_have_write_nodes;
 static std::map<int64_t, std::tuple<CService, uint64_t, size_t> > nodesToRepeatDisconnect;
 static std::map<CService, UDPConnectionInfo> mapPersistentNodes;
 
-static int mcastStatPrintInterval = 10;
+static int g_mcast_log_interval = 10;
 
 /*
  * UDP multicast service
@@ -547,11 +547,52 @@ static bool InitializeUDPMulticast(std::vector<int> &udp_socks,
     return true;
 }
 
+/* Get information from the UDP multicast Rx instances */
+UniValue UdpMulticastRxInfoToJson() {
+    UniValue ret(UniValue::VOBJ);
+    std::unique_lock<std::recursive_mutex> lock(cs_mapUDPNodes);
+    const auto t_now = std::chrono::steady_clock::now();
+    for (const auto& node : mapMulticastNodes) {
+        if (node.second.tx)
+            continue;
+
+        /* Average bitrate since the last RPC call */
+        UDPMulticastStats& stats  = node.second.stats;
+        const double elapsed      = to_millis_double(t_now - stats.t_last_rpc);
+        stats.t_last_rpc          = t_now;
+        uint64_t new_bytes        = stats.rcvd_bytes - stats.last_rcvd_bytes_rpc;
+        stats.last_rcvd_bytes_rpc = stats.rcvd_bytes;
+        const double bitrate_kbps = (double) (new_bytes * 8)/ (elapsed);
+
+        double bitrate;
+        std::string unit;
+        if (bitrate_kbps > 1e3) {
+            bitrate = bitrate_kbps / 1000;
+            unit    = "Mbps";
+        } else {
+            bitrate = bitrate_kbps;
+            unit    = "kbps";
+        }
+
+        UniValue info(UniValue::VOBJ);
+        info.pushKV("bitrate", std::to_string(bitrate) + " " + unit);
+        info.pushKV("group", node.second.group);
+        info.pushKV("groupname", node.second.groupname);
+        info.pushKV("ifname", node.second.ifname);
+        info.pushKV("mcast_ip", node.second.mcast_ip);
+        info.pushKV("port", node.second.port);
+        info.pushKV("rcvd_bytes", stats.rcvd_bytes);
+        info.pushKV("trusted", node.second.trusted);
+        ret.__pushKV(std::get<0>(node.first).ToString(), info);
+    }
+    return ret;
+}
+
 bool InitializeUDPConnections() {
     assert(udp_write_threads.empty() && !udp_read_thread);
 
     if (gArgs.IsArgSet("-udpmulticastloginterval") && (atoi(gArgs.GetArg("-udpmulticastloginterval", "")) > 0))
-        mcastStatPrintInterval = atoi(gArgs.GetArg("-udpmulticastloginterval", ""));
+        g_mcast_log_interval = atoi(gArgs.GetArg("-udpmulticastloginterval", ""));
 
     const std::vector<std::pair<unsigned short, uint64_t> > group_list(GetUDPInboundPorts());
     for (std::pair<unsigned short, uint64_t> port : group_list) {
@@ -700,6 +741,27 @@ void DisconnectNode(const std::map<CService, UDPConnectionState>::iterator& it) 
     send_and_disconnect(it);
 }
 
+static void UpdateUdpMulticastRxBytes(const UDPMulticastInfo& mcast_info) {
+    UDPMulticastStats& stats = mcast_info.stats;
+    stats.rcvd_bytes += sizeof(UDPMessage) - 1;
+
+    // Print the bit rate periodically if the required logging level is active
+    if (!LogAcceptCategory(BCLog::UDPMCAST))
+        return;
+
+    auto t_now = std::chrono::steady_clock::now();
+    const double elapsed = to_millis_double(t_now - stats.t_last_print);
+    if (elapsed > (1000 * g_mcast_log_interval)) {
+        uint64_t new_bytes = stats.rcvd_bytes - stats.last_rcvd_bytes_print;
+        LogPrint(BCLog::UDPMCAST, "UDP multicast group %d: Average bit rate %7.2f Mbit/sec (%s)\n",
+                 mcast_info.group,
+                 (double) (new_bytes * 8)/ (1000 * elapsed),
+                 mcast_info.groupname);
+        stats.t_last_print = t_now;
+        stats.last_rcvd_bytes_print = stats.rcvd_bytes;
+    }
+}
+
 static void read_socket_func(evutil_socket_t fd, short event, void* arg) {
     const bool fBench = LogAcceptCategory(BCLog::BENCH);
     std::chrono::steady_clock::time_point start(std::chrono::steady_clock::now());
@@ -773,21 +835,8 @@ static void read_socket_func(evutil_socket_t fd, short event, void* arg) {
             msg_type_masked == MSG_TYPE_TX_CONTENTS) {
             if (!HandleBlockTxMessage(msg, sizeof(UDPMessage) - 1, it->first, it->second, start, fd))
                 send_and_disconnect(it);
-            else {
-                if (LogAcceptCategory(BCLog::UDPMCAST)) {
-                    mcast_info.stats.rcvdBytes += sizeof(UDPMessage) - 1;
-                    auto now = std::chrono::steady_clock::now();
-                    double timeDeltaMillis = to_millis_double(now - mcast_info.stats.lastRxTime);
-                    if (timeDeltaMillis > 1000*mcastStatPrintInterval) {
-                        LogPrint(BCLog::UDPMCAST, "UDP multicast group %d: Average bit rate %7.2f Mbit/sec (%s)\n",
-                                 mcast_info.group,
-                                 (double)mcast_info.stats.rcvdBytes*8/(1000*timeDeltaMillis),
-                                 mcast_info.groupname);
-                        mcast_info.stats.lastRxTime = now;
-                        mcast_info.stats.rcvdBytes = 0;
-                    }
-                }
-            }
+            else
+                UpdateUdpMulticastRxBytes(mcast_info);
         } else
             LogPrintf("UDP: Unexpected message from %s!\n", it->first.ToString());
 
@@ -1924,6 +1973,8 @@ void GetUDPConnectionList(std::vector<UDPConnectionStats>& connections_list) {
     std::unique_lock<std::recursive_mutex> lock(cs_mapUDPNodes);
     connections_list.reserve(mapUDPNodes.size());
     for (const auto& node : mapUDPNodes) {
+        if (node.second.connection.udp_mode == udp_mode_t::multicast)
+            continue;
         connections_list.push_back({node.first, node.second.connection.group, node.second.connection.fTrusted, (node.second.state & STATE_GOT_SYN_ACK) ? node.second.lastRecvTime : 0, {}});
         for (size_t i = 0; i < sizeof(node.second.last_pings) / sizeof(double); i++)
             if (node.second.last_pings[i] != -1)
