@@ -322,8 +322,8 @@ static struct in_addr GetIfIpAddr(const char* const ifname) {
 static bool InitializeUDPMulticast(std::vector<int> &udp_socks,
                                    std::vector<UDPMulticastInfo> &multicast_list) {
     int group = udp_socks.size() - 1;
-    std::vector<std::pair<CService, int>> tx_addr_ifindex_vec;
-    std::set<std::pair<CService, int>> tx_addr_ifindex_set;
+    std::map<std::pair<CService, int>, int> physical_idx_map;
+    std::map<std::pair<CService, int>, int> logical_idx_map;
 
     for (auto& mcast_info : multicast_list) {
         udp_socks.push_back(socket(AF_INET6, SOCK_DGRAM, 0));
@@ -487,13 +487,20 @@ static bool InitializeUDPMulticast(std::vector<int> &udp_socks,
          * different (unique) logical stream indexes. */
         if (mcast_info.tx) {
             const auto addr_ifindex_pair = std::make_pair(addr, ifindex);
-            mcast_info.logical_idx       = std::count(tx_addr_ifindex_vec.begin(), tx_addr_ifindex_vec.end(), addr_ifindex_pair);
-            if (tx_addr_ifindex_set.count(addr_ifindex_pair))
-                mcast_info.physical_idx = std::distance(tx_addr_ifindex_set.begin(), tx_addr_ifindex_set.find(addr_ifindex_pair));
+
+            // The physical index depends only on the address/ifindex pair
+            if (physical_idx_map.find(addr_ifindex_pair) == physical_idx_map.end())
+                physical_idx_map[addr_ifindex_pair] = physical_idx_map.size();
+
+            // The logical index increments for every stream reusing a
+            // pre-existing address/ifindex pair
+            if (logical_idx_map.find(addr_ifindex_pair) == logical_idx_map.end())
+                logical_idx_map[addr_ifindex_pair] = 0;
             else
-                mcast_info.physical_idx = tx_addr_ifindex_set.size();
-            tx_addr_ifindex_vec.push_back(addr_ifindex_pair);
-            tx_addr_ifindex_set.insert(addr_ifindex_pair);
+                logical_idx_map[addr_ifindex_pair]++;
+
+            mcast_info.physical_idx = physical_idx_map[addr_ifindex_pair];
+            mcast_info.logical_idx  = logical_idx_map[addr_ifindex_pair];
 
             LogPrintf("UDP: multicast tx %lu-%lu:\n"
                       "    - multiaddr: %s\n"
