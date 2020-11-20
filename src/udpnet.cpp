@@ -212,8 +212,9 @@ static std::unique_ptr<std::thread> udp_read_thread;
 static std::vector<std::thread> udp_write_threads;
 
 static void OpenMulticastConnection(const CService& service, bool multicast_tx, size_t group, bool trusted);
-static UDPMulticastInfo ParseUDPMulticastInfo(const std::string& s, bool tx);
-static std::vector<UDPMulticastInfo> GetUDPMulticastInfo();
+static bool ParseUDPMulticastInfo(const std::string& s, UDPMulticastInfo& info);
+static bool ParseUDPMulticastTxInfo(const std::string& s, UDPMulticastInfo& info);
+static bool GetUDPMulticastInfo(std::vector<UDPMulticastInfo>& v);
 
 static void MulticastBackfillThread(const CService& mcastNode, const UDPMulticastInfo *info);
 static void LaunchMulticastBackfillThreads();
@@ -631,7 +632,11 @@ bool InitializeUDPConnections() {
         return false;
     }
 
-    auto multicast_list = GetUDPMulticastInfo();
+    std::vector<UDPMulticastInfo> multicast_list;
+    if (!GetUDPMulticastInfo(multicast_list)) {
+        CloseSocketsAndReadEvents();
+        return false;
+    }
 
     if (!InitializeUDPMulticast(udp_socks, multicast_list)) {
         CloseSocketsAndReadEvents();
@@ -1760,21 +1765,116 @@ static void send_messages_flush_and_break() {
     }
 }
 
-static UDPMulticastInfo ParseUDPMulticastInfo(const std::string& s, const bool tx) {
-    UDPMulticastInfo info{};
-    info.port = 0; // use port == 0 to infer error
+/* Parse option read from udpmulticasttx configuration file */
+static bool ParseUDPMulticastTxOpt(UDPMulticastInfo& info,
+    const std::string& opt,
+    const std::string& value)
+{
+    std::string error;
+    if (opt == "ifname") {
+        strncpy_wrapper(info.ifname, value.c_str(), IFNAMSIZ);
+    } else if (opt == "dest_addr") {
+        int port;
+        std::string ip;
+        SplitHostPort(value, port, ip);
+        if (port != (unsigned short)port || port == 0) {
+            error = "invalid port";
+        } else {
+            strncpy_wrapper(info.mcast_ip, ip.c_str(), INET_ADDRSTRLEN);
+            info.port = port;
+        }
+    } else if (opt == "bw") {
+        info.bw = atoi64(value);
+    } else if (opt == "txn_per_sec") {
+        info.txn_per_sec = atoi(value);
+    } else if (opt == "ttl") {
+        info.ttl = atoi(value);
+    } else if (opt == "depth") {
+        info.depth = atoi(value);
+        if (info.depth < 0)
+            error = "depth must be >= 0";
+    } else if (opt == "offset") {
+        info.offset = atoi(value);
+        if (info.offset < 0)
+            error = "offset must be >= 0\n";
+    } else if (opt == "dscp") {
+        info.dscp = atoi(value);
+    } else if (opt == "interleave_size") {
+        info.interleave_size = atoi(value);
+    } else {
+        error = "unknown option";
+    }
 
+    if (!error.empty()) {
+        LogPrintf("Failed to parse option %s on udpmulticasttx config: %s\n",
+            opt, error);
+        return false;
+    }
+    return true;
+}
+
+/* Parse udpmulticasttx configuration file */
+static bool ParseUDPMulticastTxInfo(const std::string& conf_file,
+    UDPMulticastInfo& info)
+{
+    info.tx = true;
+
+    /* Read configuration from file */
+    std::ifstream stream(AbsPathForConfigVal(conf_file).c_str());
+    if (!stream.good()) {
+        LogPrintf("Failed to open -udpmulticasttx config file: %s\n",
+            AbsPathForConfigVal(conf_file));
+        return false;
+    }
+    std::string str;
+    while (getline(stream, str)) {
+        const size_t pos = str.find('=');
+        if (pos == std::string::npos)
+            continue;
+
+        const std::string name = str.substr(0, pos);
+        const std::string value = str.substr(pos + 1);
+
+        if (!ParseUDPMulticastTxOpt(info, name, value))
+            return false;
+    }
+
+    /* Further validation */
+    if (info.depth > 0 && info.offset > info.depth) {
+        LogPrintf("Failed to parse -udpmulticasttx option, offset must be < depth\n");
+        return false;
+    }
+
+    /* Check mandatory fields */
+    if (strlen(info.ifname) == 0) {
+        LogPrintf("Failed to parse -udpmulticasttx option, ifname is required\n");
+        return false;
+    }
+
+    if (strlen(info.mcast_ip) == 0 || info.port == 0) {
+        LogPrintf("Failed to parse -udpmulticasttx option, dest_addr is required\n");
+        return false;
+    }
+
+    return true;
+}
+
+/* Parse udpmulticast configuration */
+static bool ParseUDPMulticastInfo(const std::string& s, UDPMulticastInfo& info)
+{
+    /* Network interface */
     const size_t if_end = s.find(',');
     if (if_end == std::string::npos) {
         LogPrintf("Failed to parse -udpmulticast option, net interface not set\n");
-        return info;
+        return false;
     }
     strncpy_wrapper(info.ifname, s.substr(0, if_end).c_str(), IFNAMSIZ);
 
+    /* Multicast address */
     const size_t mcastaddr_end = s.find(',', if_end + 1);
     if (mcastaddr_end == std::string::npos) {
         LogPrintf("Failed to parse -udpmulticast option, missing required arguments\n");
-        return info;
+        return false;
     }
 
     int port;
@@ -1783,134 +1883,61 @@ static UDPMulticastInfo ParseUDPMulticastInfo(const std::string& s, const bool t
     SplitHostPort(mcast_ip_port, port, ip);
     if (port != (unsigned short)port || port == 0) {
         LogPrintf("Failed to parse -udpmulticast option, invalid port\n");
-        return info;
+        return false;
     }
+    info.port = port;
     strncpy_wrapper(info.mcast_ip, ip.c_str(), INET_ADDRSTRLEN);
 
-    info.tx         = tx;
+    /* Source (Tx) IP address */
+    const size_t tx_ip_end = s.find(',', mcastaddr_end + 1);
+    std::string tx_ip;
 
-    /* Defaults */
-    info.groupname       = "";
-    info.ttl             = 3;
-    info.bw              = 0; // 0 leads to attempting the maximum speed
-    info.logical_idx     = 0; // default for multicast Rx, overriden for Tx
-    info.depth           = 144;
-    info.offset          = 0;
-    info.interleave_size = 1; // send one block at a time (no interleaving)
-    info.dscp            = 0; // IPv4 DSCP used for multicast Tx
-    info.trusted         = false;
-
-    if (info.tx) {
-        const size_t bw_end = s.find(',', mcastaddr_end + 1);
-
-        if (bw_end == std::string::npos) {
-            LogPrintf("Failed to parse -udpmulticasttx option, missing required arguments\n");
-            return info;
-        }
-        info.bw  = atoi64(s.substr(mcastaddr_end + 1, bw_end - mcastaddr_end - 1));
-
-        const size_t txn_per_sec_end = s.find(',', bw_end + 1);
-        if (txn_per_sec_end == std::string::npos)
-            info.txn_per_sec = atoi64(s.substr(bw_end + 1));
-        else {
-            info.txn_per_sec = atoi64(s.substr(bw_end + 1, txn_per_sec_end - bw_end - 1));
-
-            const size_t ttl_end = s.find(',', txn_per_sec_end + 1);
-            if (ttl_end == std::string::npos) {
-                info.ttl = atoi(s.substr(txn_per_sec_end + 1));
-            } else {
-                info.ttl   = atoi(s.substr(txn_per_sec_end + 1, ttl_end - txn_per_sec_end - 1));
-
-                const size_t depth_end = s.find(',', ttl_end + 1);
-                if (depth_end == std::string::npos) {
-                    info.depth = atoi(s.substr(ttl_end + 1));
-                } else {
-                    info.depth = atoi(s.substr(ttl_end + 1, depth_end - ttl_end - 1));
-
-                    const size_t offset_end = s.find(',', depth_end + 1);
-                    if (offset_end == std::string::npos) {
-                        info.offset  = atoi(s.substr(depth_end + 1));
-                    } else {
-                        info.offset  = atoi(s.substr(depth_end + 1, offset_end - depth_end - 1));
-
-                        const size_t dscp_end = s.find(',', offset_end + 1);
-                        if (dscp_end == std::string::npos) {
-                            info.dscp  = atoi(s.substr(offset_end + 1));
-                        } else {
-                            info.dscp  = atoi(s.substr(offset_end + 1, dscp_end - offset_end - 1));
-                            info.interleave_size = atoi(s.substr(dscp_end + 1));
-                        }
-                    }
-                }
-            }
-        }
-
-        if (info.depth < 0) {
-            LogPrintf("Failed to parse -udpmulticasttx option, depth must be >= 0\n");
-            return info;
-        }
-
-        if (info.offset < 0) {
-            LogPrintf("Failed to parse -udpmulticasttx option, offset must be >= 0\n");
-            return info;
-        }
-
-        if (info.depth > 0 && info.offset > info.depth) {
-            LogPrintf("Failed to parse -udpmulticasttx option, offset must be < depth\n");
-            return info;
-        }
-    } else {
-        const size_t tx_ip_end = s.find(',', mcastaddr_end + 1);
-        std::string tx_ip;
-
-        if (tx_ip_end == std::string::npos) {
-            LogPrintf("Failed to parse -udpmulticast option, missing required arguments\n");
-            return info;
-        }
-
-        tx_ip = s.substr(mcastaddr_end + 1, tx_ip_end - mcastaddr_end - 1);
-
-        const size_t trusted_end = s.find(',', tx_ip_end + 1);
-
-        if (trusted_end == std::string::npos)
-            info.trusted   = (bool) atoi64(s.substr(tx_ip_end + 1));
-        else {
-            info.trusted   = (bool) atoi64(s.substr(tx_ip_end + 1, trusted_end - tx_ip_end - 1));
-            info.groupname = s.substr(trusted_end + 1);
-        }
-
-        if (tx_ip.empty()) {
-            LogPrintf("Failed to parse -udpmulticast option, source (tx) IP empty\n");
-            return info;
-        }
-        strncpy_wrapper(info.tx_ip, tx_ip.c_str(), INET_ADDRSTRLEN);
+    if (tx_ip_end == std::string::npos) {
+        LogPrintf("Failed to parse -udpmulticast option, missing required arguments\n");
+        return false;
     }
 
-    info.port = port; /* set non-zero port if successful */
+    tx_ip = s.substr(mcastaddr_end + 1, tx_ip_end - mcastaddr_end - 1);
 
-    return info;
+    if (tx_ip.empty()) {
+        LogPrintf("Failed to parse -udpmulticast option, source (tx) IP empty\n");
+        return false;
+    }
+    strncpy_wrapper(info.tx_ip, tx_ip.c_str(), INET_ADDRSTRLEN);
+
+    /* Trusted source flag and group name */
+    const size_t trusted_end = s.find(',', tx_ip_end + 1);
+
+    if (trusted_end == std::string::npos)
+        info.trusted = (bool)atoi64(s.substr(tx_ip_end + 1));
+    else {
+        info.trusted = (bool)atoi64(s.substr(tx_ip_end + 1, trusted_end - tx_ip_end - 1));
+        info.groupname = s.substr(trusted_end + 1);
+    }
+
+    return true;
 }
 
-static std::vector<UDPMulticastInfo> GetUDPMulticastInfo()
+static bool GetUDPMulticastInfo(std::vector<UDPMulticastInfo>& v)
 {
     if (!gArgs.IsArgSet("-udpmulticast") && !gArgs.IsArgSet("-udpmulticasttx"))
-        return std::vector<UDPMulticastInfo>();
-
-    std::vector<UDPMulticastInfo> v;
+        return false;
 
     for (const std::string& s : gArgs.GetArgs("-udpmulticast")) {
-        v.push_back(ParseUDPMulticastInfo(s, false));
-        if (v.back().port == 0)
-            return std::vector<UDPMulticastInfo>();
+        UDPMulticastInfo info{};
+        if (!ParseUDPMulticastInfo(s, info))
+            return false;
+        v.push_back(info);
     }
 
     for (const std::string& s : gArgs.GetArgs("-udpmulticasttx")) {
-        v.push_back(ParseUDPMulticastInfo(s, true));
-        if (v.back().port == 0)
-            return std::vector<UDPMulticastInfo>();
+        UDPMulticastInfo info{};
+        if (!ParseUDPMulticastTxInfo(s, info))
+            return false;
+        v.push_back(info);
     }
 
-    return v;
+    return true;
 }
 
 static void OpenMulticastConnection(const CService& service, bool multicast_tx, size_t group, bool trusted) {
