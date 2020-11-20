@@ -213,31 +213,40 @@ struct UDPMulticastStats {
 };
 
 struct UDPMulticastInfo {
-    char ifname[IFNAMSIZ];          /** network interface name */
-    char mcast_ip[INET_ADDRSTRLEN]; /** multicast IPv4 address */
-    unsigned short port;            /** UDP port */
-    size_t group;                   /** UDP group */
-    bool tx;                        /** multicast Tx or Rx? */
-    int fd;                         /** socket file descriptor */
-    mutable UDPMulticastStats stats;/** statistics */
-    /* Rx only: */
-    char tx_ip[INET_ADDRSTRLEN];    /** source IPv4 address (sender address) */
-    std::string groupname;          /** optional label for stream */
-    bool trusted;                   /** whether multicast Tx peer is trusted */
+    char ifname[IFNAMSIZ] = {0};          /** network interface name */
+    char mcast_ip[INET_ADDRSTRLEN] = {0}; /** multicast IPv4 address */
+    unsigned short port = 0;              /** UDP port */
+    size_t group = 0;                     /** UDP group */
+    bool tx = false;                      /** multicast Tx or Rx? */
+    int fd;                               /** socket file descriptor */
+    mutable UDPMulticastStats stats;      /** statistics */
+                                          /* Rx only: */
+    char tx_ip[INET_ADDRSTRLEN] = {0};    /** source IPv4 address (sender
+                                           * address) */
+    std::string groupname = "";           /** optional label for stream */
+    bool trusted = false;                 /** whether multicast Tx peer is trusted */
     /* Tx only: */
-    int ttl;               /** time-to-live desired for multicast packets */
-    uint64_t bw;           /** target throughput in bps */
-    int depth;             /** backfill depth - no. of blocks to iterate over */
-    int offset;            /** offset within the backfill as starting point */
-    int interleave_size;   /** determines the depth of the sub-window of blocks
-                            *  within the backfill window whose FEC chunks are
-                            *  interleaved (sent in parallel). When set to 0,
-                            *  disables the transmission of blocks (including
-                            *  relayed blocks from the tip of the chain). */
-    uint16_t physical_idx; /** index of destination IP - net interface pair */
-    uint16_t logical_idx;  /** logical idx for streams sharing physical idx */
-    unsigned int txn_per_sec; /** txns to send per second (0 to disable) */
-    char dscp;             /** Differentiated Services Code Point (DSCP) */
+    int ttl = 1;                  /** time-to-live desired for multicast
+                                   * packets */
+    uint64_t bw = 0;              /** target throughput in bps. Set zero to
+                                   * attempt the maximum speed. */
+    int depth = 0;                /** backfill depth - no. of blocks to iterate
+                                   * over. Set zero to iterate over the full
+                                   * blockchain. */
+    int offset = 0;               /** offset within the backfill as starting
+                                   * point */
+    int interleave_size = 1;      /** determines the depth of the sub-window of
+                                   *  blocks within the backfill window whose
+                                   *  FEC chunks are interleaved (sent in
+                                   *  parallel). When set to 0, disables the
+                                   *  transmission of blocks (including relayed
+                                   *  blocks from the tip of the chain). */
+    uint16_t physical_idx = 0;    /** index of destination IP - net interface
+                                   * pair */
+    uint16_t logical_idx = 0;     /** logical idx for streams sharing physical
+                                   * idx */
+    unsigned int txn_per_sec = 0; /** txns to send per second (0 to disable) */
+    char dscp = 0;                /** Differentiated Services Code Point (DSCP) */
 };
 
 struct UDPConnectionState {
