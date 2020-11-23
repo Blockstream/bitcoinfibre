@@ -758,9 +758,10 @@ void DisconnectNode(const std::map<CService, UDPConnectionState>::iterator& it) 
     send_and_disconnect(it);
 }
 
-static void UpdateUdpMulticastRxBytes(const UDPMulticastInfo& mcast_info) {
+static void UpdateUdpMulticastRxBytes(const UDPMulticastInfo& mcast_info, const size_t rcvd_bytes)
+{
     UDPMulticastStats& stats = mcast_info.stats;
-    stats.rcvd_bytes += sizeof(UDPMessage) - 1;
+    stats.rcvd_bytes += rcvd_bytes;
 
     // Print the bit rate periodically if the required logging level is active
     if (!LogAcceptCategory(BCLog::UDPMCAST))
@@ -771,9 +772,9 @@ static void UpdateUdpMulticastRxBytes(const UDPMulticastInfo& mcast_info) {
     if (elapsed > (1000 * g_mcast_log_interval)) {
         uint64_t new_bytes = stats.rcvd_bytes - stats.last_rcvd_bytes_print;
         LogPrint(BCLog::UDPMCAST, "UDP multicast group %d: Average bit rate %7.2f Mbit/sec (%s)\n",
-                 mcast_info.group,
-                 (double) (new_bytes * 8)/ (1000 * elapsed),
-                 mcast_info.groupname);
+            mcast_info.group,
+            (double)(new_bytes * 8) / (1000 * elapsed),
+            mcast_info.groupname);
         stats.t_last_print = t_now;
         stats.last_rcvd_bytes_print = stats.rcvd_bytes;
     }
@@ -853,7 +854,7 @@ static void read_socket_func(evutil_socket_t fd, short event, void* arg) {
             if (!HandleBlockTxMessage(msg, sizeof(UDPMessage) - 1, it->first, it->second, start, fd))
                 send_and_disconnect(it);
             else
-                UpdateUdpMulticastRxBytes(mcast_info);
+                UpdateUdpMulticastRxBytes(mcast_info, res);
         } else
             LogPrintf("UDP: Unexpected message from %s!\n", it->first.ToString());
 
