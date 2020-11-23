@@ -235,18 +235,21 @@ struct UDPMulticastInfo {
                                    * blockchain. */
     int offset = 0;               /** offset within the backfill as starting
                                    * point */
-    int interleave_size = 1;      /** determines the depth of the sub-window of
+    uint32_t interleave_len = 1;  /** determines the depth of the sub-window of
                                    *  blocks within the backfill window whose
                                    *  FEC chunks are interleaved (sent in
-                                   *  parallel). When set to 0, disables the
-                                   *  transmission of blocks (including relayed
-                                   *  blocks from the tip of the chain). */
+                                   *  parallel). */
     uint16_t physical_idx = 0;    /** index of destination IP - net interface
                                    * pair */
     uint16_t logical_idx = 0;     /** logical idx for streams sharing physical
                                    * idx */
     unsigned int txn_per_sec = 0; /** txns to send per second (0 to disable) */
-    char dscp = 0;                /** Differentiated Services Code Point (DSCP) */
+    char dscp = 0;                /** Differentiated Services Code Point
+                                   * (DSCP) */
+    bool send_rep_blks = true;    /** Whether this stream should transmit
+                                   * repeated (i.e., historic) blocks */
+    bool relay_new_blks = true;   /** Whether this stream should relay new
+                                   * (i.e., recently mined) blocks */
 };
 
 struct UDPConnectionState {
