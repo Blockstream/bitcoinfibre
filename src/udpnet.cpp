@@ -509,7 +509,10 @@ static bool InitializeUDPMulticast(std::vector<int> &udp_socks,
                       "    - dscp: %u\n"
                       "    - depth: %d\n"
                       "    - offset: %d\n"
-                      "    - interleave: %d\n",
+                      "    - interleave: %u\n"
+                      "    - txn_per_sec: %u\n"
+                      "    - rep_blks: %s\n"
+                      "    - relay_blks: %s\n",
                       mcast_info.physical_idx,
                       mcast_info.logical_idx,
                       mcast_info.mcast_ip,
@@ -518,7 +521,10 @@ static bool InitializeUDPMulticast(std::vector<int> &udp_socks,
                       mcast_info.dscp,
                       mcast_info.depth,
                       mcast_info.offset,
-                      mcast_info.interleave_size);
+                      mcast_info.interleave_len,
+                      mcast_info.txn_per_sec,
+                      mcast_info.send_rep_blks ? "true" : "false",
+                      mcast_info.relay_new_blks ? "true" : "false");
         }
 
         /* Index based on multicast "addr", ifindex and logical index
@@ -1356,9 +1362,6 @@ static void MulticastBackfillThread(const CService& mcastNode,
         throw std::runtime_error("Couldn't add new block window");
     const auto pblock_window = res.first->second;
 
-    // Total number of **blocks** in parallel in the window
-    const size_t target_window_size = std::max(info->interleave_size, 1);
-
     /* Protect pblock_window->map with a mutex
      *
      * NOTE: This is the only thread that mutates the map and its
@@ -1370,7 +1373,7 @@ static void MulticastBackfillThread(const CService& mcastNode,
 
     while (!send_messages_break) {
         /* Fill FEC chunk interleaving window */
-        while ((pblock_window->map.size() < target_window_size) && (!send_messages_break)) {
+        while ((pblock_window->map.size() < info->interleave_len) && (!send_messages_break)) {
             // Add the next block to the protected block window map
             lock.lock();
             const auto res = pblock_window->map.insert(std::make_pair(pindex->nHeight, backfill_block()));
@@ -1637,8 +1640,8 @@ static void LaunchMulticastBackfillThreads() {
     for (const auto& node : mapMulticastNodes) {
         auto& info = node.second;
         if (info.tx) {
-            // Thread for transmission of FEC-coded blocks
-            if (info.interleave_size > 0) {
+            // Thread for transmission of repeated (old) FEC-coded blocks
+            if (info.send_rep_blks) {
                 mcast_tx_threads.emplace_back([&info, &node] {
                         char name[50];
                         sprintf(name, "udpblkbackfill %d-%d", info.physical_idx,
@@ -1668,15 +1671,27 @@ static void LaunchMulticastBackfillThreads() {
 }
 
 /**
- * Send a specific block chosen by height over all UDP Multicast Tx streams
+ * Send a specific block chosen by height over the UDP Multicast Tx streams
  *
  * Make sure to send different FEC chunks over each stream and send each chunk
  * through the best-effort queue (second highest in priority).
  *
  * This function is used by the "txblock" RPC call.
+ *
+ * @note: This function does not send the requested block over all multicasttx
+ * instances. Instead, it sends only over the instances enabled for relaying of
+ * new blocks (i.e., with relay_new_blks=true). The typical/expected multicast
+ * tx setup uses several non-relaying udpmulticasttx instances (typically the
+ * block repetition loops) and only one relaying instance for a given network
+ * interface. The rationale if that this configuration avoids repeating new
+ * blocks over multiple multicast tx instances that are going to the same
+ * interface. Likewise, here, to avoid repeating the requested block over
+ * multiple streams going to the same interface, send only though the
+ * udpmulticasttx instances with relay_new_blks=true.
  */
-void MulticastTxBlock(const int height) {
-    const CBlockIndex *pindex;
+void MulticastTxBlock(const int height)
+{
+    const CBlockIndex* pindex;
     {
         LOCK(cs_main);
         pindex = ::ChainActive()[height];
@@ -1687,10 +1702,11 @@ void MulticastTxBlock(const int height) {
     assert(ReadBlockFromDisk(block, pindex, Params().GetConsensus()));
 
     LogPrintf("MulticastTxBlock: sending block %s\n",
-              block.GetHash().ToString());
+        block.GetHash().ToString());
 
     for (const auto& node : multicast_nodes()) {
-        if (!node.second.tx || node.second.interleave_size <= 0)
+        // Send over the multicasttx instances enabled for block relaying
+        if (!node.second.tx || !node.second.relay_new_blks)
             continue;
 
         // Each node gets a different set of FEC chunks
@@ -1698,10 +1714,13 @@ void MulticastTxBlock(const int height) {
         UDPFillMessagesFromBlock(block, msgs, pindex->nHeight);
 
         for (const auto& msg : msgs) {
-            SendMessage(msg,
-                        sizeof(UDPMessageHeader) + sizeof(UDPBlockMessage),
-                        false /* low priority */, std::get<0>(node.first),
-                        multicast_checksum_magic, node.second.group);
+            SendMessage(
+                msg,
+                sizeof(UDPMessageHeader) + sizeof(UDPBlockMessage),
+                false /* low priority */,
+                std::get<0>(node.first),
+                multicast_checksum_magic,
+                node.second.group);
         }
     }
 }
@@ -1799,8 +1818,14 @@ static bool ParseUDPMulticastTxOpt(UDPMulticastInfo& info,
             error = "offset must be >= 0\n";
     } else if (opt == "dscp") {
         info.dscp = atoi(value);
-    } else if (opt == "interleave_size") {
-        info.interleave_size = atoi(value);
+    } else if (opt == "interleave_len") {
+        info.interleave_len = atoi(value);
+        if (info.interleave_len < 1)
+            error = "interleave_len must be >= 1";
+    } else if (opt == "send_rep_blks") {
+        info.send_rep_blks = (value == "true" || value == "1");
+    } else if (opt == "relay_new_blks") {
+        info.relay_new_blks = (value == "true" || value == "1");
     } else {
         error = "unknown option";
     }
