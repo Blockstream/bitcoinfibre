@@ -610,7 +610,7 @@ void UDPFillMessagesFromBlock(const CBlock& block, std::vector<UDPMessage>& msgs
     VectorOutputStream stream(&header_data, SER_NETWORK, PROTOCOL_VERSION);
     stream << headerAndIDs;
     const size_t n_header_chunks = DIV_CEIL(header_data.size(), FEC_CHUNK_SIZE);
-    const size_t header_overhead = base_overhead + (overhead * n_header_chunks);
+    const size_t header_overhead = base_overhead + std::round(overhead * n_header_chunks);
     const size_t n_header_fec_chunks = n_header_chunks + header_overhead;
     DataFECer header_fecer(header_data, n_header_fec_chunks);
     /* NOTE: the block header will typically be encoded by cm256, due to its
@@ -645,7 +645,7 @@ void UDPFillMessagesFromBlock(const CBlock& block, std::vector<UDPMessage>& msgs
     ChunkCodedBlock codedBlock(block, headerAndIDs);
     const std::vector<unsigned char>& chunk_coded_block = codedBlock.GetCodedBlock();
     const size_t n_block_chunks = DIV_CEIL(chunk_coded_block.size(), FEC_CHUNK_SIZE);
-    const size_t block_overhead = base_overhead + (overhead * n_block_chunks);
+    const size_t block_overhead = base_overhead + std::round(overhead * n_block_chunks);
     const size_t n_block_fec_chunks = n_block_chunks + block_overhead;
     /* NOTE: on average wirehair needs about 0.02 chunks of overhead to recover,
      * meaning most often it doesn't need overhead at all. Again, we add
