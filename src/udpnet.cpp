@@ -512,7 +512,8 @@ static bool InitializeUDPMulticast(std::vector<int> &udp_socks,
                       "    - interleave: %u\n"
                       "    - txn_per_sec: %u\n"
                       "    - rep_blks: %s\n"
-                      "    - relay_blks: %s\n",
+                      "    - relay_blks: %s\n"
+                      "    - overhead_rep_blks: %d + %.2f%%\n",
                       mcast_info.physical_idx,
                       mcast_info.logical_idx,
                       mcast_info.mcast_ip,
@@ -524,7 +525,9 @@ static bool InitializeUDPMulticast(std::vector<int> &udp_socks,
                       mcast_info.interleave_len,
                       mcast_info.txn_per_sec,
                       mcast_info.send_rep_blks ? "true" : "false",
-                      mcast_info.relay_new_blks ? "true" : "false");
+                      mcast_info.relay_new_blks ? "true" : "false",
+                      mcast_info.overhead_rep_blks.fixed,
+                      (100 * mcast_info.overhead_rep_blks.variable));
         }
 
         /* Index based on multicast "addr", ifindex and logical index
@@ -1395,7 +1398,11 @@ static void MulticastBackfillThread(const CService& mcastNode,
                 // Fill the FEC messages on this backfill block within the
                 // protected window of blocks
                 lock.lock();
-                UDPFillMessagesFromBlock(block, block_it->second.msgs, pindex->nHeight);
+                UDPFillMessagesFromBlock(block,
+                    block_it->second.msgs,
+                    pindex->nHeight,
+                    info->overhead_rep_blks.fixed,
+                    info->overhead_rep_blks.variable);
                 pblock_window->bytes_in_window += block_it->second.msgs.size() * FEC_CHUNK_SIZE;
                 lock.unlock(); // safe to release (no other thread mutates the map)
 
@@ -1712,7 +1719,9 @@ void MulticastTxBlock(const int height)
 
         // Each node gets a different set of FEC chunks
         std::vector<UDPMessage> msgs;
-        UDPFillMessagesFromBlock(block, msgs, pindex->nHeight);
+        UDPFillMessagesFromBlock(block, msgs, pindex->nHeight,
+            node.second.overhead_rep_blks.fixed,
+            node.second.overhead_rep_blks.variable);
 
         for (const auto& msg : msgs) {
             SendMessage(
@@ -1827,6 +1836,17 @@ static bool ParseUDPMulticastTxOpt(UDPMulticastInfo& info,
         info.send_rep_blks = (value == "true" || value == "1");
     } else if (opt == "relay_new_blks") {
         info.relay_new_blks = (value == "true" || value == "1");
+    } else if (opt == "overhead_rep_blks") {
+        const size_t pos = value.find(',');
+        if (pos == std::string::npos)
+            error = "overhead should be specified in \'fixed,variable\' format";
+        else {
+            // Assume the fixed overhead is given as an integer number, and that
+            // the variable overhead is in "parts per thousand". With that,
+            // avoid the locale dependent conversion provided by atof().
+            info.overhead_rep_blks.fixed = atoi(value.substr(0, pos));
+            info.overhead_rep_blks.variable = atoi(value.substr(pos + 1)) / 1000.0;
+        }
     } else {
         error = "unknown option";
     }

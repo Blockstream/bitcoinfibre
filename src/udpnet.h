@@ -212,6 +212,11 @@ struct UDPMulticastStats {
     std::chrono::steady_clock::time_point t_last_rpc = std::chrono::steady_clock::now();
 };
 
+struct FecOverhead {
+    size_t fixed;
+    double variable;
+};
+
 struct UDPMulticastInfo {
     char ifname[IFNAMSIZ] = {0};          /** network interface name */
     char mcast_ip[INET_ADDRSTRLEN] = {0}; /** multicast IPv4 address */
@@ -250,6 +255,9 @@ struct UDPMulticastInfo {
                                    * repeated (i.e., historic) blocks */
     bool relay_new_blks = true;   /** Whether this stream should relay new
                                    * (i.e., recently mined) blocks */
+    FecOverhead overhead_rep_blks = {60, 0.05}; /** Overhead applied when
+                                                 * FEC-encoding repeated
+                                                 * (historic) blocks */
 };
 
 struct UDPConnectionState {
