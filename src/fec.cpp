@@ -16,7 +16,6 @@
 
 #define DIV_CEIL(a, b) (((a) + (b) - 1) / (b))
 
-#define FEC_CHUNK_COUNT_MAX (1 << 24)
 #define CHUNK_COUNT_USES_CM256(chunks) ((chunks) <= CM256_MAX_CHUNKS)
 
 #define CACHE_STATES_COUNT 5
@@ -415,7 +414,8 @@ FECEncoder::~FECEncoder() {
  *
  */
 bool FECEncoder::BuildChunk(size_t vector_idx, bool overwrite) {
-    assert(vector_idx < fec_chunks->second.size());
+    if (vector_idx >= fec_chunks->second.size())
+         throw std::runtime_error("Invalid vector_idx");
 
     if (!overwrite && fec_chunks->second[vector_idx])
         return true;
