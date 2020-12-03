@@ -13,6 +13,7 @@
 
 #define FEC_CHUNK_SIZE 1152
 #define CM256_MAX_CHUNKS 27
+#define FEC_CHUNK_COUNT_MAX (1 << 24)
 
 #include "wirehair/wirehair.h"
 #include "wirehair/cm256.h"
@@ -146,6 +147,7 @@ public:
     const void* GetDataPtr(uint32_t chunk_id); // Only valid until called again
     size_t GetChunkCount() const { return chunk_count; }
     size_t GetChunksRcvd() const { return chunks_recvd; }
+    fs::path GetFileName() const { return filename; }
 };
 
 bool BuildFECChunks(const std::vector<unsigned char>& data, std::pair<std::unique_ptr<FECChunkType[]>, std::vector<uint32_t>>& fec_chunks);
