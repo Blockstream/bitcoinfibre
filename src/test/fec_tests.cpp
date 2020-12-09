@@ -2,6 +2,7 @@
 // unit_test.hpp needs to be included before test_case.hpp
 #include <boost/test/unit_test.hpp>
 #include <boost/test/data/test_case.hpp>
+#include <boost/test/data/monomorphic.hpp>
 // clang-format on
 #include <fec.h>
 #include <memory>
@@ -9,6 +10,8 @@
 #include <test/setup_common.h>
 #include <util/memory.h>
 #include <util/system.h>
+
+namespace bdata = boost::unit_test::data;
 
 static const std::array<MemoryUsageMode, 2> MEMORY_USAGE_TYPE{MemoryUsageMode::USE_MMAP, MemoryUsageMode::USE_MEMORY};
 
@@ -58,8 +61,7 @@ bool generate_encoded_chunks(size_t block_size, TestData& test_data, size_t n_ov
     FECEncoder block_encoder(&test_data.original_data, &block_fec_chunks);
 
     for (size_t vector_idx = 0; vector_idx < total_encoded_chunks; vector_idx++) {
-        // build the chunk and make sure chunk_id is set correctly afterwards
-        if (!block_encoder.BuildChunk(vector_idx) || block_fec_chunks.second[vector_idx] == 0) {
+        if (!block_encoder.BuildChunk(vector_idx)) {
             return false;
         }
         std::vector<unsigned char> fec_chunk(FEC_CHUNK_SIZE);
@@ -309,10 +311,7 @@ void providechunk_test(MemoryUsageMode memory_usage_type, size_t n_uncoded_chunk
 
     if (expected_result) {
         BOOST_CHECK(decoder.DecodeReady());
-        std::vector<unsigned char> decoded_data(data_size);
-        for (size_t i = 0; i < n_uncoded_chunks; i++)
-            memcpy(&decoded_data[i * FEC_CHUNK_SIZE], decoder.GetDataPtr(i), FEC_CHUNK_SIZE);
-
+        std::vector<unsigned char> decoded_data = decoder.GetDecodedData();
         BOOST_CHECK_EQUAL(decoded_data.size(), test_data.original_data.size());
         BOOST_CHECK_EQUAL_COLLECTIONS(decoded_data.begin(), decoded_data.end(),
             test_data.original_data.begin(), test_data.original_data.end());
@@ -469,9 +468,7 @@ BOOST_AUTO_TEST_CASE(fec_test_decoding_multiple_blocks_in_parallel)
     bool all_decoded_successfully = true;
     for (size_t i = 0; i < n_decoders; i++) {
         BOOST_ASSERT(decoders_vec[i]->DecodeReady());
-        std::vector<unsigned char> decoded_data(data_size);
-        for (size_t j = 0; j < n_uncoded_chunks; j++)
-            memcpy(&decoded_data[j * FEC_CHUNK_SIZE], decoders_vec[i]->GetDataPtr(j), FEC_CHUNK_SIZE);
+        std::vector<unsigned char> decoded_data = decoders_vec[i]->GetDecodedData();
 
         BOOST_ASSERT(decoded_data.size() == test_data_vec[i].original_data.size());
 
@@ -586,6 +583,43 @@ BOOST_AUTO_TEST_CASE(fec_test_map_storage_insert)
         BOOST_CHECK_EQUAL(12, map_storage.GetChunkId(4));
         BOOST_CHECK_EQUAL(123, map_storage.GetChunkId(0));
     }
+}
+
+BOOST_DATA_TEST_CASE_F(BasicTestingSetup, fec_test_decoding_getdataptr, bdata::make({1, 2, CM256_MAX_CHUNKS, CM256_MAX_CHUNKS + 10}) * MEMORY_USAGE_TYPE, n_uncoded_chunks, memory_usage_type)
+{
+    // Random test data that does not fill n_uncoded_chunks exactly (padded)
+    TestData test_data;
+    size_t data_size = FEC_CHUNK_SIZE * n_uncoded_chunks - (FEC_CHUNK_SIZE / 2);
+    BOOST_CHECK(generate_encoded_chunks(data_size, test_data, default_encoding_overhead));
+    size_t n_encoded_chunks = test_data.encoded_chunks.size();
+
+    // Provide chunks into the FEC Decoder
+    FECDecoder decoder(data_size, memory_usage_type);
+    for (size_t i = 0; i < n_encoded_chunks; i++) {
+        decoder.ProvideChunk(test_data.encoded_chunks[i].data(), test_data.chunk_ids[i]);
+    }
+    BOOST_CHECK(decoder.DecodeReady());
+
+    // Get the decoded data using GetDecodedData
+    std::vector<unsigned char> decoded_data = decoder.GetDecodedData();
+
+    // Get the decoded data using GetDataPtr
+    // NOTE: there are two options when using GetDataPtr:
+    //   1) Allocate data_size on the resulting std::vector<unsigned char> and
+    //   memcpy the last chunk while considering the padding.
+    //   2) Allocate enough space to copy full n_uncoded_chunks chunks. Then,
+    //   consider only decoded_data2[0] to decoded_data2[data_size-1].
+    // Use the second approach in the sequel.
+    std::vector<unsigned char> decoded_data2(n_uncoded_chunks * FEC_CHUNK_SIZE);
+    for (size_t i = 0; i < (size_t)n_uncoded_chunks; i++)
+        memcpy(&decoded_data2[i * FEC_CHUNK_SIZE], decoder.GetDataPtr(i), FEC_CHUNK_SIZE);
+
+    // Compare both to the original
+    BOOST_CHECK_EQUAL(decoded_data.size(), test_data.original_data.size());
+    BOOST_CHECK_EQUAL_COLLECTIONS(decoded_data.begin(), decoded_data.end(),
+        test_data.original_data.begin(), test_data.original_data.end());
+    BOOST_CHECK_EQUAL_COLLECTIONS(decoded_data2.begin(), decoded_data2.begin() + data_size,
+        test_data.original_data.begin(), test_data.original_data.end());
 }
 
 BOOST_AUTO_TEST_SUITE_END()

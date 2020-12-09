@@ -729,15 +729,7 @@ static void ProcessBlockThread() {
                 if (fBench)
                     decode_start = std::chrono::steady_clock::now();
 
-                const uint32_t n_header_chunks = DIV_CEIL(block.header_len, sizeof(UDPBlockMessage::data));
-
-                std::vector<unsigned char> header_data(n_header_chunks * sizeof(UDPBlockMessage::data));
-
-                for (uint32_t i = 0; i < n_header_chunks; i++) {
-                    const void* data_ptr = block.header_decoder.GetDataPtr(i);
-                    assert(data_ptr);
-                    memcpy(&header_data[i * sizeof(UDPBlockMessage::data)], data_ptr, sizeof(UDPBlockMessage::data));
-                }
+                std::vector<unsigned char> header_data = block.header_decoder.GetDecodedData();
 
                 std::chrono::steady_clock::time_point data_copied;
                 if (fBench)
@@ -1160,13 +1152,7 @@ static bool HandleTx(UDPMessage& msg, size_t length, const CService& node, UDPCo
     }
 
     if (state.tx_in_flight->DecodeReady()) {
-        std::vector<unsigned char> tx_data(msg.msg.block.obj_length);
-
-        for (size_t i = 0; i < DIV_CEIL(tx_data.size(), FEC_CHUNK_SIZE); i++) {
-            const void* chunk = state.tx_in_flight->GetDataPtr(i);
-            assert(chunk);
-            memcpy(tx_data.data() + i * FEC_CHUNK_SIZE, chunk, std::min(tx_data.size() - i * FEC_CHUNK_SIZE, (size_t)FEC_CHUNK_SIZE));
-        }
+        std::vector<unsigned char> tx_data = state.tx_in_flight->GetDecodedData();
 
         try {
             VectorInputStream stream(&tx_data, SER_NETWORK, PROTOCOL_VERSION);
