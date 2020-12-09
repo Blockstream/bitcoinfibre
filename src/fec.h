@@ -187,6 +187,7 @@ public:
     bool HasChunk(uint32_t chunk_id);
     bool DecodeReady() const;
     const void* GetDataPtr(uint32_t chunk_id); // Only valid until called again
+    std::vector<unsigned char> GetDecodedData();
     size_t GetChunkCount() const { return chunk_count; }
     size_t GetChunksRcvd() const { return chunks_recvd; }
     fs::path GetFileName() const { return filename; }

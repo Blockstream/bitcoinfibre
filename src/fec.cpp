@@ -375,6 +375,28 @@ const void* FECDecoder::GetDataPtr(uint32_t chunk_id)
     return &tmp_chunk;
 }
 
+std::vector<unsigned char> FECDecoder::GetDecodedData()
+{
+    assert(DecodeReady());
+    std::vector<unsigned char> vec(obj_size);
+    if (chunk_count == 1) {
+        memcpy(vec.data(), &tmp_chunk, obj_size);
+    } else if (CHUNK_COUNT_USES_CM256(chunk_count)) {
+        for (uint32_t i = 0; i < chunk_count; i++) {
+            const void* data_ptr = GetDataPtr(i);
+            assert(data_ptr);
+            size_t size_remaining = obj_size - (i * FEC_CHUNK_SIZE);
+            memcpy(vec.data() + (i * FEC_CHUNK_SIZE), data_ptr, std::min(size_remaining, (size_t)FEC_CHUNK_SIZE));
+        }
+    } else {
+        WirehairResult decode_res = wirehair_recover(wirehair_decoder, vec.data(), obj_size);
+        if (decode_res != Wirehair_Success) {
+            throw std::runtime_error("Wirehair decoding failed");
+        }
+    }
+    return vec;
+}
+
 void FECDecoder::DecodeCm256()
 {
     assert(!cm256_decoded);
