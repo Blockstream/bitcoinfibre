@@ -16,9 +16,11 @@
 
 #define DIV_CEIL(a, b) (((a) + (b) - 1) / (b))
 
-#define CHUNK_COUNT_USES_CM256(chunks) ((chunks) <= CM256_MAX_CHUNKS)
+#define CHUNK_COUNT_USES_CM256(chunks) ((chunks) >= 2 && (chunks) <= CM256_MAX_CHUNKS)
+#define CHUNK_COUNT_USES_WIREHAIR(chunks) ((chunks) > CM256_MAX_CHUNKS)
 
 #define CACHE_STATES_COUNT 5
+
 
 static std::atomic<WirehairCodec> cache_states[CACHE_STATES_COUNT];
 static inline WirehairCodec get_wirehair_codec() {
@@ -67,49 +69,84 @@ T* exchange(T*& var, nullptr_t)
     var = nullptr;
     return tmp;
 }
+}
 
-struct map_storage
+
+MapStorage::MapStorage(boost::filesystem::path const& p, int const c, bool create) :
+    m_chunk_count(c),
+    m_file_size((CHUNK_ID_SIZE + FEC_CHUNK_SIZE) * c)
 {
-    map_storage(boost::filesystem::path const& p, int const c) :
-        chunk_count(c)
-    {
-        chunk_file = ::open(p.c_str(), O_RDWR, 0755);
-        if (chunk_file == -1) {
-            throw std::runtime_error("failed to open file: "
-                + p.string() + " " + ::strerror(errno));
-        }
-
-        chunk_storage = static_cast<char*>(::mmap(nullptr, FEC_CHUNK_SIZE * chunk_count,
-            PROT_READ | PROT_WRITE, MAP_SHARED, chunk_file, 0));
-        if (chunk_storage == MAP_FAILED) {
-            ::close(chunk_file);
-            throw std::runtime_error("mmap failed " + p.string()
-                + " " + ::strerror(errno));
-        }
+    if (create) {
+        fs::create_directories(p.parent_path());
     }
 
-    map_storage(map_storage&& ms) noexcept :
-        chunk_count(ms.chunk_count),
-        chunk_file(exchange(ms.chunk_file, -1)),
-        chunk_storage(exchange(ms.chunk_storage, nullptr))
-    {}
-
-    ~map_storage()
-    {
-      if (chunk_storage != nullptr)
-          ::munmap(chunk_storage, FEC_CHUNK_SIZE * chunk_count);
-      if (chunk_file != -1)
-          ::close(chunk_file);
+    const int flags = create ? (O_RDWR | O_CREAT) : O_RDWR;
+    m_chunk_file = ::open(p.c_str(), flags, 0755);
+    if (m_chunk_file == -1) {
+        throw std::runtime_error("failed to open file: " + p.string() + " " + ::strerror(errno));
     }
 
-    char* storage() const { return chunk_storage; }
+    if (create) {
+        int const ret = ::ftruncate(m_chunk_file, (CHUNK_ID_SIZE + FEC_CHUNK_SIZE) * m_chunk_count);
+        if (ret != 0) {
+            ::unlink(p.c_str());
+            throw std::runtime_error("ftruncate failed " + p.string() + " " + ::strerror(errno));
+        }
+    } else {
+        m_data_storage = static_cast<char*>(::mmap(nullptr, m_file_size,
+            PROT_READ | PROT_WRITE, MAP_SHARED, m_chunk_file, 0));
+        if (m_data_storage == MAP_FAILED) {
+            ::close(m_chunk_file);
+            throw std::runtime_error("mmap failed " + p.string() + " " + ::strerror(errno));
+        }
+        m_id_storage = m_data_storage + (m_chunk_count * FEC_CHUNK_SIZE);
+    }
+}
 
-private:
-    int chunk_count;
-    int chunk_file = -1;
-    char* chunk_storage = nullptr;
-};
+MapStorage::MapStorage(MapStorage&& ms) noexcept :
+    m_chunk_count(ms.m_chunk_count),
+    m_chunk_file(exchange(ms.m_chunk_file, -1)),
+    m_data_storage(exchange(ms.m_data_storage, nullptr))
+{}
 
+void MapStorage::Insert(const unsigned char* chunk, uint32_t chunk_id, size_t idx)
+{
+    memcpy(GetChunk(idx), chunk, FEC_CHUNK_SIZE);
+
+    // store chunk_id at the end of the file
+    auto const chunk_id_dest_ptr = m_id_storage + (idx * CHUNK_ID_SIZE);
+    memcpy(chunk_id_dest_ptr, &chunk_id, CHUNK_ID_SIZE);
+}
+
+char* MapStorage::GetChunk(size_t idx) const
+{
+    if (idx < m_chunk_count) {
+        return m_data_storage + (idx * FEC_CHUNK_SIZE);
+    }
+    throw std::runtime_error("Invalid chunk index: " + idx);
+}
+
+uint32_t MapStorage::GetChunkId(size_t idx) const
+{
+    if (idx < m_chunk_count) {
+        uint32_t chunk_id = 0;
+        memcpy(&chunk_id, m_id_storage + (idx * CHUNK_ID_SIZE), CHUNK_ID_SIZE);
+        return chunk_id;
+    }
+    throw std::runtime_error("Invalid chunk id index: " + idx);
+}
+
+size_t MapStorage::Size() const
+{
+    return m_file_size;
+}
+
+MapStorage::~MapStorage()
+{
+    if (m_data_storage != nullptr)
+        ::munmap(m_data_storage, m_file_size);
+    if (m_chunk_file != -1)
+        ::close(m_chunk_file);
 }
 
 FECDecoder::FECDecoder() :
@@ -117,34 +154,27 @@ FECDecoder::FECDecoder() :
 {
 }
 
-FECDecoder::FECDecoder(size_t const data_size) :
+FECDecoder::FECDecoder(size_t const data_size, MemoryUsageMode memory_mode) :
         chunk_count(DIV_CEIL(data_size, FEC_CHUNK_SIZE)),
         obj_size(data_size),
         chunk_tracker(chunk_count),
-        filename(compute_filename())
+        memory_usage_mode(memory_mode)
 {
     if (chunk_count < 2)
         return;
 
-    filename = compute_filename();
-    boost::system::error_code ignore;
-    fs::create_directories(filename.parent_path(), ignore);
-    int const chunk_file = ::open(filename.c_str(), O_RDWR | O_CREAT, 0755);
-    if (chunk_file == -1) {
-        throw std::runtime_error("failed to open file: "
-            + filename.string() + " " + ::strerror(errno));
+    if (memory_usage_mode == MemoryUsageMode::USE_MMAP) {
+        filename = compute_filename();
+        MapStorage map_storage(filename, chunk_count, true /* create */);
+        owns_file = true;
+    } else {
+        if (CHUNK_COUNT_USES_CM256(chunk_count)) {
+            cm256_chunks.reserve(chunk_count);
+        } else {
+            wirehair_decoder = wirehair_decoder_create(get_wirehair_codec(), data_size, FEC_CHUNK_SIZE);
+            assert(wirehair_decoder);
+        }
     }
-    int const ret = ::ftruncate(chunk_file, FEC_CHUNK_SIZE * chunk_count);
-    if (ret != 0) {
-        ::close(chunk_file);
-        ::unlink(filename.c_str());
-        throw std::runtime_error("ftruncate failed " + filename.string()
-            + " " + ::strerror(errno));
-    }
-    ::close(chunk_file);
-    owns_file = true;
-
-    chunk_ids.reserve(chunk_count);
 }
 
 fs::path FECDecoder::compute_filename() const
@@ -164,22 +194,33 @@ FECDecoder& FECDecoder::operator=(FECDecoder&& decoder) noexcept {
     decodeComplete    = decoder.decodeComplete;
     chunk_tracker     = std::move(decoder.chunk_tracker);
     owns_file         = exchange(decoder.owns_file, false);
+    memory_usage_mode = decoder.memory_usage_mode;
     cm256_map         = std::move(decoder.cm256_map);
-    chunk_ids         = std::move(decoder.chunk_ids);
+    cm256_decoded     = exchange(decoder.cm256_decoded, false);
+    cm256_chunks      = std::move(decoder.cm256_chunks);
     if (owns_file) {
         fs::rename(decoder.filename, filename);
     }
-    cm256_decoded    = exchange(decoder.cm256_decoded, false);
     tmp_chunk        = decoder.tmp_chunk;
     wirehair_decoder = exchange(decoder.wirehair_decoder, nullptr);
+
+    // In mmap mode, cm256_blocks are populated within DecodeCm256Mmap, when the
+    // object is already decodable. In contrast, in memory mode, cm256_blocks
+    // are populated on every call to ProvideChunkMemory().
+    if (memory_usage_mode == MemoryUsageMode::USE_MEMORY || cm256_decoded) {
+        memcpy(cm256_blocks, decoder.cm256_blocks, sizeof(cm256_block) * decoder.chunks_recvd);
+    }
+
     return *this;
 }
 
 void FECDecoder::remove_file()
 {
-    map_storage s(filename, chunk_count);
-    ::madvise(s.storage(), FEC_CHUNK_SIZE * chunk_count, MADV_REMOVE);
-    ::unlink(filename.c_str());
+    if (memory_usage_mode == MemoryUsageMode::USE_MMAP) {
+        MapStorage map_storage(filename, chunk_count);
+        ::madvise(map_storage.GetStorage(), map_storage.Size(), MADV_REMOVE);
+        ::unlink(filename.c_str());
+    }
     owns_file = false;
 }
 
@@ -205,59 +246,97 @@ bool FECDecoder::ProvideChunk(const unsigned char* const chunk, uint32_t const c
     if (chunk_count < 2) { // For 1-packet data, just send it repeatedly...
         memcpy(&tmp_chunk, chunk, FEC_CHUNK_SIZE);
         decodeComplete = true;
-    } else {
-        map_storage s(filename, chunk_count);
-        char* chunk_storage = s.storage();
+        return true;
+    }
 
-        // both wirehair and cm256 need chunk_count chunks, so regardless of
-        // which decoder we use, fill our chunk storage
-        if (chunks_recvd < chunk_count) {
-            auto const dest_ptr = chunk_storage + (chunks_recvd * FEC_CHUNK_SIZE);
-            memcpy(dest_ptr, chunk, FEC_CHUNK_SIZE);
-            chunk_ids.push_back(chunk_id);
+    if (memory_usage_mode == MemoryUsageMode::USE_MMAP) {
+        return ProvideChunkMmap(chunk, chunk_id);
+    } else {
+        return ProvideChunkMemory(chunk, chunk_id);
+    }
+}
+
+
+bool FECDecoder::ProvideChunkMmap(const unsigned char* chunk, uint32_t chunk_id)
+{
+    MapStorage map_storage(filename, chunk_count);
+
+    // both wirehair and cm256 need chunk_count chunks, so regardless of
+    // which decoder we use, fill our chunk storage
+    if (chunks_recvd < chunk_count) {
+        map_storage.Insert(chunk, chunk_id, chunks_recvd);
+    }
+
+    // CM256 is an MDS code. Hence, as soon as chunk_count chunks are available,
+    // the CM256-encoded object is guaranteed to be decodable already. In
+    // contrast, wirehair is not MDS and may need a few extra chunks.
+    if (CHUNK_COUNT_USES_CM256(chunk_count)) {
+        if (chunk_count == chunks_recvd + 1) {
+            decodeComplete = true;
         }
-        if (CHUNK_COUNT_USES_CM256(chunk_count)) {
-            if (chunk_count == chunks_recvd + 1)
-                decodeComplete = true;
-        } else {
-            if (chunks_recvd + 1 == chunk_count) {
-                // This was the "last" chunk. Now try to decode them!
-                // this will potentially pull chunks back in from disk
-                wirehair_decoder = wirehair_decoder_create(get_wirehair_codec(), obj_size, FEC_CHUNK_SIZE);
-                assert(wirehair_decoder);
-                assert(chunk_ids.size() == chunk_count);
-                for (size_t i = 0; i < chunk_count; ++i) {
-                    const WirehairResult decode_res = wirehair_decode(wirehair_decoder
-                        , chunk_ids[i], chunk_storage + i * FEC_CHUNK_SIZE, FEC_CHUNK_SIZE);
-                    if (decode_res == Wirehair_Success) {
-                        decodeComplete = true;
-                        break;
-                    }
-                    else if (decode_res != Wirehair_NeedMore) {
-                        LogPrintf("wirehair_decode failed: %s\n", wirehair_result_string(decode_res));
-                    }
-                }
-            }
-            else if (chunks_recvd >= chunk_count) {
-                // if we've received chunk_count chunks already, we will have
-                // tried to decode. If we get here it means we failed to decode,
-                // but we've already put everything in RAM, so we might as well
-                // continue trying to decode as we go now. No need to use
-                // chunk_storage
-                assert(wirehair_decoder);
-                const WirehairResult decode_res = wirehair_decode(wirehair_decoder
-                    , chunk_id, (void*)chunk, FEC_CHUNK_SIZE);
+    } else {
+        if (chunks_recvd + 1 == chunk_count) {
+            // This was the "last" chunk. Now try to decode them!
+            // this will potentially pull chunks back in from disk
+            wirehair_decoder = wirehair_decoder_create(get_wirehair_codec(), obj_size, FEC_CHUNK_SIZE);
+            assert(wirehair_decoder);
+
+            for (size_t i = 0; i < chunk_count; ++i) {
+                const WirehairResult decode_res = wirehair_decode(wirehair_decoder, map_storage.GetChunkId(i), map_storage.GetChunk(i), FEC_CHUNK_SIZE);
                 if (decode_res == Wirehair_Success) {
                     decodeComplete = true;
-                }
-                else if (decode_res != Wirehair_NeedMore) {
+                    break;
+                } else if (decode_res != Wirehair_NeedMore) {
                     LogPrintf("wirehair_decode failed: %s\n", wirehair_result_string(decode_res));
+                    return false;
                 }
+            }
+        } else if (chunks_recvd >= chunk_count) {
+            // if we've received chunk_count chunks already, we will have
+            // tried to decode. If we get here it means we failed to decode,
+            // but we've already put everything in RAM, so we might as well
+            // continue trying to decode as we go now. No need to use
+            // chunk_storage
+            assert(wirehair_decoder);
+            const WirehairResult decode_res = wirehair_decode(wirehair_decoder, chunk_id, (void*)chunk, FEC_CHUNK_SIZE);
+            if (decode_res == Wirehair_Success) {
+                decodeComplete = true;
+            } else if (decode_res != Wirehair_NeedMore) {
+                LogPrintf("wirehair_decode failed: %s\n", wirehair_result_string(decode_res));
+                return false;
             }
         }
     }
+
     ++chunks_recvd;
 
+    return true;
+}
+
+
+bool FECDecoder::ProvideChunkMemory(const unsigned char* chunk, uint32_t chunk_id)
+{
+    if (CHUNK_COUNT_USES_CM256(chunk_count)) {
+        cm256_chunks.emplace_back();
+        memcpy(&cm256_chunks.back(), chunk, FEC_CHUNK_SIZE);
+        cm256_blocks[chunks_recvd].Block = &cm256_chunks.back();
+        cm256_blocks[chunks_recvd].Index = (uint8_t)chunk_id;
+        if (chunk_count == chunks_recvd + 1){
+            decodeComplete = true;
+        }
+    } else {
+        const WirehairResult decode_res = wirehair_decode(wirehair_decoder, chunk_id, (void*)chunk, FEC_CHUNK_SIZE);
+        if (decode_res == Wirehair_Success)
+            decodeComplete = true;
+        else {
+            if (decode_res != Wirehair_NeedMore) {
+                LogPrintf("wirehair_decode failed: %s\n", wirehair_result_string(decode_res));
+                return false;
+            }
+        }
+    }
+
+    chunks_recvd++;
     return true;
 }
 
@@ -272,55 +351,76 @@ bool FECDecoder::DecodeReady() const {
     return decodeComplete;
 }
 
-const void* FECDecoder::GetDataPtr(uint32_t chunk_id) {
+const void* FECDecoder::GetDataPtr(uint32_t chunk_id)
+{
     assert(DecodeReady());
     assert(chunk_id < chunk_count);
-    if (chunk_count >= 2) {
-        if (CHUNK_COUNT_USES_CM256(chunk_count)) {
-            map_storage s(filename, chunk_count);
-            char* chunk_storage = s.storage();
-            if (!cm256_decoded) {
-                assert(chunk_ids.size() == chunk_count);
-                assert(chunk_count <= CM256_MAX_CHUNKS);
-                assert(chunk_id <= CM256_MAX_CHUNKS);
-
-                // Fill in cm256 chunks in the order they were received. These
-                // can consist of both original and recovery chunks.
-                cm256_block cm256_blocks[CM256_MAX_CHUNKS];
-                for (size_t i = 0; i < chunk_count; ++i) {
-                    cm256_blocks[i].Block = chunk_storage + (FEC_CHUNK_SIZE * i);
-                    cm256_blocks[i].Index = (uint8_t)chunk_ids[i];
-                }
-
-                cm256_encoder_params params { (int)chunk_count, (256 - (int)chunk_count - 1), FEC_CHUNK_SIZE };
-                assert(!cm256_decode(params, cm256_blocks));
-                cm256_map.resize(chunk_count);
-                // After decoding, the cm256_blocks should not contain recovery
-                // chunks anymore. Instead, they should contain the original
-                // (decoded) chunks, so that their Index (chunk id) and Block
-                // (pointer) fields should correspond, respectively, to the
-                // original chunk id and the original data decoded in place
-                // within the chunk_storage. However, the order of cm256_blocks
-                // may not be sorted, so map each decoded chunk index to the
-                // corresponding index in the storage.
-                for (size_t i = 0; i < chunk_count; ++i) {
-                    auto const& b = cm256_blocks[i];
-                    assert(b.Index < CM256_MAX_CHUNKS);
-                    cm256_map[b.Index] = (static_cast<char*>(b.Block) - chunk_storage) / FEC_CHUNK_SIZE;
-                }
-                cm256_decoded = true;
-            }
+    if (CHUNK_COUNT_USES_CM256(chunk_count)) {
+        if (!cm256_decoded) {
+            DecodeCm256();
+        }
+        if (memory_usage_mode == MemoryUsageMode::USE_MMAP) {
             assert(chunk_id < cm256_map.size());
             assert(cm256_map[chunk_id] < chunk_count);
-            memcpy(&tmp_chunk, chunk_storage + cm256_map[chunk_id] * FEC_CHUNK_SIZE, FEC_CHUNK_SIZE);
+            MapStorage map_storage(filename, chunk_count);
+            memcpy(&tmp_chunk, map_storage.GetChunk(cm256_map[chunk_id]), FEC_CHUNK_SIZE);
         } else {
-            uint32_t chunk_size = FEC_CHUNK_SIZE;
-            assert(!wirehair_recover_block(wirehair_decoder, chunk_id, (void*)&tmp_chunk, &chunk_size));
+            assert(cm256_blocks[uint8_t(chunk_id)].Index == chunk_id);
+            return cm256_blocks[uint8_t(chunk_id)].Block;
         }
+    } else if (CHUNK_COUNT_USES_WIREHAIR(chunk_count)) {
+        uint32_t chunk_size = FEC_CHUNK_SIZE;
+        assert(!wirehair_recover_block(wirehair_decoder, chunk_id, (void*)&tmp_chunk, &chunk_size));
     }
     return &tmp_chunk;
 }
 
+void FECDecoder::DecodeCm256()
+{
+    assert(!cm256_decoded);
+    if (memory_usage_mode == MemoryUsageMode::USE_MMAP) {
+        DecodeCm256Mmap();
+    } else {
+        DecodeCm256Memory();
+    }
+    cm256_decoded = true;
+}
+
+void FECDecoder::DecodeCm256Memory()
+{
+    cm256_encoder_params params{(int)chunk_count, (256 - (int)chunk_count - 1), FEC_CHUNK_SIZE};
+    assert(!cm256_decode(params, cm256_blocks));
+    std::sort(cm256_blocks, &cm256_blocks[chunk_count], [](const cm256_block& a, const cm256_block& b) { return a.Index < b.Index; });
+}
+
+void FECDecoder::DecodeCm256Mmap()
+{
+    MapStorage map_storage(filename, chunk_count);
+    char* chunk_storage = map_storage.GetStorage();
+
+    // Fill in cm256 chunks in the order they were received. These
+    // can consist of both original and recovery chunks.
+    for (size_t i = 0; i < chunk_count; ++i) {
+        cm256_blocks[i].Block = map_storage.GetChunk(i);
+        cm256_blocks[i].Index = (uint8_t)map_storage.GetChunkId(i);
+    }
+    cm256_encoder_params params{(int)chunk_count, (256 - (int)chunk_count - 1), FEC_CHUNK_SIZE};
+    assert(!cm256_decode(params, cm256_blocks));
+    cm256_map.resize(chunk_count);
+    // After decoding, the cm256_blocks should not contain recovery
+    // chunks anymore. Instead, they should contain the original
+    // (decoded) chunks, so that their Index (chunk id) and Block
+    // (pointer) fields should correspond, respectively, to the
+    // original chunk id and the original data decoded in place
+    // within the chunk_storage. However, the order of cm256_blocks
+    // may not be sorted, so map each decoded chunk index to the
+    // corresponding index in the storage.
+    for (size_t i = 0; i < chunk_count; ++i) {
+        auto const& b = cm256_blocks[i];
+        assert(b.Index < CM256_MAX_CHUNKS);
+        cm256_map[b.Index] = (static_cast<char*>(b.Block) - chunk_storage) / FEC_CHUNK_SIZE;
+    }
+}
 
 FECEncoder::FECEncoder(const std::vector<unsigned char>* dataIn, std::pair<std::unique_ptr<FECChunkType[]>, std::vector<uint32_t>>* fec_chunksIn)
         : data(dataIn), fec_chunks(fec_chunksIn) {
