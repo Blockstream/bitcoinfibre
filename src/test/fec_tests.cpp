@@ -1,10 +1,16 @@
-
+// clang-format off
+// unit_test.hpp needs to be included before test_case.hpp
 #include <boost/test/unit_test.hpp>
+#include <boost/test/data/test_case.hpp>
+// clang-format on
 #include <fec.h>
 #include <memory>
+#include <sys/mman.h>
 #include <test/setup_common.h>
 #include <util/memory.h>
 #include <util/system.h>
+
+static const std::array<MemoryUsageMode, 2> MEMORY_USAGE_TYPE{MemoryUsageMode::USE_MMAP, MemoryUsageMode::USE_MEMORY};
 
 #define DIV_CEIL(a, b) (((a) + (b)-1) / (b))
 
@@ -107,9 +113,9 @@ static void check_chunk_not_equal(const void* p_chunk1, std::vector<unsigned cha
     BOOST_CHECK(mismatch);
 }
 
-BOOST_FIXTURE_TEST_SUITE(fec_tests, BasicTestingSetup)
+BOOST_AUTO_TEST_SUITE(fec_tests)
 
-BOOST_AUTO_TEST_CASE(fec_buildchunk_invalid_idx_test)
+BOOST_AUTO_TEST_CASE(fec_test_buildchunk_invalid_idx)
 {
     constexpr size_t n_uncoded_chunks = 5;
     constexpr size_t block_size = n_uncoded_chunks * FEC_CHUNK_SIZE;
@@ -174,19 +180,19 @@ void test_buildchunk_overwrite(size_t n_uncoded_chunks)
     }
 }
 
-BOOST_AUTO_TEST_CASE(fec_buildchunk_overwrite_wirehair)
+BOOST_AUTO_TEST_CASE(fec_test_buildchunk_overwrite_wirehair)
 {
     test_buildchunk_overwrite(CM256_MAX_CHUNKS + 1);
 }
 
 
-BOOST_AUTO_TEST_CASE(fec_buildchunk_overwrite_cm256)
+BOOST_AUTO_TEST_CASE(fec_test_buildchunk_overwrite_cm256)
 {
     test_buildchunk_overwrite(CM256_MAX_CHUNKS - 1);
 }
 
 
-BOOST_AUTO_TEST_CASE(fec_buildchunk_repetition_coding)
+BOOST_AUTO_TEST_CASE(fec_test_buildchunk_repetition_coding)
 {
     // When the original data fits within a single chunk, repetition coding is used.
     constexpr size_t n_encoded_chunks = 3;
@@ -215,7 +221,7 @@ BOOST_AUTO_TEST_CASE(fec_buildchunk_repetition_coding)
     }
 }
 
-BOOST_AUTO_TEST_CASE(fec_buildchunk_successful_Wirehair_encoder)
+BOOST_AUTO_TEST_CASE(fec_test_buildchunk_successful_Wirehair_encoder)
 {
     // Choose block size bigger than CM256_MAX_CHUNKS to
     // force using wirehair encoder
@@ -225,7 +231,7 @@ BOOST_AUTO_TEST_CASE(fec_buildchunk_successful_Wirehair_encoder)
     BOOST_CHECK(generate_encoded_chunks(block_size, test_data, default_encoding_overhead));
 }
 
-BOOST_AUTO_TEST_CASE(fec_buildchunk_successful_cm256_encoder)
+BOOST_AUTO_TEST_CASE(fec_test_buildchunk_successful_cm256_encoder)
 {
     // Choose block size bigger than 1 chunk and smaller than
     // CM256_MAX_CHUNKS to force using cm256 encoder
@@ -234,7 +240,7 @@ BOOST_AUTO_TEST_CASE(fec_buildchunk_successful_cm256_encoder)
     BOOST_CHECK(generate_encoded_chunks(block_size, test_data));
 }
 
-BOOST_AUTO_TEST_CASE(fec_providechunk_invalid_chunk_id_test)
+BOOST_DATA_TEST_CASE_F(BasicTestingSetup, fec_test_providechunk_invalid_chunk_id, MEMORY_USAGE_TYPE, memory_usage_type)
 {
     // Set data size in a way that CHUNK_COUNT_USES_CM256 is true
     constexpr size_t chunk_count = 2;
@@ -242,7 +248,7 @@ BOOST_AUTO_TEST_CASE(fec_providechunk_invalid_chunk_id_test)
     std::vector<unsigned char> chunk(data_size);
     fill_with_random_data(chunk);
 
-    FECDecoder decoder(data_size);
+    FECDecoder decoder(data_size, memory_usage_type);
     BOOST_CHECK(!decoder.ProvideChunk(chunk.data(), 256));
 
     // Set data size in a way that CHUNK_COUNT_USES_CM256 is false
@@ -251,16 +257,16 @@ BOOST_AUTO_TEST_CASE(fec_providechunk_invalid_chunk_id_test)
     std::vector<unsigned char> chunk2(data_size2);
     fill_with_random_data(chunk2);
 
-    FECDecoder decoder2(data_size2);
+    FECDecoder decoder2(data_size2, memory_usage_type);
     BOOST_CHECK(!decoder2.ProvideChunk(chunk2.data(), FEC_CHUNK_COUNT_MAX + 1));
     BOOST_CHECK(!decoder.DecodeReady());
 }
 
-BOOST_AUTO_TEST_CASE(fec_providechunk_small_chunk_count)
+BOOST_DATA_TEST_CASE_F(BasicTestingSetup, fec_test_providechunk_small_chunk_count, MEMORY_USAGE_TYPE, memory_usage_type)
 {
     // Generate random data fitting within a single chunk
     size_t data_size = 5;
-    FECDecoder decoder(data_size);
+    FECDecoder decoder(data_size, memory_usage_type);
     std::vector<unsigned char> original_data(data_size);
     fill_with_random_data(original_data);
 
@@ -278,8 +284,7 @@ BOOST_AUTO_TEST_CASE(fec_providechunk_small_chunk_count)
     check_chunk_equal(decoder.GetDataPtr(0), original_data);
 }
 
-
-void providechunk_test(size_t n_uncoded_chunks, bool expected_result, size_t n_overhead_chunks = 0, size_t n_dropped_chunks = 0)
+void providechunk_test(MemoryUsageMode memory_usage_type, size_t n_uncoded_chunks, bool expected_result, size_t n_overhead_chunks = 0, size_t n_dropped_chunks = 0)
 {
     TestData test_data;
     size_t data_size = FEC_CHUNK_SIZE * n_uncoded_chunks;
@@ -293,7 +298,7 @@ void providechunk_test(size_t n_uncoded_chunks, bool expected_result, size_t n_o
     while (dropped_indexes.size() < n_dropped_chunks)
         dropped_indexes.insert(rand() % n_encoded_chunks);
 
-    FECDecoder decoder(data_size);
+    FECDecoder decoder(data_size, memory_usage_type);
     for (size_t i = 0; i < n_encoded_chunks; i++) {
         if (dropped_indexes.find(i) != dropped_indexes.end()) {
             // chunk i has been dropped
@@ -316,52 +321,53 @@ void providechunk_test(size_t n_uncoded_chunks, bool expected_result, size_t n_o
     }
 }
 
-BOOST_AUTO_TEST_CASE(fec_providechunk_cm256)
+BOOST_DATA_TEST_CASE_F(BasicTestingSetup, fec_test_providechunk_cm256, MEMORY_USAGE_TYPE, memory_usage_type)
 {
     // default extra encoded chunk, no drops
-    providechunk_test(2, true);
+    providechunk_test(memory_usage_type, 2, true);
 
     // 2 extra encoded chunks, 2 dropped chunks
-    providechunk_test(2, true, 2, 2);
+    providechunk_test(memory_usage_type, 2, true, 2, 2);
 
     // 2 extra encoded chunks, 1 dropped chunk
-    providechunk_test(2, true, 2, 1);
+    providechunk_test(memory_usage_type, 2, true, 2, 1);
 
     // 2 extra encoded chunks, 3 dropped chunks
-    providechunk_test(2, false, 2, 3);
+    providechunk_test(memory_usage_type, 2, false, 2, 3);
 
     // default extra encoded chunk, no drops
-    providechunk_test(CM256_MAX_CHUNKS, true);
+    providechunk_test(memory_usage_type, CM256_MAX_CHUNKS, true);
 
     // 10 extra encoded chunks, 10 dropped chunks
-    providechunk_test(CM256_MAX_CHUNKS, true, 10, 10);
+    providechunk_test(memory_usage_type, CM256_MAX_CHUNKS, true, 10, 10);
 
     // 10 extra encoded chunks, 7 dropped chunks
-    providechunk_test(CM256_MAX_CHUNKS, true, 10, 7);
+    providechunk_test(memory_usage_type, CM256_MAX_CHUNKS, true, 10, 7);
 
     // 10 extra encoded chunks, 12 dropped chunks
-    providechunk_test(CM256_MAX_CHUNKS, false, 10, 12);
+    providechunk_test(memory_usage_type, CM256_MAX_CHUNKS, false, 10, 12);
 }
 
-BOOST_AUTO_TEST_CASE(fec_providechunk_wirehair)
+BOOST_DATA_TEST_CASE_F(BasicTestingSetup, fec_test_providechunk_wirehair, MEMORY_USAGE_TYPE, memory_usage_type)
 {
     // default extra encoded chunk, no drops
-    providechunk_test(CM256_MAX_CHUNKS + 10, true, default_encoding_overhead);
+    providechunk_test(memory_usage_type, CM256_MAX_CHUNKS + 10, true, default_encoding_overhead);
 
     // 10 extra encoded chunks, 5 dropped chunks
-    providechunk_test(CM256_MAX_CHUNKS + 10, true, 10, 5);
+    providechunk_test(memory_usage_type, CM256_MAX_CHUNKS + 10, true, 10, 5);
 
     // 10 extra encoded chunks, 7 dropped chunks
-    providechunk_test(CM256_MAX_CHUNKS + 10, true, 10, 7);
+    providechunk_test(memory_usage_type, CM256_MAX_CHUNKS + 10, true, 10, 7);
 
     // 10 extra encoded chunks, 12 dropped chunks
-    providechunk_test(CM256_MAX_CHUNKS + 10, false, 10, 12);
+    providechunk_test(memory_usage_type, CM256_MAX_CHUNKS + 10, false, 10, 12);
 
     // 10 extra encoded chunks, 15 dropped chunks
-    providechunk_test(CM256_MAX_CHUNKS + 10, false, 10, 15);
+    providechunk_test(memory_usage_type, CM256_MAX_CHUNKS + 10, false, 10, 15);
 }
 
-BOOST_AUTO_TEST_CASE(fec_providechunk_repetition)
+
+BOOST_DATA_TEST_CASE_F(BasicTestingSetup, fec_test_providechunk_repetition, MEMORY_USAGE_TYPE, memory_usage_type)
 {
     constexpr size_t n_encoded_chunks = 3;
     constexpr size_t block_size = 10;
@@ -384,19 +390,19 @@ BOOST_AUTO_TEST_CASE(fec_providechunk_repetition)
     // There were 3 encoded chunks, but let's assume 2 of them were dropped
     // and the receiver only received the 3rd encoded chunk.
 
-    FECDecoder decoder(block_size);
+    FECDecoder decoder(block_size, memory_usage_type);
     decoder.ProvideChunk(&block_fec_chunks.first[2], 2);
 
     BOOST_CHECK(decoder.DecodeReady());
     check_chunk_equal(&block_fec_chunks.first[2], original_data);
 }
 
-BOOST_AUTO_TEST_CASE(test_creation_removal_chunk_file)
+BOOST_AUTO_TEST_CASE(fec_test_creation_removal_chunk_file)
 {
     fs::path filename;
     {
         // FECDecoder's constructor should create the file in the partial_blocks directory
-        FECDecoder decoder(10000);
+        FECDecoder decoder(10000, MemoryUsageMode::USE_MMAP);
         filename = decoder.GetFileName();
         BOOST_CHECK(fs::exists(filename));
     } // When FECDecoder's destructor is called, it should remove the file
@@ -404,12 +410,11 @@ BOOST_AUTO_TEST_CASE(test_creation_removal_chunk_file)
     BOOST_CHECK(!fs::exists(filename));
 }
 
-
-BOOST_AUTO_TEST_CASE(test_chunk_file_stays_if_destructor_not_called)
+BOOST_AUTO_TEST_CASE(fec_test_chunk_file_stays_if_destructor_not_called)
 {
     fs::path filename;
     {
-        FECDecoder* decoder = new FECDecoder(10000);
+        FECDecoder* decoder = new FECDecoder(10000, MemoryUsageMode::USE_MMAP);
         filename = decoder->GetFileName();
         BOOST_CHECK(fs::exists(filename));
     }
@@ -419,7 +424,17 @@ BOOST_AUTO_TEST_CASE(test_chunk_file_stays_if_destructor_not_called)
     fs::remove(filename);
 }
 
-BOOST_AUTO_TEST_CASE(test_decoding_multiple_blocks_in_parallel)
+BOOST_AUTO_TEST_CASE(fec_test_filename_is_empty_in_memory_mode)
+{
+    fs::path filename;
+
+    // FECDecoder's constructor shouldn't intialize filename
+    FECDecoder decoder(10000, MemoryUsageMode::USE_MEMORY);
+    filename = decoder.GetFileName();
+    BOOST_CHECK(filename.empty());
+}
+
+BOOST_AUTO_TEST_CASE(fec_test_decoding_multiple_blocks_in_parallel)
 {
     size_t n_decoders = 1000;
     size_t n_uncoded_chunks = CM256_MAX_CHUNKS + 1;
@@ -435,7 +450,13 @@ BOOST_AUTO_TEST_CASE(test_decoding_multiple_blocks_in_parallel)
         TestData test_data;
         generate_encoded_chunks(data_size, test_data, default_encoding_overhead);
         test_data_vec.emplace_back(std::move(test_data));
-        decoders_vec.emplace_back(std::move(MakeUnique<FECDecoder>(data_size)));
+
+        // randomly instantiate some decoders in mmap mode and some in memory mode
+        if (rand() % 2) {
+            decoders_vec.emplace_back(std::move(MakeUnique<FECDecoder>(data_size, MemoryUsageMode::USE_MMAP)));
+        } else {
+            decoders_vec.emplace_back(std::move(MakeUnique<FECDecoder>(data_size, MemoryUsageMode::USE_MEMORY)));
+        }
     }
 
     // Provide one chunk to each decoder in a round robin fashion
@@ -462,6 +483,109 @@ BOOST_AUTO_TEST_CASE(test_decoding_multiple_blocks_in_parallel)
         }
     }
     BOOST_CHECK(all_decoded_successfully);
+}
+
+// checks if the chunk ids stored in the filename match the ids in the expected_chunk_ids vector
+void check_stored_chunk_ids(const FECDecoder& decoder, const std::vector<uint32_t>& expected_chunk_ids)
+{
+    MapStorage map_storage(decoder.GetFileName(), decoder.GetChunkCount());
+    std::vector<uint32_t> stored_chunk_ids;
+
+    for (size_t i = 0; i < decoder.GetChunksRcvd(); i++) {
+        stored_chunk_ids.push_back(map_storage.GetChunkId(i));
+    }
+
+    // do not compare stored_chunk_ids with the whole expected_chunk_ids, as this function
+    // can also run for partial blocks in which not all chunk_id slots are filled
+    BOOST_CHECK_EQUAL_COLLECTIONS(expected_chunk_ids.begin(), expected_chunk_ids.begin() + stored_chunk_ids.size(),
+        stored_chunk_ids.begin(), stored_chunk_ids.end());
+}
+
+BOOST_AUTO_TEST_CASE(fec_test_chunk_ids_in_mmap_storage_test)
+{
+    TestData test_data;
+    size_t n_chunks = 21;
+    size_t data_size = FEC_CHUNK_SIZE * n_chunks;
+    generate_encoded_chunks(data_size, test_data);
+
+    FECDecoder decoder(data_size, MemoryUsageMode::USE_MMAP);
+
+    // provide 1/3 of the chunks and test
+    for (size_t i = 0; i < n_chunks / 3; i++) {
+        decoder.ProvideChunk(test_data.encoded_chunks[i].data(), test_data.chunk_ids[i]);
+    }
+    check_stored_chunk_ids(decoder, test_data.chunk_ids);
+
+    // provide next 1/3 of the chunks and test
+    for (size_t i = n_chunks / 3; i < (2 * n_chunks / 3); i++) {
+        decoder.ProvideChunk(test_data.encoded_chunks[i].data(), test_data.chunk_ids[i]);
+    }
+    check_stored_chunk_ids(decoder, test_data.chunk_ids);
+
+    // provide the rest of the chunks and test
+    for (size_t i = (2 * n_chunks / 3); i < n_chunks; i++) {
+        decoder.ProvideChunk(test_data.encoded_chunks[i].data(), test_data.chunk_ids[i]);
+    }
+    check_stored_chunk_ids(decoder, test_data.chunk_ids);
+}
+
+
+BOOST_AUTO_TEST_CASE(fec_test_map_storage_insert)
+{
+    std::vector<unsigned char> test_data_a(FEC_CHUNK_SIZE);
+    std::vector<unsigned char> test_data_b(FEC_CHUNK_SIZE / 2);
+    std::vector<unsigned char> test_data_c(FEC_CHUNK_SIZE);
+
+    fill_with_random_data(test_data_a);
+    fill_with_random_data(test_data_b);
+    // Set half of the test_data_b items to 0
+    test_data_b.insert(test_data_b.end(), FEC_CHUNK_SIZE / 2, 0);
+    fill_with_random_data(test_data_c);
+
+    FECDecoder decoder(FEC_CHUNK_SIZE * 5, MemoryUsageMode::USE_MMAP);
+    MapStorage map_storage(decoder.GetFileName(), decoder.GetChunkCount());
+
+    // Insert into consequtive indexes
+    map_storage.Insert(test_data_a.data(), 1, 0);
+    map_storage.Insert(test_data_b.data(), 12, 1);
+    map_storage.Insert(test_data_c.data(), 123, 2);
+    {
+        check_chunk_equal(map_storage.GetChunk(0), test_data_a);
+        check_chunk_equal(map_storage.GetChunk(1), test_data_b);
+        check_chunk_equal(map_storage.GetChunk(2), test_data_c);
+
+        BOOST_CHECK_EQUAL(1, map_storage.GetChunkId(0));
+        BOOST_CHECK_EQUAL(12, map_storage.GetChunkId(1));
+        BOOST_CHECK_EQUAL(123, map_storage.GetChunkId(2));
+    }
+
+    // Insert into non consequtive indexes
+    map_storage.Insert(test_data_a.data(), 1, 0);
+    map_storage.Insert(test_data_b.data(), 12, 2);
+    map_storage.Insert(test_data_c.data(), 123, 4);
+    {
+        check_chunk_equal(map_storage.GetChunk(0), test_data_a);
+        check_chunk_equal(map_storage.GetChunk(2), test_data_b);
+        check_chunk_equal(map_storage.GetChunk(4), test_data_c);
+
+        BOOST_CHECK_EQUAL(1, map_storage.GetChunkId(0));
+        BOOST_CHECK_EQUAL(12, map_storage.GetChunkId(2));
+        BOOST_CHECK_EQUAL(123, map_storage.GetChunkId(4));
+    }
+
+    // Rewrite into already written slots
+    map_storage.Insert(test_data_a.data(), 1, 2);
+    map_storage.Insert(test_data_b.data(), 12, 4);
+    map_storage.Insert(test_data_c.data(), 123, 0);
+    {
+        check_chunk_equal(map_storage.GetChunk(2), test_data_a);
+        check_chunk_equal(map_storage.GetChunk(4), test_data_b);
+        check_chunk_equal(map_storage.GetChunk(0), test_data_c);
+
+        BOOST_CHECK_EQUAL(1, map_storage.GetChunkId(2));
+        BOOST_CHECK_EQUAL(12, map_storage.GetChunkId(4));
+        BOOST_CHECK_EQUAL(123, map_storage.GetChunkId(0));
+    }
 }
 
 BOOST_AUTO_TEST_SUITE_END()

@@ -267,7 +267,7 @@ static void FECEncodeBenchmark(benchmark::State& state, bool fAll) {
 static void FECEncodeOneBenchmark(benchmark::State& state) { FECEncodeBenchmark(state, false); }
 static void FECEncodeAllBenchmark(benchmark::State& state) { FECEncodeBenchmark(state, true); }
 
-static void FECDecodeBenchmark(benchmark::State& state, unsigned mask) {
+static void FECDecodeBenchmark(benchmark::State& state, unsigned mask, const MemoryUsageMode memory_usage_mode) {
     std::vector<unsigned char> data((const unsigned char*)blockencodings_tests::block413567,
             (const unsigned char*)&blockencodings_tests::block413567[sizeof(blockencodings_tests::block413567)]);
     size_t fec_chunk_count = DIV_CEIL(data.size(), FEC_CHUNK_SIZE);
@@ -279,7 +279,7 @@ static void FECDecodeBenchmark(benchmark::State& state, unsigned mask) {
 
     while (state.KeepRunning()) {
         size_t chunks = DIV_CEIL(data.size(), FEC_CHUNK_SIZE);
-        FECDecoder dec(data.size());
+        FECDecoder dec(data.size(), memory_usage_mode);
         for (size_t i = 0; i < chunks && !dec.DecodeReady(); i++) {
             if (g() & mask)
                 assert(dec.ProvideChunk(&data[i * FEC_CHUNK_SIZE], i));
@@ -294,12 +294,18 @@ static void FECDecodeBenchmark(benchmark::State& state, unsigned mask) {
     }
 }
 
-static void FECDecodeBenchmark3(benchmark::State& state) { FECDecodeBenchmark(state, 0x3); }
-static void FECDecodeBenchmark7(benchmark::State& state) { FECDecodeBenchmark(state, 0x7); }
-static void FECDecodeBenchmarkF(benchmark::State& state) { FECDecodeBenchmark(state, 0xf); }
+static void FECDecodeBenchmark3Mem(benchmark::State& state) { FECDecodeBenchmark(state, 0x3, MemoryUsageMode::USE_MEMORY); }
+static void FECDecodeBenchmark7Mem(benchmark::State& state) { FECDecodeBenchmark(state, 0x7, MemoryUsageMode::USE_MEMORY); }
+static void FECDecodeBenchmarkFMem(benchmark::State& state) { FECDecodeBenchmark(state, 0xf, MemoryUsageMode::USE_MEMORY); }
+static void FECDecodeBenchmark3Mmap(benchmark::State& state) { FECDecodeBenchmark(state, 0x3, MemoryUsageMode::USE_MMAP); }
+static void FECDecodeBenchmark7Mmap(benchmark::State& state) { FECDecodeBenchmark(state, 0x7, MemoryUsageMode::USE_MMAP); }
+static void FECDecodeBenchmarkFMmap(benchmark::State& state) { FECDecodeBenchmark(state, 0xf, MemoryUsageMode::USE_MMAP); }
 
 BENCHMARK(FECEncodeAllBenchmark, 100);
 BENCHMARK(FECEncodeOneBenchmark, 100);
-BENCHMARK(FECDecodeBenchmark3, 100);
-BENCHMARK(FECDecodeBenchmark7, 100);
-BENCHMARK(FECDecodeBenchmarkF, 100);
+BENCHMARK(FECDecodeBenchmark3Mem, 100);
+BENCHMARK(FECDecodeBenchmark7Mem, 100);
+BENCHMARK(FECDecodeBenchmarkFMem, 100);
+BENCHMARK(FECDecodeBenchmark3Mmap, 100);
+BENCHMARK(FECDecodeBenchmark7Mmap, 100);
+BENCHMARK(FECDecodeBenchmarkFMmap, 100);
