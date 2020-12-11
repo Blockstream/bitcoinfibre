@@ -1077,12 +1077,20 @@ bool PartialBlockData::Init(const UDPMessage& msg) {
 
     tip_blk = msg.header.msg_type & TIP_BLOCK;
 
+    // When receiving a block at the tip of the blockchain, load FEC chunks
+    // directly in memory. They are expected to remain there only briefly until
+    // the block FEC-decoding completes. In contrast, if receiving non-tip
+    // (repeated/historic) blocks, use the decoder in mmap mode so that FEC
+    // chunks are offloaded to disk. The non-tip blocks can take a long time to
+    // complete when many (thousands of) non-tip blocks are sent in parallel.
+    const MemoryUsageMode memory_usage_mode = tip_blk ? MemoryUsageMode::USE_MEMORY : MemoryUsageMode::USE_MMAP;
+
     if ((msg.header.msg_type & UDP_MSG_TYPE_TYPE_MASK) == MSG_TYPE_BLOCK_HEADER) {
-        header_decoder = FECDecoder(obj_length);
+        header_decoder = FECDecoder(obj_length, memory_usage_mode);
         header_len = obj_length;
         header_initialized = true;
     } else {
-        body_decoder = FECDecoder(obj_length);
+        body_decoder = FECDecoder(obj_length, memory_usage_mode);
         blk_len = obj_length;
         blk_initialized = true;
     }
@@ -1131,7 +1139,9 @@ static bool HandleTx(UDPMessage& msg, size_t length, const CService& node, UDPCo
     if (state.tx_in_flight_hash_prefix != msg.msg.block.hash_prefix) {
         state.tx_in_flight_hash_prefix = msg.msg.block.hash_prefix;
         state.tx_in_flight_msg_size    = msg.msg.block.obj_length;
-        state.tx_in_flight.reset(new FECDecoder(msg.msg.block.obj_length));
+        state.tx_in_flight.reset(new FECDecoder(msg.msg.block.obj_length, MemoryUsageMode::USE_MEMORY));
+        // NOTE: always place txn chunks directly in memory instead of disk. The
+        // FEC decoding is expected to be quick in this case.
     }
 
     if (!state.tx_in_flight) return true; // Already finished decode
