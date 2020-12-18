@@ -142,7 +142,7 @@ class FECDecoder {
 
     // Whether to store chunk ids and chunk data in memory (e.g. vector) or
     // to store them in a memory mapped file on the disk
-    MemoryUsageMode memory_usage_mode = MemoryUsageMode::USE_MMAP;
+    MemoryUsageMode memory_usage_mode = MemoryUsageMode::USE_MEMORY;
 
     // maps final chunk ids to offset into the storage (backed by the file)
     std::vector<uint8_t> cm256_map;
@@ -159,7 +159,7 @@ class FECDecoder {
 
     friend FECEncoder::FECEncoder(FECDecoder&& decoder, const std::vector<unsigned char>* dataIn, std::pair<std::unique_ptr<FECChunkType[]>, std::vector<uint32_t>>* fec_chunksIn);
 
-    fs::path compute_filename() const;
+    fs::path compute_filename(const std::string& obj_id) const;
 
     bool ProvideChunkMemory(const unsigned char* chunk, uint32_t chunk_id);
     bool ProvideChunkMmap(const unsigned char* chunk, uint32_t chunk_id);
@@ -170,9 +170,10 @@ class FECDecoder {
 
 public:
     // data_size must be <= MAX_BLOCK_SERIALIZED_SIZE * MAX_CHUNK_CODED_BLOCK_SIZE_FACTOR
-    // memory_usage_mode if set to USE_MEM, all chunks and chunk ids are stored in a memory-mapped file on disk
+    // memory_usage_mode if set to USE_MMAP, all chunks and chunk ids are stored in a memory-mapped file on disk
     //                  if set to USE_MEMORY, nothing is stored on disk and everything will live in the memory
-    FECDecoder(size_t data_size, MemoryUsageMode memory_usage_mode = MemoryUsageMode::USE_MMAP);
+    // obj_id identification string used to generate a unique Mmap file name (used when memory_usage_mode == USE_MMAP)
+    FECDecoder(size_t data_size, MemoryUsageMode memory_usage_mode = MemoryUsageMode::USE_MEMORY, const std::string& obj_id = "");
 
     FECDecoder();
     ~FECDecoder();
