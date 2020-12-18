@@ -1078,11 +1078,11 @@ bool PartialBlockData::Init(const UDPMessage& msg) {
     const MemoryUsageMode memory_usage_mode = tip_blk ? MemoryUsageMode::USE_MEMORY : MemoryUsageMode::USE_MMAP;
 
     if ((msg.header.msg_type & UDP_MSG_TYPE_TYPE_MASK) == MSG_TYPE_BLOCK_HEADER) {
-        header_decoder = FECDecoder(obj_length, memory_usage_mode);
+        header_decoder = FECDecoder(obj_length, memory_usage_mode, std::to_string(msg.msg.block.hash_prefix) + "_header");
         header_len = obj_length;
         header_initialized = true;
     } else {
-        body_decoder = FECDecoder(obj_length, memory_usage_mode);
+        body_decoder = FECDecoder(obj_length, memory_usage_mode, std::to_string(msg.msg.block.hash_prefix) + "_body");
         blk_len = obj_length;
         blk_initialized = true;
     }
