@@ -17,8 +17,25 @@ static const std::array<MemoryUsageMode, 2> MEMORY_USAGE_TYPE{MemoryUsageMode::U
 
 #define DIV_CEIL(a, b) (((a) + (b)-1) / (b))
 
+
 constexpr char hex_digits[] = "0123456789ABCDEF";
-constexpr size_t default_encoding_overhead = 3;
+constexpr size_t default_encoding_overhead = 5;
+
+struct GlobalFixture {
+    /**
+     * Files generated during tests in partial_blocks get cleaned after the test
+     * finishes, but the directory stays. So, after a while,
+     * "/tmp/test_common_Bitcoin Core" will be filled with useless empty
+     * directories. The GlobalFixture destructor runs after all the tests and
+     * removes these directories.
+     */
+    ~GlobalFixture()
+    {
+        fs::path partial_blocks = GetDataDir() / "partial_blocks";
+        fs::remove_all(partial_blocks.parent_path());
+    }
+};
+BOOST_GLOBAL_FIXTURE(GlobalFixture);
 
 struct TestData {
     std::vector<std::vector<unsigned char>> encoded_chunks;
@@ -242,6 +259,24 @@ BOOST_AUTO_TEST_CASE(fec_test_buildchunk_successful_cm256_encoder)
     BOOST_CHECK(generate_encoded_chunks(block_size, test_data));
 }
 
+
+BOOST_DATA_TEST_CASE_F(BasicTestingSetup, fec_test_fecdecoder_filename_pattern, bdata::make({FEC_CHUNK_SIZE + 1, 2000, FEC_CHUNK_SIZE * 2, 1048576}), data_size)
+{
+    // Object ID provided:
+    {
+        std::string obj_id = "1234_body";
+        FECDecoder decoder(data_size, MemoryUsageMode::USE_MMAP, obj_id);
+        // filename should be set as "<obj_id>_<obj_size>"
+        BOOST_CHECK(decoder.GetFileName().filename().c_str() == obj_id + "_" + std::to_string(data_size));
+    }
+    // Object ID not provided:
+    {
+        FECDecoder decoder(data_size, MemoryUsageMode::USE_MMAP);
+        // filename should be equal to the FECDecoder object's address
+        BOOST_CHECK(decoder.GetFileName().filename().c_str() == std::to_string(std::uintptr_t(&decoder)));
+    }
+}
+
 BOOST_DATA_TEST_CASE_F(BasicTestingSetup, fec_test_providechunk_invalid_chunk_id, MEMORY_USAGE_TYPE, memory_usage_type)
 {
     // Set data size in a way that CHUNK_COUNT_USES_CM256 is true
@@ -418,9 +453,6 @@ BOOST_AUTO_TEST_CASE(fec_test_chunk_file_stays_if_destructor_not_called)
         BOOST_CHECK(fs::exists(filename));
     }
     BOOST_CHECK(fs::exists(filename));
-
-    // cleanup the system!
-    fs::remove(filename);
 }
 
 BOOST_AUTO_TEST_CASE(fec_test_filename_is_empty_in_memory_mode)
@@ -620,6 +652,73 @@ BOOST_DATA_TEST_CASE_F(BasicTestingSetup, fec_test_decoding_getdataptr, bdata::m
         test_data.original_data.begin(), test_data.original_data.end());
     BOOST_CHECK_EQUAL_COLLECTIONS(decoded_data2.begin(), decoded_data2.begin() + data_size,
         test_data.original_data.begin(), test_data.original_data.end());
+}
+
+BOOST_FIXTURE_TEST_CASE(fec_test_decoder_move_assignment_operator, BasicTestingSetup)
+{
+    {
+        // - both decoders without obj_id
+        // - decoder1 constructed in mmap mode (gets a filename)
+        // - decoder2 default-constructed (without a filename)
+        FECDecoder decoder1(5000, MemoryUsageMode::USE_MMAP);
+        auto filename1 = decoder1.GetFileName();
+        FECDecoder decoder2;
+        decoder2 = std::move(decoder1);
+        // Given that decoder2 did not have a filename originally, its filename
+        // becomes filename1 after the move assignment.
+        BOOST_CHECK_EQUAL(filename1, decoder2.GetFileName());
+        BOOST_CHECK(fs::exists(decoder2.GetFileName()));
+    }
+    {
+        // - decoder1 with obj_id, decoder2 without it
+        // - decoder1 constructed in mmap mode (gets a filename)
+        // - decoder2 default-constructed (without a filename)
+        FECDecoder decoder1(5000, MemoryUsageMode::USE_MMAP, "1234_body");
+        auto filename1 = decoder1.GetFileName();
+        FECDecoder decoder2;
+        decoder2 = std::move(decoder1);
+        // Again, because decoder2 was default-constructed, its filename becomes
+        // that of the moved object (decoder1).
+        BOOST_CHECK_EQUAL(filename1, decoder2.GetFileName());
+        BOOST_CHECK(fs::exists(decoder2.GetFileName()));
+    }
+    {
+        // - both decoders constructed in mmap mode with an obj_id
+        FECDecoder decoder1(5000, MemoryUsageMode::USE_MMAP, "1234_body");
+        auto filename1 = decoder1.GetFileName();
+        FECDecoder decoder2(4000, MemoryUsageMode::USE_MMAP, "5678_body");
+        auto filename2 = decoder2.GetFileName();
+        decoder2 = std::move(decoder1);
+        // In this case, decoder2 does have a filename originally. Thus, after
+        // the move assignment, the file pointed by filename1 gets moved into
+        // decoder2 and renamed as filename2. Meanwhile, the original filename2
+        // is destroyed and only its name is preserved, although now with the
+        // contents of filename1.
+        BOOST_CHECK(!fs::exists(filename1));
+        BOOST_CHECK(fs::exists(filename2));
+        BOOST_CHECK_EQUAL(filename2, decoder2.GetFileName());
+    }
+    {
+        // - decoder1 default-constructed
+        // - decoder2 constructed in mmap mode with an obj_id
+        FECDecoder decoder1;
+        FECDecoder decoder2(5000, MemoryUsageMode::USE_MMAP, "1234_body");
+        auto filename2 = decoder2.GetFileName();
+        decoder2 = std::move(decoder1);
+        // In this case, decoder1 does not own a file. Hence, the move
+        // assignment operator does not apply any file renaming. Ultimately,
+        // decoder2's filename should be preserved after the move.
+        BOOST_CHECK_EQUAL(filename2, decoder2.GetFileName());
+    }
+    {
+        // - decoder1 constructed in memory mode
+        // - decoder2 default-constructed (also in memory mode, the default)
+        FECDecoder decoder1(5000, MemoryUsageMode::USE_MEMORY);
+        FECDecoder decoder2;
+        decoder2 = std::move(decoder1);
+        // no checks required, as there is no files. just make sure = operator
+        // does not throw.
+    }
 }
 
 BOOST_AUTO_TEST_SUITE_END()

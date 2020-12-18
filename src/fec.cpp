@@ -149,12 +149,11 @@ MapStorage::~MapStorage()
         ::close(m_chunk_file);
 }
 
-FECDecoder::FECDecoder() :
-        filename(compute_filename())
+FECDecoder::FECDecoder()
 {
 }
 
-FECDecoder::FECDecoder(size_t const data_size, MemoryUsageMode memory_mode) :
+FECDecoder::FECDecoder(size_t const data_size, MemoryUsageMode memory_mode, const std::string& obj_id) :
         chunk_count(DIV_CEIL(data_size, FEC_CHUNK_SIZE)),
         obj_size(data_size),
         chunk_tracker(chunk_count),
@@ -164,7 +163,7 @@ FECDecoder::FECDecoder(size_t const data_size, MemoryUsageMode memory_mode) :
         return;
 
     if (memory_usage_mode == MemoryUsageMode::USE_MMAP) {
-        filename = compute_filename();
+        filename = compute_filename(obj_id);
         MapStorage map_storage(filename, chunk_count, true /* create */);
         owns_file = true;
     } else {
@@ -177,9 +176,15 @@ FECDecoder::FECDecoder(size_t const data_size, MemoryUsageMode memory_mode) :
     }
 }
 
-fs::path FECDecoder::compute_filename() const
+fs::path FECDecoder::compute_filename(const std::string& obj_id) const
 {
-    return GetDataDir() / "partial_blocks" / std::to_string(std::uintptr_t(this));
+    // Try to make a unique name out of the available information
+    if (obj_id.empty()) {
+        return GetDataDir() / "partial_blocks" / std::to_string(std::uintptr_t(this));
+    } else {
+        // filename pattern = <obj_id>_<obj_size>
+        return GetDataDir() / "partial_blocks" / (obj_id + "_" + std::to_string(obj_size));
+    }
 }
 
 FECDecoder& FECDecoder::operator=(FECDecoder&& decoder) noexcept {
@@ -199,7 +204,12 @@ FECDecoder& FECDecoder::operator=(FECDecoder&& decoder) noexcept {
     cm256_decoded     = exchange(decoder.cm256_decoded, false);
     cm256_chunks      = std::move(decoder.cm256_chunks);
     if (owns_file) {
-        fs::rename(decoder.filename, filename);
+	    assert(fs::exists(decoder.filename));
+        if (filename.empty()) {
+            filename = decoder.filename;
+        } else {
+            fs::rename(decoder.filename, filename);
+        }
     }
     tmp_chunk        = decoder.tmp_chunk;
     wirehair_decoder = exchange(decoder.wirehair_decoder, nullptr);
