@@ -721,4 +721,50 @@ BOOST_FIXTURE_TEST_CASE(fec_test_decoder_move_assignment_operator, BasicTestingS
     }
 }
 
+BOOST_DATA_TEST_CASE_F(BasicTestingSetup, fec_test_decode_using_moved_decoder, bdata::make({1, 2, CM256_MAX_CHUNKS, CM256_MAX_CHUNKS + 10}) * MEMORY_USAGE_TYPE, n_uncoded_chunks, memory_usage_type)
+{
+    TestData test_data;
+    size_t data_size = FEC_CHUNK_SIZE * n_uncoded_chunks;
+    generate_encoded_chunks(data_size, test_data, default_encoding_overhead);
+
+    size_t n_encoded_chunks = n_uncoded_chunks + default_encoding_overhead;
+
+    // Move a newly instantiated FECDecoder
+    {
+        // default construct in memory mode
+        FECDecoder decoder;
+        // Move a non default constructed FECDecoder into decoder
+        decoder = FECDecoder(data_size, memory_usage_type, "1234_header");
+        for (size_t i = 0; i < n_encoded_chunks; i++) {
+            decoder.ProvideChunk(test_data.encoded_chunks[i].data(), test_data.chunk_ids[i]);
+        }
+
+        BOOST_CHECK(decoder.DecodeReady());
+        std::vector<unsigned char> decoded_data = decoder.GetDecodedData();
+        BOOST_CHECK_EQUAL(decoded_data.size(), test_data.original_data.size());
+        BOOST_CHECK_EQUAL_COLLECTIONS(decoded_data.begin(), decoded_data.end(),
+            test_data.original_data.begin(), test_data.original_data.end());
+    }
+
+    // Move a FECDecoder which already received some chunks
+    {
+        FECDecoder decoder1(data_size);
+        for (size_t i = 0; i < n_encoded_chunks / 2; i++) {
+            decoder1.ProvideChunk(test_data.encoded_chunks[i].data(), test_data.chunk_ids[i]);
+        }
+
+        FECDecoder decoder2;
+        decoder2 = std::move(decoder1);
+        for (size_t i = n_encoded_chunks / 2; i < n_encoded_chunks; i++) {
+            decoder2.ProvideChunk(test_data.encoded_chunks[i].data(), test_data.chunk_ids[i]);
+        }
+
+        BOOST_CHECK(decoder2.DecodeReady());
+        std::vector<unsigned char> decoded_data = decoder2.GetDecodedData();
+        BOOST_CHECK_EQUAL(decoded_data.size(), test_data.original_data.size());
+        BOOST_CHECK_EQUAL_COLLECTIONS(decoded_data.begin(), decoded_data.end(),
+            test_data.original_data.begin(), test_data.original_data.end());
+    }
+}
+
 BOOST_AUTO_TEST_SUITE_END()
