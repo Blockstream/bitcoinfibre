@@ -817,9 +817,9 @@ static void ProcessBlockThread() {
 
                 if (fBench) {
                     std::chrono::steady_clock::time_point header_provided(std::chrono::steady_clock::now());
-                    LogPrintf("UDP: Block %s (height %7d) - Got full header and shorttxids from %s in %lf %lf %lf ms\n", blockHash.ToString(), block.height, block.nodeHeaderRecvd.ToString(), to_millis_double(data_copied - decode_start), to_millis_double(header_deserialized - data_copied), to_millis_double(header_provided - header_deserialized));
+                    LogPrintf("UDP: Block %s (height %7d) - Got full header and shorttxids from %s in %lf %lf %lf ms\n", blockHash.ToString(), block.height, block.GetSenders(), to_millis_double(data_copied - decode_start), to_millis_double(header_deserialized - data_copied), to_millis_double(header_provided - header_deserialized));
                 } else
-                    LogPrintf("UDP: Block %s (height %7d) - Got full header and shorttxids from %s\n", blockHash.ToString(), block.height, block.nodeHeaderRecvd.ToString());
+                    LogPrintf("UDP: Block %s (height %7d) - Got full header and shorttxids from: [%s]\n", blockHash.ToString(), block.height, block.GetSenders());
 
                 if (block.block_data.AreAllTxnsInMempool())
                     LogPrintf("UDP: Block %s - Ready to be decoded (all txns available)\n", blockHash.ToString());
@@ -915,7 +915,7 @@ static void ProcessBlockThread() {
                          * accurate. It reflects the count up to when the block
                          * is decoded. However, further chunks may still be
                          * received after the block is decoded. */
-                        LogPrintf("UDP: Block %s reconstructed from %s with %u chunks in %lf ms (%u recvd from %u peers)\n", decoded_block.GetHash().ToString(), block.nodeHeaderRecvd.ToString(), total_chunks_used, to_millis_double(std::chrono::steady_clock::now() - block.timeHeaderRecvd), total_chunks_recvd, chunksProvidedByNode.size());
+                        LogPrintf("UDP: Block %s reconstructed with %u chunks in %lf ms (%u recvd from %u peers)\n", decoded_block.GetHash().ToString(), total_chunks_used, to_millis_double(std::chrono::steady_clock::now() - block.timeHeaderRecvd), total_chunks_recvd, chunksProvidedByNode.size());
                         for (const std::pair<CService, std::pair<uint32_t, uint32_t> >& provider : chunksProvidedByNode)
                             LogPrintf("UDP:    %u/%u used from %s\n", provider.second.first, provider.second.second, provider.first.ToString());
                     }
@@ -1077,20 +1077,26 @@ bool PartialBlockData::Init(const UDPMessage& msg) {
     // complete when many (thousands of) non-tip blocks are sent in parallel.
     const MemoryUsageMode memory_usage_mode = tip_blk ? MemoryUsageMode::USE_MEMORY : MemoryUsageMode::USE_MMAP;
 
+    // In mmap mode, save chunks on a consistently-named file that persists
+    // across bitcoind sessions. The name includes the two unique identifiers
+    // used to map partial blocks in mapPartialBlocks: the peer (potentially a
+    // "trusted peer") and the block hash prefix.
+    std::string chunk_file_prefix = peer.ToString() + "_" + std::to_string(msg.msg.block.hash_prefix);
+
     if ((msg.header.msg_type & UDP_MSG_TYPE_TYPE_MASK) == MSG_TYPE_BLOCK_HEADER) {
-        header_decoder = FECDecoder(obj_length, memory_usage_mode, std::to_string(msg.msg.block.hash_prefix) + "_header");
+        header_decoder = FECDecoder(obj_length, memory_usage_mode, chunk_file_prefix + "_header");
         header_len = obj_length;
         header_initialized = true;
     } else {
-        body_decoder = FECDecoder(obj_length, memory_usage_mode, std::to_string(msg.msg.block.hash_prefix) + "_body");
+        body_decoder = FECDecoder(obj_length, memory_usage_mode, chunk_file_prefix + "_body");
         blk_len = obj_length;
         blk_initialized = true;
     }
     return true;
 }
 
-PartialBlockData::PartialBlockData(const CService& node, const UDPMessage& msg, const std::chrono::steady_clock::time_point& packet_recv) :
-        timeHeaderRecvd(packet_recv), nodeHeaderRecvd(node),
+PartialBlockData::PartialBlockData(const CService& peer, const UDPMessage& msg, const std::chrono::steady_clock::time_point& packet_recv) :
+        timeHeaderRecvd(packet_recv), peer(peer),
         in_header(true), blk_initialized(false), header_initialized(false),
         is_decodeable(false), is_header_processing(false),
         packet_awaiting_lock(false), awaiting_processing(false),
@@ -1115,6 +1121,33 @@ void PartialBlockData::ReconstructBlockFromDecoder() {
 
     assert(block_data.IsBlockAvailable());
 };
+
+/* Get FEC chunk senders corresponding to the partial block
+ *
+ * When "PartialBlockData.peer" is a "trusted peer", there can be multiple
+ * senders aggregated in the same partial block. In this case, the multiple
+ * senders can be obtained from the perNodeChunkCount map. In contrast, when
+ * "PartialBlockData.peer" is a non-trusted peer, all chunks come from the same
+ * peer. In this case, "PartialBlockData.peer" is the actual peer instead of a
+ * dummy value.
+ */
+std::string PartialBlockData::GetSenders()
+{
+    if (peer != TRUSTED_PEER_DUMMY) {
+        assert(perNodeChunkCount.size() == 1);
+        return peer.ToString();
+    }
+
+    std::string senders;
+    const size_t n_nodes = perNodeChunkCount.size();
+    size_t i_node = 1;
+    for (const auto& node : perNodeChunkCount) {
+        senders += node.first.ToString();
+        if (i_node++ < n_nodes)
+            senders += ", ";
+    }
+    return senders;
+}
 
 static void BlockMsgHToLE(UDPMessage& msg) {
     msg.msg.block.hash_prefix = htole64(msg.msg.block.hash_prefix);
@@ -1270,7 +1303,7 @@ bool HandleBlockTxMessage(UDPMessage& msg, size_t length, const CService& node, 
     bool new_block = false;
     auto it = mapPartialBlocks.find(hash_peer_pair);
     if (it == mapPartialBlocks.end()) {
-        it = mapPartialBlocks.insert(std::make_pair(std::make_pair(hash_prefix, state.connection.fTrusted ? TRUSTED_PEER_DUMMY : node), std::make_shared<PartialBlockData>(node, msg, packet_process_start))).first;
+        it = mapPartialBlocks.insert(std::make_pair(hash_peer_pair, std::make_shared<PartialBlockData>(peer, msg, packet_process_start))).first;
         new_block = true;
     }
     PartialBlockData& block = *it->second;

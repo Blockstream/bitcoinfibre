@@ -94,8 +94,8 @@ enum UDPState {
 
 struct PartialBlockData {
     const std::chrono::steady_clock::time_point timeHeaderRecvd;
-    const CService nodeHeaderRecvd;
-
+    const CService peer; // sender peer (either a "trusted peer" or a real peer)
+    // NOTE: when peer == TRUSTED_PEER_DUMMY, the actual senders are available in the perNodeChunkCount map
     std::atomic_bool in_header; // Indicates we are currently downloading header (or block txn)
     std::atomic_bool blk_initialized; // Indicates Init has been called with a block contents message
     std::atomic_bool header_initialized; // Indicates Init has been called with a block header message
@@ -131,6 +131,7 @@ struct PartialBlockData {
     ReadStatus ProvideHeaderData(const CBlockHeaderAndLengthShortTxIDs& header);
     PartialBlockData(const CService& node, const UDPMessage& header_msg, const std::chrono::steady_clock::time_point& packet_recv); // Must be a MSG_TYPE_BLOCK_HEADER
     void ReconstructBlockFromDecoder();
+    std::string GetSenders();
 };
 
 class ChunksAvailableSet {
