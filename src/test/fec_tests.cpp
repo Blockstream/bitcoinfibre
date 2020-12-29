@@ -23,9 +23,9 @@ constexpr size_t default_encoding_overhead = 5;
 
 struct GlobalFixture {
     /**
-     * Files generated during tests in partial_blocks get cleaned after the test
-     * finishes, but the directory stays. So, after a while,
-     * "/tmp/test_common_Bitcoin Core" will be filled with useless empty
+     * The files generated within the partial_blocks directory during tests get
+     * cleaned once the tests finish, but the directories stay. Thus, after a
+     * while, "/tmp/test_common_Bitcoin Core" will be filled with useless empty
      * directories. The GlobalFixture destructor runs after all the tests and
      * removes these directories.
      */
@@ -514,6 +514,74 @@ BOOST_AUTO_TEST_CASE(fec_test_decoding_multiple_blocks_in_parallel)
     BOOST_CHECK(all_decoded_successfully);
 }
 
+BOOST_AUTO_TEST_CASE(fec_test_map_storage_initialized_correctly)
+{
+    TestData test_data;
+    size_t n_chunks = 5;
+    size_t data_size = FEC_CHUNK_SIZE * n_chunks;
+    generate_encoded_chunks(data_size, test_data);
+    std::string obj_id = "1234_body";
+    FECDecoder decoder_a(data_size, MemoryUsageMode::USE_MMAP, obj_id);
+    MapStorage map_storage_a(decoder_a.GetFileName(), decoder_a.GetChunkCount());
+
+    bool initialized_fine = true;
+    for (size_t i = 0; i < n_chunks; i++) {
+        if (!CHUNK_ID_IS_NOT_SET(map_storage_a.GetChunkId(i)) || *map_storage_a.GetChunk(i) != '\0') {
+            initialized_fine = false;
+            break;
+        }
+    }
+    BOOST_CHECK(initialized_fine);
+
+    for (size_t i = 0; i < n_chunks - 1; i++) {
+        decoder_a.ProvideChunk(test_data.encoded_chunks[i].data(), test_data.chunk_ids[i]);
+    }
+
+    // A new decoder with the same filename (for example, a decoder created in
+    // recovery mode)
+    FECDecoder decoder_b(data_size, MemoryUsageMode::USE_MMAP, obj_id);
+    BOOST_CHECK_EQUAL(decoder_a.GetFileName(), decoder_b.GetFileName());
+    BOOST_CHECK_EQUAL(decoder_a.GetChunkCount(), decoder_b.GetChunkCount());
+
+    // The expectation is that the new decoder does not reset the values (chunk
+    // data and id) that are already stored in the file
+    MapStorage map_storage_b(decoder_b.GetFileName(), decoder_b.GetChunkCount());
+    bool stored_items_untouched = true;
+    for (size_t i = 0; i < n_chunks - 1; i++) {
+        if (CHUNK_ID_IS_NOT_SET(map_storage_b.GetChunkId(i)) || *map_storage_b.GetChunk(i) == '\0') {
+            stored_items_untouched = false;
+            break;
+        }
+    }
+    BOOST_CHECK(stored_items_untouched);
+}
+
+BOOST_AUTO_TEST_CASE(fec_test_map_storage_recoverable)
+{
+    TestData test_data;
+    size_t n_chunks = 5;
+    size_t data_size = FEC_CHUNK_SIZE * n_chunks;
+    generate_encoded_chunks(data_size, test_data);
+    std::string obj_id = "1234_body";
+    FECDecoder decoder(data_size, MemoryUsageMode::USE_MMAP, obj_id);
+    {
+        MapStorage map_storage(decoder.GetFileName(), decoder.GetChunkCount(), true);
+        BOOST_CHECK(!map_storage.IsRecoverable());
+    }
+
+    decoder.ProvideChunk(test_data.encoded_chunks[0].data(), test_data.chunk_ids[0]);
+    {
+        MapStorage map_storage(decoder.GetFileName(), decoder.GetChunkCount(), true);
+        BOOST_CHECK(map_storage.IsRecoverable());
+    }
+
+    {
+        MapStorage map_storage(decoder.GetFileName(), decoder.GetChunkCount());
+        // When MapStorage is not instantiated with create=true, the IsRecoverable always returns false
+        BOOST_CHECK(!map_storage.IsRecoverable());
+    }
+}
+
 // checks if the chunk ids stored in the filename match the ids in the expected_chunk_ids vector
 void check_stored_chunk_ids(const FECDecoder& decoder, const std::vector<uint32_t>& expected_chunk_ids)
 {
@@ -765,6 +833,111 @@ BOOST_DATA_TEST_CASE_F(BasicTestingSetup, fec_test_decode_using_moved_decoder, b
         BOOST_CHECK_EQUAL_COLLECTIONS(decoded_data.begin(), decoded_data.end(),
             test_data.original_data.begin(), test_data.original_data.end());
     }
+}
+
+/**
+ * Test helper funtion for testing recovery of FECDecoder
+ * @param[in] n_uncoded_chunks     number of uncoded chunk to be generated
+ * @param[in] n_overhead_chunks    number of overhead chunks to be generated
+ * @param[in] abort_at             floating point indicating the percentage at which the first decoder should be aborted
+ * @param[in] start_second_at      floating point indicating the percentage from which the second decoder should start receving chunks
+ * @param[in] expected_result      whether the test is expected to pass successfully or not
+ *
+ */
+void recovery_test(size_t n_uncoded_chunks, size_t n_overhead_chunks, float abort_at, float start_second_at, bool expected_result)
+{
+    assert(abort_at <= 1 && abort_at > 0 && start_second_at < 1 && start_second_at >= 0);
+
+    TestData test_data;
+    size_t data_size = FEC_CHUNK_SIZE * n_uncoded_chunks;
+    generate_encoded_chunks(data_size, test_data, n_overhead_chunks);
+    size_t n_encoded_chunks = n_uncoded_chunks + n_overhead_chunks;
+
+    std::string obj_id = "1234_body";
+
+    FECDecoder first_decoder(data_size, MemoryUsageMode::USE_MMAP, obj_id);
+
+    for (size_t i = 0; i < ceil(n_encoded_chunks * abort_at); i++) {
+        first_decoder.ProvideChunk(test_data.encoded_chunks[i].data(), test_data.chunk_ids[i]);
+    }
+
+    /// Assume the application was aborted here *******
+    /// The file is left on the disk but the decoding is not finished yet
+
+    // try to recover the data on disk first, and continue decoding with second_decoder
+    FECDecoder second_decoder(data_size, MemoryUsageMode::USE_MMAP, obj_id);
+
+    for (size_t i = floor(n_encoded_chunks * start_second_at); i < n_encoded_chunks; i++) {
+        second_decoder.ProvideChunk(test_data.encoded_chunks[i].data(), test_data.chunk_ids[i]);
+    }
+
+    if (expected_result) {
+        BOOST_CHECK(second_decoder.DecodeReady());
+        std::vector<unsigned char> decoded_data = second_decoder.GetDecodedData();
+        BOOST_CHECK_EQUAL(decoded_data.size(), test_data.original_data.size());
+        BOOST_CHECK_EQUAL_COLLECTIONS(decoded_data.begin(), decoded_data.end(),
+            test_data.original_data.begin(), test_data.original_data.end());
+    } else {
+        BOOST_CHECK(!second_decoder.DecodeReady());
+    }
+}
+
+BOOST_FIXTURE_TEST_CASE(fec_test_fecdecoder_recovery_in_two_steps, BasicTestingSetup)
+{
+    recovery_test(2, 0, 0.5, 0.5, true);
+    recovery_test(2, 0, 0.5, 0, true);
+    recovery_test(10, 0, 0.5, 0.5, true);
+    recovery_test(10, 0, 0.3, 0.3, true);
+    recovery_test(10, 0, 0.3, 0.4, false);
+    recovery_test(10, 0, 0.3, 0.1, true);
+    recovery_test(10, 0, 0.9, 0, true);
+    recovery_test(6, 4, 0.4, 0, true);
+    recovery_test(6, 4, 0.4, 0.4, true);
+    recovery_test(6, 4, 0.4, 0.6, true);  // there is a gap, but still decodable due to overhead
+    recovery_test(6, 4, 0.4, 0.9, false); // if gap is bigger than the overhead, decoding is not possible
+    recovery_test(6, 4, 0.6, 0, true);    // abort and continue after having enough chunks to decode already
+    recovery_test(6, 4, 0.8, 0, true);    // receive most of the chunks twice
+    recovery_test(6, 4, 1.0, 0, true);    // receive all the chunks twice
+
+    recovery_test(90, 10, 0.7, 0, true);
+    recovery_test(90, 10, 0.5, 0.5, true);
+    recovery_test(90, 10, 0.4, 0.45, true); // there is a gap, but still decodable due to overhead
+    recovery_test(90, 10, 0.4, 0.6, false); // if gap is bigger than the overhead, decoding is not possible
+    recovery_test(90, 10, 0.8, 0, true);    // receive most of the chunks twice
+    recovery_test(90, 10, 1.0, 0, true);    // receive all the chunks twice
+    recovery_test(90, 10, 0.9, 0, true);    // abort and continue after having enough chunks to decode already
+}
+
+BOOST_DATA_TEST_CASE_F(BasicTestingSetup, fec_test_fecdecoder_recovery_with_N_decoders, bdata::make({1, 2, CM256_MAX_CHUNKS, CM256_MAX_CHUNKS + 10}), n_uncoded_chunks)
+{
+    // This test will cover the worst-case scenario for recovering chunks
+    // If the decoder is going to receive N chunks, it will receive them via N different decoders.
+    // As if the decoder was restarted after receiving every chunk.
+    // Expectation is that the last decoder is still able to decode successfully.
+
+    TestData test_data;
+    size_t n_overhead_chunks = default_encoding_overhead;
+    size_t data_size = FEC_CHUNK_SIZE * n_uncoded_chunks;
+    size_t n_encoded_chunks = n_uncoded_chunks + n_overhead_chunks;
+
+    generate_encoded_chunks(data_size, test_data, n_overhead_chunks);
+
+    std::string obj_id = "1234_body";
+
+    std::vector<std::unique_ptr<FECDecoder>> decoders_vec;
+    for (size_t i = 0; i < n_encoded_chunks - 1; i++) {
+        decoders_vec.emplace_back(std::move(MakeUnique<FECDecoder>(data_size, MemoryUsageMode::USE_MMAP, obj_id)));
+        decoders_vec.back()->ProvideChunk(test_data.encoded_chunks[i].data(), test_data.chunk_ids[i]);
+    }
+
+    FECDecoder final_decoder(data_size, MemoryUsageMode::USE_MMAP, obj_id);
+    final_decoder.ProvideChunk(test_data.encoded_chunks[n_encoded_chunks - 1].data(), test_data.chunk_ids[n_encoded_chunks - 1]);
+
+    BOOST_CHECK(final_decoder.DecodeReady());
+    std::vector<unsigned char> decoded_data = final_decoder.GetDecodedData();
+    BOOST_CHECK_EQUAL(decoded_data.size(), test_data.original_data.size());
+    BOOST_CHECK_EQUAL_COLLECTIONS(decoded_data.begin(), decoded_data.end(),
+        test_data.original_data.begin(), test_data.original_data.end());
 }
 
 BOOST_AUTO_TEST_SUITE_END()
