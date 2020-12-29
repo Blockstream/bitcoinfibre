@@ -14,7 +14,8 @@
 #define FEC_CHUNK_SIZE 1152
 #define CHUNK_ID_SIZE sizeof(uint32_t)
 #define CM256_MAX_CHUNKS 27
-#define FEC_CHUNK_COUNT_MAX (1 << 24)
+#define FEC_CHUNK_COUNT_MAX ((1 << 24) - 1)
+#define CHUNK_ID_IS_NOT_SET(chunk_id) (chunk_id == FEC_CHUNK_COUNT_MAX + 1)
 
 #include "wirehair/wirehair.h"
 #include "wirehair/cm256.h"
@@ -115,7 +116,12 @@ public:
     size_t Size() const;
     char* GetStorage() const { return m_data_storage; }
 
+    // Return value is only valid if MapStorage gets instantiated with 'create=true'
+    bool IsRecoverable() const;
     ~MapStorage();
+
+private:
+    bool Recoverable(const boost::filesystem::path& filename) const;
 
 private:
     size_t m_chunk_count = 0;
@@ -123,6 +129,7 @@ private:
     char* m_data_storage = nullptr;
     char* m_id_storage = nullptr;
     size_t m_file_size = 0;
+    bool m_recoverable = false;
 };
 
 class FECDecoder {
@@ -162,11 +169,13 @@ class FECDecoder {
     fs::path compute_filename(const std::string& obj_id) const;
 
     bool ProvideChunkMemory(const unsigned char* chunk, uint32_t chunk_id);
-    bool ProvideChunkMmap(const unsigned char* chunk, uint32_t chunk_id);
+    bool ProvideChunkMmap(const unsigned char* chunk, uint32_t chunk_id, bool recovery_run = false);
 
     void DecodeCm256();
     void DecodeCm256Memory();
     void DecodeCm256Mmap();
+
+    void RecoverFromDisk();
 
 public:
     // data_size must be <= MAX_BLOCK_SERIALIZED_SIZE * MAX_CHUNK_CODED_BLOCK_SIZE_FACTOR
@@ -177,13 +186,12 @@ public:
 
     FECDecoder();
     ~FECDecoder();
-
     FECDecoder(const FECDecoder&) =delete;
     FECDecoder(FECDecoder&& decoder) =delete;
     FECDecoder& operator=(FECDecoder&& decoder) noexcept;
 
-    bool ProvideChunk(const unsigned char* chunk, uint32_t chunk_id);
-    bool ProvideChunk(const FECChunkType* chunk, uint32_t chunk_id) { return ProvideChunk((const unsigned char*)chunk, chunk_id); }
+    bool ProvideChunk(const unsigned char* chunk, uint32_t chunk_id, bool recovery_run = false);
+    bool ProvideChunk(const FECChunkType* chunk, uint32_t chunk_id, bool recovery_run = false) { return ProvideChunk((const unsigned char*)chunk, chunk_id, recovery_run); }
 
     bool HasChunk(uint32_t chunk_id);
     bool DecodeReady() const;
