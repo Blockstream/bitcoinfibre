@@ -86,20 +86,34 @@ MapStorage::MapStorage(boost::filesystem::path const& p, int const c, bool creat
         throw std::runtime_error("failed to open file: " + p.string() + " " + ::strerror(errno));
     }
 
+    m_data_storage = static_cast<char*>(::mmap(nullptr, m_file_size,
+        PROT_READ | PROT_WRITE, MAP_SHARED, m_chunk_file, 0));
+    if (m_data_storage == MAP_FAILED) {
+        ::close(m_chunk_file);
+        throw std::runtime_error("mmap failed " + p.string() + " " + ::strerror(errno));
+    }
+    m_id_storage = m_data_storage + (m_chunk_count * FEC_CHUNK_SIZE);
+
     if (create) {
-        int const ret = ::ftruncate(m_chunk_file, (CHUNK_ID_SIZE + FEC_CHUNK_SIZE) * m_chunk_count);
-        if (ret != 0) {
-            ::unlink(p.c_str());
-            throw std::runtime_error("ftruncate failed " + p.string() + " " + ::strerror(errno));
+        m_recoverable = Recoverable(p);
+        if (!m_recoverable) {
+            int const ret = ::ftruncate(m_chunk_file, m_file_size);
+            if (ret != 0) {
+                ::unlink(p.c_str());
+                throw std::runtime_error("ftruncate failed " + p.string() + " " + ::strerror(errno));
+            }
+
+            // Initialize all chunk ids to an invalid value (FEC_CHUNK_COUNT_MAX
+            // + 1) if creating the chunk file. In the future, when recovering
+            // the chunk storage from a pre-existing file, it is possible to
+            // know the chunks that were previously populated by checking
+            // whether the chunk id is a valid one.
+            uint32_t initial_chunk_id = FEC_CHUNK_COUNT_MAX + 1;
+            for (size_t i = 0; i < m_chunk_count; i++) {
+                auto const chunk_id_dest_ptr = m_id_storage + (i * CHUNK_ID_SIZE);
+                memcpy(chunk_id_dest_ptr, &initial_chunk_id, CHUNK_ID_SIZE);
+            }
         }
-    } else {
-        m_data_storage = static_cast<char*>(::mmap(nullptr, m_file_size,
-            PROT_READ | PROT_WRITE, MAP_SHARED, m_chunk_file, 0));
-        if (m_data_storage == MAP_FAILED) {
-            ::close(m_chunk_file);
-            throw std::runtime_error("mmap failed " + p.string() + " " + ::strerror(errno));
-        }
-        m_id_storage = m_data_storage + (m_chunk_count * FEC_CHUNK_SIZE);
     }
 }
 
@@ -141,6 +155,30 @@ size_t MapStorage::Size() const
     return m_file_size;
 }
 
+bool MapStorage::IsRecoverable() const
+{
+    return m_recoverable;
+}
+
+bool MapStorage::Recoverable(const boost::filesystem::path& filename) const
+{
+    if (filename.empty() || !fs::exists(filename)) {
+        return false;
+    }
+
+    size_t chunk_file_size = fs::file_size(filename);
+    if (chunk_file_size == 0 || chunk_file_size != m_file_size || m_chunk_count == 0) {
+        return false;
+    }
+
+    // At least one chunk id should have a valid value, otherwise the file does
+    // not have useful data
+    if (CHUNK_ID_IS_NOT_SET(GetChunkId(0))) {
+        return false;
+    }
+    return true;
+}
+
 MapStorage::~MapStorage()
 {
     if (m_data_storage != nullptr)
@@ -165,6 +203,9 @@ FECDecoder::FECDecoder(size_t const data_size, MemoryUsageMode memory_mode, cons
     if (memory_usage_mode == MemoryUsageMode::USE_MMAP) {
         filename = compute_filename(obj_id);
         MapStorage map_storage(filename, chunk_count, true /* create */);
+        if (map_storage.IsRecoverable()) {
+            RecoverFromDisk();
+        }
         owns_file = true;
     } else {
         if (CHUNK_COUNT_USES_CM256(chunk_count)) {
@@ -226,7 +267,7 @@ FECDecoder& FECDecoder::operator=(FECDecoder&& decoder) noexcept {
 
 void FECDecoder::remove_file()
 {
-    if (memory_usage_mode == MemoryUsageMode::USE_MMAP) {
+    if (memory_usage_mode == MemoryUsageMode::USE_MMAP && fs::exists(filename)) {
         MapStorage map_storage(filename, chunk_count);
         ::madvise(map_storage.GetStorage(), map_storage.Size(), MADV_REMOVE);
         ::unlink(filename.c_str());
@@ -242,7 +283,8 @@ FECDecoder::~FECDecoder() {
         remove_file();
 }
 
-bool FECDecoder::ProvideChunk(const unsigned char* const chunk, uint32_t const chunk_id) {
+bool FECDecoder::ProvideChunk(const unsigned char* const chunk, uint32_t const chunk_id, bool recovery_run)
+{
     if (CHUNK_COUNT_USES_CM256(chunk_count) ? chunk_id > 0xff : chunk_id > FEC_CHUNK_COUNT_MAX)
         return false;
 
@@ -260,20 +302,20 @@ bool FECDecoder::ProvideChunk(const unsigned char* const chunk, uint32_t const c
     }
 
     if (memory_usage_mode == MemoryUsageMode::USE_MMAP) {
-        return ProvideChunkMmap(chunk, chunk_id);
+        return ProvideChunkMmap(chunk, chunk_id, recovery_run);
     } else {
         return ProvideChunkMemory(chunk, chunk_id);
     }
 }
 
 
-bool FECDecoder::ProvideChunkMmap(const unsigned char* chunk, uint32_t chunk_id)
+bool FECDecoder::ProvideChunkMmap(const unsigned char* chunk, uint32_t chunk_id, bool recovery_run)
 {
     MapStorage map_storage(filename, chunk_count);
 
     // both wirehair and cm256 need chunk_count chunks, so regardless of
     // which decoder we use, fill our chunk storage
-    if (chunks_recvd < chunk_count) {
+    if (chunks_recvd < chunk_count && !recovery_run) {
         map_storage.Insert(chunk, chunk_id, chunks_recvd);
     }
 
@@ -322,7 +364,6 @@ bool FECDecoder::ProvideChunkMmap(const unsigned char* chunk, uint32_t chunk_id)
 
     return true;
 }
-
 
 bool FECDecoder::ProvideChunkMemory(const unsigned char* chunk, uint32_t chunk_id)
 {
@@ -454,6 +495,20 @@ void FECDecoder::DecodeCm256Mmap()
     }
 }
 
+void FECDecoder::RecoverFromDisk()
+{
+    MapStorage map_storage(filename, chunk_count);
+
+    for (size_t i = 0; i < chunk_count; i++) {
+        uint32_t chunk_id = map_storage.GetChunkId(i);
+        if (CHUNK_ID_IS_NOT_SET(chunk_id)) {
+            break;
+        }
+        char* chunk = map_storage.GetChunk(i);
+        ProvideChunk((unsigned char*)chunk, chunk_id, true /*recovery_run*/);
+    }
+}
+
 FECEncoder::FECEncoder(const std::vector<unsigned char>* dataIn, std::pair<std::unique_ptr<FECChunkType[]>, std::vector<uint32_t>>* fec_chunksIn)
         : data(dataIn), fec_chunks(fec_chunksIn) {
     assert(!fec_chunks->second.empty());
@@ -568,7 +623,7 @@ bool FECEncoder::BuildChunk(size_t vector_idx, bool overwrite) {
             cm256_start_idx = GetRand(0xff);
         fec_chunk_id = (cm256_start_idx + vector_idx) % (0xff - data_chunks);
     } else
-        fec_chunk_id = rand.randrange(FEC_CHUNK_COUNT_MAX - data_chunks);
+        fec_chunk_id = rand.randrange(FEC_CHUNK_COUNT_MAX + 1 - data_chunks);
     size_t chunk_id = fec_chunk_id + data_chunks;
 
     if (overwrite && (fec_chunks->second[vector_idx] == chunk_id))
