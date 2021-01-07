@@ -193,9 +193,6 @@ static const unsigned int DEFAULT_CHECKLEVEL = 3;
 static const uint64_t MIN_DISK_SPACE_FOR_BLOCK_FILES = 550 * 1024 * 1024;
 
 FlatFilePos SaveBlockToDisk(const CBlock&, int nHeight, const CChainParams&, const FlatFilePos*);
-bool StoreOoOBlock(const CChainParams&, const std::shared_ptr<const CBlock>, bool force, int in_height);
-void ProcessSuccessorOoOBlocks(const CChainParams&, const uint256& prev_block_hash, bool force=false);
-void CheckForOoOBlocks(const CChainParams&);
 
 /** 
  * Process an incoming block. This only returns after the best known valid

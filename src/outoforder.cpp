@@ -9,6 +9,7 @@
 #include <sync.h>
 #include <uint256.h>
 #include <validation.h>
+#include <outoforder.h>
 
 #include <deque>
 #include <map>
@@ -34,8 +35,7 @@ static int ExtractHeightFromBlock(const Consensus::Params& consensusParams, cons
     try {
         CScriptNum bn(data, /*require minimal encoding=*/true);
         return bn.getint();
-    }
-    catch (scriptnum_error) {
+    } catch (const scriptnum_error&) {
         return -1;
     }
 }
@@ -137,4 +137,48 @@ void CheckForOoOBlocks(const CChainParams& chainparams)
     for (const auto& prev_block_hash : to_process) {
         ProcessSuccessorOoOBlocks(chainparams, prev_block_hash);
     }
+}
+
+size_t CountOoOBlocks()
+{
+    size_t n_blocks = 0;
+    {
+        LOCK(cs_ooob);
+        CDBWrapper* const ooob_db = GetOoOBlockDB();
+        std::unique_ptr<CDBIterator> pcursor(ooob_db->NewIterator());
+        for (pcursor->SeekToFirst(); pcursor->Valid(); pcursor->Next()) {
+            n_blocks++;
+        }
+    }
+    return n_blocks;
+}
+
+std::map<uint256, std::vector<uint256>> GetOoOBlockMap()
+{
+    std::map<uint256, std::vector<uint256>> ooob_map;
+    {
+        LOCK(cs_ooob);
+        CDBWrapper* const ooob_db = GetOoOBlockDB();
+
+        std::unique_ptr<CDBIterator> pcursor(ooob_db->NewIterator());
+
+        for (pcursor->SeekToFirst(); pcursor->Valid(); pcursor->Next()) {
+            std::pair<char, uint256> key;
+            std::map<uint256, FlatFilePos> successors;
+            if (!pcursor->GetKey(key)) {
+                LogPrintf("Warning: failed to read key from out-of-order block database\n");
+                continue;
+            }
+            if (!pcursor->GetValue(successors)) {
+                LogPrintf("Warning: failed to read value from out-of-order block database\n");
+                continue;
+            }
+
+            ooob_map[key.second] = std::vector<uint256>();
+            for (const auto& successor : successors) {
+                ooob_map[key.second].push_back(successor.first);
+            }
+        }
+    }
+    return ooob_map;
 }
