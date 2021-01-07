@@ -143,13 +143,18 @@ class FECDecoder {
     // Only used in wirehair mode:
     WirehairCodec wirehair_decoder = nullptr;
 
-    // whether this instance is expected to delete the file or not, when
-    // destructed
-    bool owns_file = false;
-
     // Whether to store chunk ids and chunk data in memory (e.g. vector) or
     // to store them in a memory mapped file on the disk
     MemoryUsageMode memory_usage_mode = MemoryUsageMode::USE_MEMORY;
+
+    // whether this instance owns an mmap chunk file
+    bool owns_file = false;
+
+    // Whether this instance is expected to keep (persist) the mmap chunk file
+    // or not when destructed. When set to true, the destructor does not remove
+    // the chunk file. In this case, the chunk file shall be removed by calling
+    // RemoveMmapFile() explicitly.
+    bool m_keep_mmap_file = false;
 
     // maps final chunk ids to offset into the storage (backed by the file)
     std::vector<uint8_t> cm256_map;
@@ -158,8 +163,6 @@ class FECDecoder {
     // Only used in cm256 mode:
     std::vector<FECChunkType> cm256_chunks;
     cm256_block cm256_blocks[CM256_MAX_CHUNKS];
-
-    void remove_file();
 
     // filename for the chunk storage
     fs::path filename;
@@ -182,7 +185,8 @@ public:
     // memory_usage_mode if set to USE_MMAP, all chunks and chunk ids are stored in a memory-mapped file on disk
     //                  if set to USE_MEMORY, nothing is stored on disk and everything will live in the memory
     // obj_id identification string used to generate a unique Mmap file name (used when memory_usage_mode == USE_MMAP)
-    FECDecoder(size_t data_size, MemoryUsageMode memory_usage_mode = MemoryUsageMode::USE_MEMORY, const std::string& obj_id = "");
+    // keep_mmap_file persist the chunk file in mmap mode (see the keep_mmap_file notes above)
+    FECDecoder(size_t data_size, MemoryUsageMode memory_usage_mode = MemoryUsageMode::USE_MEMORY, const std::string& obj_id = "", const bool keep_mmap_file = false);
 
     FECDecoder();
     ~FECDecoder();
@@ -200,6 +204,7 @@ public:
     size_t GetChunkCount() const { return chunk_count; }
     size_t GetChunksRcvd() const { return chunks_recvd; }
     fs::path GetFileName() const { return filename; }
+    void RemoveMmapFile();
 
 };
 
