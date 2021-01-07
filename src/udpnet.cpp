@@ -694,6 +694,9 @@ bool InitializeUDPConnections() {
 
     BlockRecvInit();
 
+    /* Load partial blocks acquired in previous sessions */
+    LoadPartialBlocks();
+
     udp_read_thread.reset(new std::thread(&TraceThread<void (*)()>, "udpread", &ThreadRunReadEventLoop));
 
     return true;
