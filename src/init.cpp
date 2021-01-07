@@ -72,6 +72,7 @@
 #include <validation.h>
 #include <validationinterface.h>
 #include <walletinitinterface.h>
+#include <outoforder.h>
 
 #include <condition_variable>
 #include <cstdint>
