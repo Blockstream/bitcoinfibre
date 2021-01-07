@@ -15,6 +15,7 @@
 #include <core_io.h>
 #include <hash.h>
 #include <index/blockfilterindex.h>
+#include <outoforder.h>
 #include <policy/feerate.h>
 #include <policy/policy.h>
 #include <policy/rbf.h>
@@ -2523,6 +2524,51 @@ static UniValue getblockfilter(const JSONRPCRequest& request)
     return ret;
 }
 
+static UniValue getoooblocks(const JSONRPCRequest& request)
+{
+    RPCHelpMan{
+        "getoooblocks",
+        "\nReturn information about the out-of-order blocks (OOOBs) stored in disk.\n",
+        {
+            {"verbose", RPCArg::Type::BOOL, /* default */ "false",
+                "False to obtain the number of OOOBs in disk, true to obtain their hashes"},
+        },
+        RPCResults{
+            RPCResult{"for verbose = true",
+                "{                         (json object) predecessor to successor hash mapping\n"
+                "  \"predecessor_hash\": [   (array) list with hashes of successor blocks\n"
+                "      \"successor_hash\",   (string) successor block hash\n"
+                "      ...\n"
+                "  ], ...\n"
+                "}\n"},
+            RPCResult{"for verbose = false",
+                "n    (numeric) Number of OOOBs available in disk\n"},
+        },
+        RPCExamples{
+            HelpExampleCli("getoooblocks", "true") + HelpExampleRpc("getoooblocks", "true")},
+    }
+        .Check(request);
+
+    bool fVerbose = false;
+    if (!request.params[0].isNull())
+        fVerbose = request.params[0].get_bool();
+
+    if (!fVerbose)
+        return CountOoOBlocks();
+    else {
+        const auto ooob_map = GetOoOBlockMap();
+        UniValue ret(UniValue::VOBJ);
+        for (const auto& elem : ooob_map) {
+            UniValue successor_array(UniValue::VARR);
+            for (const auto& successor : elem.second) {
+                successor_array.push_back(successor.ToString());
+            }
+            ret.pushKV(elem.first.ToString(), successor_array);
+        }
+        return ret;
+    }
+}
+
 // clang-format off
 static const CRPCCommand commands[] =
 { //  category              name                      actor (function)         argNames
@@ -2551,6 +2597,7 @@ static const CRPCCommand commands[] =
     { "blockchain",         "preciousblock",          &preciousblock,          {"blockhash"} },
     { "blockchain",         "scantxoutset",           &scantxoutset,           {"action", "scanobjects"} },
     { "blockchain",         "getblockfilter",         &getblockfilter,         {"blockhash", "filtertype"} },
+    { "blockchain",         "getoooblocks",           &getoooblocks,           {"verbose"} },
 
     /* Not shown in help */
     { "hidden",             "invalidateblock",        &invalidateblock,        {"blockhash"} },

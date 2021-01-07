@@ -55,6 +55,7 @@
 #include <validation.h>
 #include <validationinterface.h>
 #include <walletinitinterface.h>
+#include <outoforder.h>
 
 #include <stdint.h>
 #include <stdio.h>
