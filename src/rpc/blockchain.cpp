@@ -26,6 +26,7 @@
 #include <node/context.h>
 #include <node/transaction.h>
 #include <node/utxo_snapshot.h>
+#include <outoforder.h>
 #include <primitives/transaction.h>
 #include <rpc/server.h>
 #include <rpc/server_util.h>
@@ -2974,6 +2975,51 @@ UniValue CreateUTXOSnapshot(
     return result;
 }
 
+static UniValue getoooblocks(const JSONRPCRequest& request)
+{
+    RPCHelpMan{
+        "getoooblocks",
+        "\nReturn information about the out-of-order blocks (OOOBs) stored in disk.\n",
+        {
+            {"verbose", RPCArg::Type::BOOL, /* default */ "false",
+             "False to obtain the number of OOOBs in disk, true to obtain their hashes"},
+        },
+        RPCResults{
+            RPCResult{"for verbose = true",
+                      "{                         (json object) predecessor to successor hash mapping\n"
+                      "  \"predecessor_hash\": [   (array) list with hashes of successor blocks\n"
+                      "      \"successor_hash\",   (string) successor block hash\n"
+                      "      ...\n"
+                      "  ], ...\n"
+                      "}\n"},
+            RPCResult{"for verbose = false",
+                      "n    (numeric) Number of OOOBs available in disk\n"},
+        },
+        RPCExamples{
+            HelpExampleCli("getoooblocks", "true") + HelpExampleRpc("getoooblocks", "true")},
+    }
+        .Check(request);
+
+    bool fVerbose = false;
+    if (!request.params[0].isNull())
+        fVerbose = request.params[0].get_bool();
+
+    if (!fVerbose)
+        return CountOoOBlocks();
+    else {
+        const auto ooob_map = GetOoOBlockMap();
+        UniValue ret(UniValue::VOBJ);
+        for (const auto& elem : ooob_map) {
+            UniValue successor_array(UniValue::VARR);
+            for (const auto& successor : elem.second) {
+                successor_array.push_back(successor.ToString());
+            }
+            ret.pushKV(elem.first.ToString(), successor_array);
+        }
+        return ret;
+    }
+}
+
 void RegisterBlockchainRPCCommands(CRPCTable& t)
 {
     static const CRPCCommand commands[]{
@@ -2997,6 +3043,7 @@ void RegisterBlockchainRPCCommands(CRPCTable& t)
         {"blockchain", &scantxoutset},
         {"blockchain", &scanblocks},
         {"blockchain", &getblockfilter},
+        {"blockchain", &getoooblocks},
         {"hidden", &invalidateblock},
         {"hidden", &reconsiderblock},
         {"hidden", &waitfornewblock},

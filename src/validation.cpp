@@ -4,6 +4,7 @@
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
 #include <validation.h>
+#include <outoforder.h>
 
 #include <kernel/coinstats.h>
 #include <kernel/mempool_persist.h>

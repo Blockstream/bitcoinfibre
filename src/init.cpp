@@ -84,6 +84,7 @@
 #include <validation.h>
 #include <validationinterface.h>
 #include <walletinitinterface.h>
+#include <outoforder.h>
 
 #include <algorithm>
 #include <condition_variable>
