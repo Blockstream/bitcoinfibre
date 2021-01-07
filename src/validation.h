@@ -134,10 +134,6 @@ extern CBlockIndex *pindexBestHeader;
 /** Documentation for argument 'checklevel'. */
 extern const std::vector<std::string> CHECKLEVEL_DOC;
 
-bool StoreOoOBlock(const CChainParams&, const std::shared_ptr<const CBlock>, bool force, int in_height);
-void ProcessSuccessorOoOBlocks(const CChainParams&, const uint256& prev_block_hash, bool force=false);
-void CheckForOoOBlocks(const CChainParams&);
-
 /** Unload database information */
 void UnloadBlockIndex(CTxMemPool* mempool, ChainstateManager& chainman);
 /** Run instances of script checking worker threads */
