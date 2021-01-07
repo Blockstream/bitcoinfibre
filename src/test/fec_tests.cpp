@@ -431,7 +431,7 @@ BOOST_DATA_TEST_CASE_F(BasicTestingSetup, fec_test_providechunk_repetition, MEMO
     check_chunk_equal(&block_fec_chunks.first[2], original_data);
 }
 
-BOOST_AUTO_TEST_CASE(fec_test_creation_removal_chunk_file)
+BOOST_FIXTURE_TEST_CASE(fec_test_creation_removal_chunk_file, BasicTestingSetup)
 {
     fs::path filename;
     {
@@ -442,6 +442,15 @@ BOOST_AUTO_TEST_CASE(fec_test_creation_removal_chunk_file)
     } // When FECDecoder's destructor is called, it should remove the file
 
     BOOST_CHECK(!fs::exists(filename));
+
+    {
+        // Now construct the FECDecoder object with keep_mmap_file=true
+        FECDecoder decoder(10000, MemoryUsageMode::USE_MMAP, "" /* obj_id */, true /* keep_mmap_file */);
+        filename = decoder.GetFileName();
+        BOOST_CHECK(fs::exists(filename));
+    } // When FECDecoder's destructor is called, it should NOT remove the file
+
+    BOOST_CHECK(fs::exists(filename));
 }
 
 BOOST_AUTO_TEST_CASE(fec_test_chunk_file_stays_if_destructor_not_called)
