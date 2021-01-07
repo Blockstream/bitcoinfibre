@@ -92,6 +92,14 @@ enum UDPState {
     STATE_INIT_COMPLETE = STATE_GOT_SYN | STATE_GOT_SYN_ACK, // We can now send data to this peer
 };
 
+struct ChunkFileNameParts{
+    struct in_addr ipv4Addr;
+    unsigned short port;
+    size_t length;
+    uint64_t hash_prefix;
+    bool is_header;
+};
+
 struct PartialBlockData {
     const std::chrono::steady_clock::time_point timeHeaderRecvd;
     const CService peer; // sender peer (either a "trusted peer" or a real peer)
@@ -99,7 +107,7 @@ struct PartialBlockData {
     std::atomic_bool in_header; // Indicates we are currently downloading header (or block txn)
     std::atomic_bool blk_initialized; // Indicates Init has been called with a block contents message
     std::atomic_bool header_initialized; // Indicates Init has been called with a block header message
-    std::atomic_bool is_decodeable; // Indicates decoder.DecodeReady() && !in_header
+    std::atomic_bool is_decodeable; // Indicates body_decoder.DecodeReady() or block.block_data.IsBlockAvailable()
     std::atomic_bool is_header_processing; // Indicates in_header && !initialized but header is ready
     std::atomic_bool packet_awaiting_lock; // Indicates there is a packet ready to process that needs state_mutex
     std::atomic_bool awaiting_processing; // Indicates the block has been pushed to the processing queue already
@@ -128,8 +136,12 @@ struct PartialBlockData {
     std::map<CService, std::pair<uint32_t, uint32_t>> perNodeChunkCount;
 
     bool Init(const UDPMessage& msg);
+    bool Init(const ChunkFileNameParts& cfp);
+
     ReadStatus ProvideHeaderData(const CBlockHeaderAndLengthShortTxIDs& header);
     PartialBlockData(const CService& node, const UDPMessage& header_msg, const std::chrono::steady_clock::time_point& packet_recv); // Must be a MSG_TYPE_BLOCK_HEADER
+    PartialBlockData(const CService& peer, const ChunkFileNameParts& cfp);
+
     void ReconstructBlockFromDecoder();
     std::string GetSenders();
 };

@@ -17,6 +17,8 @@
 #include <queue>
 #include <condition_variable>
 #include <thread>
+#include <boost/algorithm/string.hpp>
+#include <boost/range/iterator_range.hpp>
 #include <boost/optional.hpp>
 
 #if BOOST_VERSION < 105600
@@ -28,7 +30,10 @@
 #define to_millis_double(t) (std::chrono::duration_cast<std::chrono::duration<double, std::chrono::milliseconds::period> >(t).count())
 #define DIV_CEIL(a, b) (((a) + (b) - 1) / (b))
 
-static CService TRUSTED_PEER_DUMMY;
+static in_addr TRUSTED_PEER_DUMMY_IPADDR;
+auto res = inet_pton(AF_INET, "0.0.0.0", &TRUSTED_PEER_DUMMY_IPADDR);
+static unsigned short TRUSTED_PEER_DUMMY_PORT = 0;
+static CService TRUSTED_PEER_DUMMY(TRUSTED_PEER_DUMMY_IPADDR, TRUSTED_PEER_DUMMY_PORT);
 static std::map<std::pair<uint64_t, CService>, std::shared_ptr<PartialBlockData> > mapPartialBlocks;
 static std::unordered_set<uint64_t> setBlocksRelayed;
 // In cases where we receive a block without its previous block, or a block
@@ -76,6 +81,17 @@ static void RemovePartialBlocks(uint64_t const hash_prefix) {
     std::map<std::pair<uint64_t, CService>, std::shared_ptr<PartialBlockData> >::iterator it = mapPartialBlocks.lower_bound(std::make_pair(hash_prefix, TRUSTED_PEER_DUMMY));
     while (it != mapPartialBlocks.end() && it->first.first == hash_prefix)
         it = RemovePartialBlock(it);
+}
+
+std::shared_ptr<PartialBlockData> GetPartialBlockData(const std::pair<uint64_t, CService>& key){
+    auto it = mapPartialBlocks.find(key);
+    if (it != mapPartialBlocks.end())
+        return it->second;
+    return nullptr;
+}
+
+void ResetPartialBlocks(){
+    mapPartialBlocks.clear();
 }
 
 static inline void SendMessageToNode(const UDPMessage& msg, unsigned int length, bool high_prio, uint64_t hash_prefix, std::map<CService, UDPConnectionState>::iterator it) {
@@ -1056,6 +1072,95 @@ void BlockRecvShutdown() {
     }
 }
 
+/*
+ * Detect whether a FEC chunk file contains recoverable partial block data
+ *
+ * Assume the file is recoverable if it is named according to the following
+ * format: "<ipaddr:port>_<hashprefix>_<blockpart>_<size>", where:
+ *
+ * - <ipaddr:port> : is the IP address and port of the sender peer (the trusted
+ *                   dummy peer is set to "[::]:0").
+ * - <hashprefix>  : is the block hash prefix.
+ * - <blockpart>   : indicates which part of the block the chunk file holds
+ *                   (header or body).
+ * - "size"        : is the object size in bytes.
+ */
+bool IsChunkFileRecoverable(const std::string& filename, ChunkFileNameParts& cfp)
+{
+    std::vector<std::string> parts;
+    boost::split(parts, filename, boost::is_any_of("_"));
+    if (parts.size() != 4) {
+        return false;
+    }
+    std::vector<std::string> ip_port;
+    boost::split(ip_port, parts[0], boost::is_any_of(":"));
+    if (ip_port.size() != 2) {
+        return false;
+    }
+
+    auto res = inet_pton(AF_INET, ip_port[0].c_str(), &(cfp.ipv4Addr));
+    if (res <= 0) {
+        return false;
+    }
+    cfp.port = static_cast<unsigned short>(strtoul(ip_port[1].c_str(), nullptr, 10));
+
+    cfp.hash_prefix = strtoull(parts[1].c_str(), nullptr, 10);
+    if (cfp.hash_prefix == 0) {
+        return false;
+    }
+
+    if (parts[2] != "header" && parts[2] != "body") {
+        return false;
+    }
+    cfp.is_header = (parts[2] == "header");
+
+    cfp.length = strtoul(parts[3].c_str(), nullptr, 10);
+    if (cfp.length == 0) {
+        return false;
+    }
+
+    return true;
+}
+
+// Scan the disk for recoverable FEC chunk files and try to rebuild the
+// mapPartialBlocks state. Clean up the chunk files that are not recoverable.
+void LoadPartialBlocks()
+{
+    uint32_t n_imported = 0;
+    uint32_t n_removed = 0;
+    fs::path chunk_files_dir = GetDataDir() / "partial_blocks";
+    if (is_directory(chunk_files_dir)) {
+        for (auto& entry : boost::make_iterator_range(fs::directory_iterator(chunk_files_dir), {})) {
+            boost::filesystem::path chunk_file_path(entry);
+            ChunkFileNameParts cfp;
+            if (!IsChunkFileRecoverable(chunk_file_path.filename().string(), cfp)) {
+                fs::remove(chunk_file_path);
+                n_removed++;
+                continue;
+            }
+            CService peer(cfp.ipv4Addr, cfp.port);
+            const std::pair<uint64_t, CService> hash_peer_pair = std::make_pair(cfp.hash_prefix, peer);
+
+            auto block = GetPartialBlockData(hash_peer_pair);
+            if (!block) {
+                // new block
+                mapPartialBlocks.insert(std::make_pair(hash_peer_pair, std::make_shared<PartialBlockData>(peer, cfp)));
+                n_imported++;
+            } else {
+                // header or body was already recovered
+                if (!block->Init(cfp)) {
+                    LogPrintf("UDP: Got block contents that couldn't match header for block id %lu\n", cfp.hash_prefix);
+                    fs::remove(chunk_file_path);
+                }
+            }
+        }
+    }
+    LogPrintf("Imported %lu partial blocks from disk\n", n_imported);
+    if (n_removed > 0) {
+        LogPrintf("Removed %lu non-recoverable partial blocks from disk\n", n_removed);
+    }
+}
+
 // TODO: Use the one from net_processing (with appropriate lock-free-ness)
 static std::vector<std::pair<uint256, CTransactionRef>> udpnet_dummy_extra_txn;
 ReadStatus PartialBlockData::ProvideHeaderData(const CBlockHeaderAndLengthShortTxIDs& header) {
@@ -1064,13 +1169,19 @@ ReadStatus PartialBlockData::ProvideHeaderData(const CBlockHeaderAndLengthShortT
     return block_data.InitData(header, udpnet_dummy_extra_txn);
 }
 
-bool PartialBlockData::Init(const UDPMessage& msg) {
+static std::string GetChunkFilePrefix(const CService& peer, uint64_t hash_prefix){
+    return peer.ToString() + "_" + std::to_string(hash_prefix);
+}
+
+bool PartialBlockData::Init(const UDPMessage& msg)
+{
     assert((msg.header.msg_type & UDP_MSG_TYPE_TYPE_MASK) == MSG_TYPE_BLOCK_HEADER || (msg.header.msg_type & UDP_MSG_TYPE_TYPE_MASK) == MSG_TYPE_BLOCK_CONTENTS);
-    const uint32_t obj_length  = msg.msg.block.obj_length;
+    const uint32_t obj_length = msg.msg.block.obj_length;
     if (obj_length > MAX_BLOCK_SERIALIZED_SIZE * MAX_CHUNK_CODED_BLOCK_SIZE_FACTOR)
         return false;
 
     tip_blk = msg.header.msg_type & TIP_BLOCK;
+    const bool is_blk_header_chunk = (msg.header.msg_type & UDP_MSG_TYPE_TYPE_MASK) == MSG_TYPE_BLOCK_HEADER;
 
     // When receiving a block at the tip of the blockchain, load FEC chunks
     // directly in memory. They are expected to remain there only briefly until
@@ -1084,9 +1195,9 @@ bool PartialBlockData::Init(const UDPMessage& msg) {
     // across bitcoind sessions. The name includes the two unique identifiers
     // used to map partial blocks in mapPartialBlocks: the peer (potentially a
     // "trusted peer") and the block hash prefix.
-    std::string chunk_file_prefix = peer.ToString() + "_" + std::to_string(msg.msg.block.hash_prefix);
+    std::string chunk_file_prefix = GetChunkFilePrefix(peer, msg.msg.block.hash_prefix);
 
-    if ((msg.header.msg_type & UDP_MSG_TYPE_TYPE_MASK) == MSG_TYPE_BLOCK_HEADER) {
+    if (is_blk_header_chunk) {
         header_decoder = FECDecoder(
             obj_length,
             memory_usage_mode,
@@ -1095,6 +1206,7 @@ bool PartialBlockData::Init(const UDPMessage& msg) {
         );
         header_len = obj_length;
         header_initialized = true;
+        assert(header_decoder.GetChunksRcvd() == 0);
     } else {
         body_decoder = FECDecoder(
             obj_length,
@@ -1104,7 +1216,14 @@ bool PartialBlockData::Init(const UDPMessage& msg) {
         );
         blk_len = obj_length;
         blk_initialized = true;
+        assert(body_decoder.GetChunksRcvd() == 0);
     }
+    // NOTE: Even though the decoder that was just constructed could have
+    // recovered data from a pre-existing mmap file in disk, we don't expect it
+    // to recover data here. At this point, we expect that LoadPartialBlocks()
+    // has already recovered all the data that could be recovered. Hence, the
+    // decoder should be empty at this point. The above assertions verify that.
+
     return true;
 }
 
@@ -1115,10 +1234,57 @@ PartialBlockData::PartialBlockData(const CService& peer, const UDPMessage& msg, 
         packet_awaiting_lock(false), awaiting_processing(false),
         chain_lookup(false), currentlyProcessing(false), blk_len(0),
         header_len(0), block_data(&mempool)
-    {
-       bool const ret = Init(msg);
-       assert(ret);
+{
+    bool const ret = Init(msg);
+    assert(ret);
+}
+
+
+bool PartialBlockData::Init(const ChunkFileNameParts& cfp)
+{
+    if (cfp.length > MAX_BLOCK_SERIALIZED_SIZE * MAX_CHUNK_CODED_BLOCK_SIZE_FACTOR)
+        return false;
+
+    std::string chunk_file_prefix = GetChunkFilePrefix(peer, cfp.hash_prefix);
+    if (cfp.is_header) {
+	    assert(!header_initialized);
+        header_decoder = FECDecoder(
+            cfp.length,
+            MemoryUsageMode::USE_MMAP,
+            chunk_file_prefix + "_header",
+            true /* persist mmap file */
+        );
+        header_len = cfp.length;
+        header_initialized = true;
+        // The recovered header object could be decodable already
+        is_header_processing = header_decoder.DecodeReady();
+    } else {
+        assert(!blk_initialized);
+        body_decoder = FECDecoder(
+            cfp.length,
+            MemoryUsageMode::USE_MMAP,
+            chunk_file_prefix + "_body",
+            true /* persist mmap file */
+        );
+        blk_len = cfp.length;
+        blk_initialized = true;
+        // The recovered body object could be decodable already
+        is_decodeable = body_decoder.DecodeReady();
     }
+    return true;
+}
+
+PartialBlockData::PartialBlockData(const CService& peer, const ChunkFileNameParts& cfp) :
+        timeHeaderRecvd(std::chrono::steady_clock::now()), peer(peer),
+        in_header(true), blk_initialized(false), header_initialized(false),
+        is_decodeable(false), is_header_processing(false),
+        packet_awaiting_lock(false), awaiting_processing(false),
+        chain_lookup(false), currentlyProcessing(false), blk_len(0),
+        header_len(0), block_data(&mempool), tip_blk(false)
+{
+    bool const ret = Init(cfp);
+    assert(ret);
+}
 
 void PartialBlockData::ReconstructBlockFromDecoder() {
     assert(body_decoder.DecodeReady());
