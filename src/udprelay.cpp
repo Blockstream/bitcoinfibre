@@ -60,6 +60,9 @@ static std::map<std::pair<uint64_t, CService>, std::shared_ptr<PartialBlockData>
             continue; // Peer reconnected at some point
         nodeIt->second.chunks_avail.erase(chunks_avail_it);
     }
+    /* Now that we are done with the FEC data, remove any underlying mmap FEC chunk files */
+    it->second->header_decoder.RemoveMmapFile();
+    it->second->body_decoder.RemoveMmapFile();
     return mapPartialBlocks.erase(it);
 }
 
@@ -1084,11 +1087,21 @@ bool PartialBlockData::Init(const UDPMessage& msg) {
     std::string chunk_file_prefix = peer.ToString() + "_" + std::to_string(msg.msg.block.hash_prefix);
 
     if ((msg.header.msg_type & UDP_MSG_TYPE_TYPE_MASK) == MSG_TYPE_BLOCK_HEADER) {
-        header_decoder = FECDecoder(obj_length, memory_usage_mode, chunk_file_prefix + "_header");
+        header_decoder = FECDecoder(
+            obj_length,
+            memory_usage_mode,
+            chunk_file_prefix + "_header",
+            true /* persist mmap file */
+        );
         header_len = obj_length;
         header_initialized = true;
     } else {
-        body_decoder = FECDecoder(obj_length, memory_usage_mode, chunk_file_prefix + "_body");
+        body_decoder = FECDecoder(
+            obj_length,
+            memory_usage_mode,
+            chunk_file_prefix + "_body",
+            true /* persist mmap file */
+        );
         blk_len = obj_length;
         blk_initialized = true;
     }

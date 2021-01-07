@@ -191,7 +191,7 @@ FECDecoder::FECDecoder()
 {
 }
 
-FECDecoder::FECDecoder(size_t const data_size, MemoryUsageMode memory_mode, const std::string& obj_id) :
+FECDecoder::FECDecoder(size_t const data_size, MemoryUsageMode memory_mode, const std::string& obj_id, const bool keep_mmap_file) :
         chunk_count(DIV_CEIL(data_size, FEC_CHUNK_SIZE)),
         obj_size(data_size),
         chunk_tracker(chunk_count),
@@ -207,6 +207,7 @@ FECDecoder::FECDecoder(size_t const data_size, MemoryUsageMode memory_mode, cons
             RecoverFromDisk();
         }
         owns_file = true;
+        m_keep_mmap_file = keep_mmap_file;
     } else {
         if (CHUNK_COUNT_USES_CM256(chunk_count)) {
             cm256_chunks.reserve(chunk_count);
@@ -229,8 +230,8 @@ fs::path FECDecoder::compute_filename(const std::string& obj_id) const
 }
 
 FECDecoder& FECDecoder::operator=(FECDecoder&& decoder) noexcept {
-    if (owns_file)
-        remove_file();
+    if (owns_file && !m_keep_mmap_file)
+        RemoveMmapFile();
     if (wirehair_decoder)
         return_wirehair_codec(wirehair_decoder);
 
@@ -239,13 +240,14 @@ FECDecoder& FECDecoder::operator=(FECDecoder&& decoder) noexcept {
     obj_size          = decoder.obj_size;
     decodeComplete    = decoder.decodeComplete;
     chunk_tracker     = std::move(decoder.chunk_tracker);
-    owns_file         = exchange(decoder.owns_file, false);
     memory_usage_mode = decoder.memory_usage_mode;
+    owns_file         = exchange(decoder.owns_file, false);
+    m_keep_mmap_file  = decoder.m_keep_mmap_file;
     cm256_map         = std::move(decoder.cm256_map);
     cm256_decoded     = exchange(decoder.cm256_decoded, false);
     cm256_chunks      = std::move(decoder.cm256_chunks);
     if (owns_file) {
-	    assert(fs::exists(decoder.filename));
+        assert(fs::exists(decoder.filename));
         if (filename.empty()) {
             filename = decoder.filename;
         } else {
@@ -265,22 +267,23 @@ FECDecoder& FECDecoder::operator=(FECDecoder&& decoder) noexcept {
     return *this;
 }
 
-void FECDecoder::remove_file()
+void FECDecoder::RemoveMmapFile()
 {
-    if (memory_usage_mode == MemoryUsageMode::USE_MMAP && fs::exists(filename)) {
+    if (owns_file && fs::exists(filename)) {
         MapStorage map_storage(filename, chunk_count);
         ::madvise(map_storage.GetStorage(), map_storage.Size(), MADV_REMOVE);
         ::unlink(filename.c_str());
+        owns_file = false;
     }
-    owns_file = false;
 }
 
-FECDecoder::~FECDecoder() {
+FECDecoder::~FECDecoder()
+{
     if (wirehair_decoder)
         return_wirehair_codec(wirehair_decoder);
 
-    if (owns_file)
-        remove_file();
+    if (owns_file && !m_keep_mmap_file)
+        RemoveMmapFile();
 }
 
 bool FECDecoder::ProvideChunk(const unsigned char* const chunk, uint32_t const chunk_id, bool recovery_run)
