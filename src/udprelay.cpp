@@ -11,6 +11,7 @@
 #include <logging.h>
 #include <streams.h>
 #include <validation.h>
+#include <outoforder.h>
 #include <version.h>
 #include <net.h>
 #include <net_processing.h>
