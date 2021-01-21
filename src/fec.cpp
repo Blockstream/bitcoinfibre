@@ -243,7 +243,6 @@ FECDecoder& FECDecoder::operator=(FECDecoder&& decoder) noexcept {
     memory_usage_mode = decoder.memory_usage_mode;
     owns_file         = exchange(decoder.owns_file, false);
     m_keep_mmap_file  = decoder.m_keep_mmap_file;
-    cm256_map         = std::move(decoder.cm256_map);
     cm256_decoded     = exchange(decoder.cm256_decoded, false);
     cm256_chunks      = std::move(decoder.cm256_chunks);
     if (owns_file) {
@@ -413,20 +412,22 @@ const void* FECDecoder::GetDataPtr(uint32_t chunk_id)
         if (!cm256_decoded) {
             DecodeCm256();
         }
-        if (memory_usage_mode == MemoryUsageMode::USE_MMAP) {
-            assert(chunk_id < cm256_map.size());
-            assert(cm256_map[chunk_id] < chunk_count);
-            MapStorage map_storage(filename, chunk_count);
-            memcpy(&tmp_chunk, map_storage.GetChunk(cm256_map[chunk_id]), FEC_CHUNK_SIZE);
-        } else {
-            assert(cm256_blocks[uint8_t(chunk_id)].Index == chunk_id);
-            return cm256_blocks[uint8_t(chunk_id)].Block;
-        }
+        assert(cm256_blocks[uint8_t(chunk_id)].Index == chunk_id);
+        return cm256_blocks[uint8_t(chunk_id)].Block;
     } else if (CHUNK_COUNT_USES_WIREHAIR(chunk_count)) {
         uint32_t chunk_size = FEC_CHUNK_SIZE;
         assert(!wirehair_recover_block(wirehair_decoder, chunk_id, (void*)&tmp_chunk, &chunk_size));
     }
     return &tmp_chunk;
+}
+
+/* Clean-up routine to be executed after calls to GetDataPtr() */
+void FECDecoder::GetDataPtrDone()
+{
+    if (CHUNK_COUNT_USES_CM256(chunk_count) &&
+        memory_usage_mode == MemoryUsageMode::USE_MMAP) {
+        CleanCm256Storage();
+    }
 }
 
 std::vector<unsigned char> FECDecoder::GetDecodedData()
@@ -442,6 +443,8 @@ std::vector<unsigned char> FECDecoder::GetDecodedData()
             size_t size_remaining = obj_size - (i * FEC_CHUNK_SIZE);
             memcpy(vec.data() + (i * FEC_CHUNK_SIZE), data_ptr, std::min(size_remaining, (size_t)FEC_CHUNK_SIZE));
         }
+
+        GetDataPtrDone();
     } else {
         WirehairResult decode_res = wirehair_recover(wirehair_decoder, vec.data(), obj_size);
         if (decode_res != Wirehair_Success) {
@@ -455,47 +458,60 @@ void FECDecoder::DecodeCm256()
 {
     assert(!cm256_decoded);
     if (memory_usage_mode == MemoryUsageMode::USE_MMAP) {
-        DecodeCm256Mmap();
-    } else {
-        DecodeCm256Memory();
+        CopyCm256MmapChunksToMemory();
     }
+
+    // Decode the cm256 chunks in place
+    cm256_encoder_params params{(int)chunk_count, (256 - (int)chunk_count - 1), FEC_CHUNK_SIZE};
+    assert(!cm256_decode(params, cm256_blocks));
+
+    // After in-place decoding, the chunk ids in "cm256_blocks" do not refer to
+    // the encoded chunks any longer. Instead, they refer to the original (i.e.,
+    // decoded) chunks. Furthermore, the order of original chunks after decoding
+    // is not guaranteed to be sorted. Hence, sort the chunks explicitly:
+    std::sort(
+        cm256_blocks,
+        &cm256_blocks[chunk_count],
+        [](const cm256_block& a, const cm256_block& b) { return a.Index < b.Index; });
+
     cm256_decoded = true;
 }
 
-void FECDecoder::DecodeCm256Memory()
-{
-    cm256_encoder_params params{(int)chunk_count, (256 - (int)chunk_count - 1), FEC_CHUNK_SIZE};
-    assert(!cm256_decode(params, cm256_blocks));
-    std::sort(cm256_blocks, &cm256_blocks[chunk_count], [](const cm256_block& a, const cm256_block& b) { return a.Index < b.Index; });
-}
-
-void FECDecoder::DecodeCm256Mmap()
+void FECDecoder::CopyCm256MmapChunksToMemory()
 {
     MapStorage map_storage(filename, chunk_count);
     char* chunk_storage = map_storage.GetStorage();
 
+    // cm256_chunks will be used to store the decoded chunks
+    cm256_chunks.reserve(chunk_count);
+
     // Fill in cm256 chunks in the order they were received. These
     // can consist of both original and recovery chunks.
     for (size_t i = 0; i < chunk_count; ++i) {
-        cm256_blocks[i].Block = map_storage.GetChunk(i);
+        cm256_chunks.emplace_back();
+        memcpy(&cm256_chunks.back(), map_storage.GetChunk(i), FEC_CHUNK_SIZE);
+        cm256_blocks[i].Block = &cm256_chunks.back();
         cm256_blocks[i].Index = (uint8_t)map_storage.GetChunkId(i);
     }
-    cm256_encoder_params params{(int)chunk_count, (256 - (int)chunk_count - 1), FEC_CHUNK_SIZE};
-    assert(!cm256_decode(params, cm256_blocks));
-    cm256_map.resize(chunk_count);
-    // After decoding, the cm256_blocks should not contain recovery
-    // chunks anymore. Instead, they should contain the original
-    // (decoded) chunks, so that their Index (chunk id) and Block
-    // (pointer) fields should correspond, respectively, to the
-    // original chunk id and the original data decoded in place
-    // within the chunk_storage. However, the order of cm256_blocks
-    // may not be sorted, so map each decoded chunk index to the
-    // corresponding index in the storage.
-    for (size_t i = 0; i < chunk_count; ++i) {
-        auto const& b = cm256_blocks[i];
-        assert(b.Index < CM256_MAX_CHUNKS);
-        cm256_map[b.Index] = (static_cast<char*>(b.Block) - chunk_storage) / FEC_CHUNK_SIZE;
-    }
+}
+
+/* Clean up the temporary storage used for in-place cm256 decoding */
+void FECDecoder::CleanCm256Storage()
+{
+    // We should never clean up the "cm256_chunks" storage in memory mode
+    // because that would not be recoverable. In contrast, in mmap mode, we can
+    // clean up "cm256_chunks" as needed because the encoded chunks remain in
+    // the mmap file and can always be copied back to "cm256_chunks".
+    assert(cm256_decoded);
+    assert(memory_usage_mode == MemoryUsageMode::USE_MMAP);
+    cm256_chunks.clear();
+
+    // Make sure the memory is also released. Here, one can also use
+    // shrink_to_fit. However, that's not binding and does not guarantee the
+    // relesing of memory. In contrast, swapping with an empty vector always
+    // releases the memory.
+    std::vector<FECChunkType>().swap(cm256_chunks);
+    cm256_decoded = false;
 }
 
 void FECDecoder::RecoverFromDisk()

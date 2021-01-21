@@ -1299,6 +1299,7 @@ void PartialBlockData::ReconstructBlockFromDecoder() {
         }
     }
 
+    body_decoder.GetDataPtrDone();
     assert(block_data.IsBlockAvailable());
 };
 

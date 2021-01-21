@@ -917,6 +917,56 @@ BOOST_FIXTURE_TEST_CASE(fec_test_fecdecoder_recovery_in_two_steps, BasicTestingS
     recovery_test(90, 10, 0.9, 0, true);    // abort and continue after having enough chunks to decode already
 }
 
+BOOST_DATA_TEST_CASE_F(BasicTestingSetup, fec_test_fecdecoder_recovery_after_decoding, bdata::make({2, CM256_MAX_CHUNKS, CM256_MAX_CHUNKS + 10}), n_uncoded_chunks)
+{
+    // This test case tests the situation in which the mmap-mode decoder has all
+    // the chunks and proceeds with the decoding, but for some reason the
+    // application exits before the decoded data is used and, more importantly,
+    // before the corresponding mmaped file is removed from disk. For example,
+    // this scenario can arise in udprelay.cpp when the header object is
+    // decodable but the application closes before the associated body object
+    // becomes decodable. In this case, the header mmap file would remain in
+    // disk because udprelay.cpp only removes the header file when the body
+    // object also becomes decodable.
+    //
+    // As a result, on the next run, there will be another attempt to decode the
+    // same chunks from the recovered mmap file. In this case, the fact that the
+    // previous session already decoded the data once should not prevent the
+    // recoverability of the chunks on the subsequent session.
+
+    TestData test_data;
+    size_t n_overhead_chunks = 5;
+    size_t data_size = FEC_CHUNK_SIZE * n_uncoded_chunks;
+    generate_encoded_chunks(data_size, test_data, n_overhead_chunks);
+    size_t n_encoded_chunks = n_uncoded_chunks + n_overhead_chunks;
+
+    std::string obj_id = "1234_body";
+
+    // First session
+    {
+        FECDecoder decoder(data_size, MemoryUsageMode::USE_MMAP, obj_id, true /* keep_mmap_file */);
+
+        for (size_t i = 0; i < n_encoded_chunks; i++) {
+            decoder.ProvideChunk(test_data.encoded_chunks[i].data(), test_data.chunk_ids[i]);
+        }
+
+        // calling GetDecodedData will make sure decoding happens
+        decoder.GetDecodedData();
+    }
+
+    /// Assume the application was aborted here *******
+
+    // Second session
+    {
+        FECDecoder decoder(data_size, MemoryUsageMode::USE_MMAP, obj_id);
+        BOOST_CHECK(decoder.DecodeReady());
+        std::vector<unsigned char> decoded_data = decoder.GetDecodedData();
+        BOOST_CHECK_EQUAL(decoded_data.size(), test_data.original_data.size());
+        BOOST_CHECK_EQUAL_COLLECTIONS(decoded_data.begin(), decoded_data.end(),
+            test_data.original_data.begin(), test_data.original_data.end());
+    }
+}
+
 BOOST_DATA_TEST_CASE_F(BasicTestingSetup, fec_test_fecdecoder_recovery_with_N_decoders, bdata::make({1, 2, CM256_MAX_CHUNKS, CM256_MAX_CHUNKS + 10}), n_uncoded_chunks)
 {
     // This test will cover the worst-case scenario for recovering chunks
