@@ -156,9 +156,6 @@ class FECDecoder {
     // RemoveMmapFile() explicitly.
     bool m_keep_mmap_file = false;
 
-    // maps final chunk ids to offset into the storage (backed by the file)
-    std::vector<uint8_t> cm256_map;
-
     bool cm256_decoded = false;
     // Only used in cm256 mode:
     std::vector<FECChunkType> cm256_chunks;
@@ -175,10 +172,11 @@ class FECDecoder {
     bool ProvideChunkMmap(const unsigned char* chunk, uint32_t chunk_id, bool recovery_run = false);
 
     void DecodeCm256();
-    void DecodeCm256Memory();
-    void DecodeCm256Mmap();
+    void CopyCm256MmapChunksToMemory();
+    void CleanCm256Storage();
 
     void RecoverFromDisk();
+
 
 public:
     // data_size must be <= MAX_BLOCK_SERIALIZED_SIZE * MAX_CHUNK_CODED_BLOCK_SIZE_FACTOR
@@ -200,6 +198,8 @@ public:
     bool HasChunk(uint32_t chunk_id);
     bool DecodeReady() const;
     const void* GetDataPtr(uint32_t chunk_id); // Only valid until called again
+    void GetDataPtrDone();
+
     std::vector<unsigned char> GetDecodedData();
     size_t GetChunkCount() const { return chunk_count; }
     size_t GetChunksRcvd() const { return chunks_recvd; }
