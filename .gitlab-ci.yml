@@ -25,7 +25,7 @@ test:
     - ./autogen.sh
     - ./configure --disable-wallet --enable-debug --with-gui=no
     - make -j$(nproc)
-    - ./src/test/test_bitcoin
+    - make check
 
 xcompile-aarch64:
   image: $DOCKER_IMAGE
