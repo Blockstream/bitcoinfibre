@@ -21,21 +21,20 @@ static const std::array<MemoryUsageMode, 2> MEMORY_USAGE_TYPE{MemoryUsageMode::U
 constexpr char hex_digits[] = "0123456789ABCDEF";
 constexpr size_t default_encoding_overhead = 5;
 
-struct GlobalFixture {
+struct FecTestingSetup : public BasicTestingSetup {
     /**
      * The files generated within the partial_blocks directory during tests get
      * cleaned once the tests finish, but the directories stay. Thus, after a
      * while, "/tmp/test_common_Bitcoin Core" will be filled with useless empty
-     * directories. The GlobalFixture destructor runs after all the tests and
+     * directories. The FecTestingSetup destructor runs after all the tests and
      * removes these directories.
      */
-    ~GlobalFixture()
+    ~FecTestingSetup()
     {
         fs::path partial_blocks = GetDataDir() / "partial_blocks";
         fs::remove_all(partial_blocks.parent_path());
     }
 };
-BOOST_GLOBAL_FIXTURE(GlobalFixture);
 
 struct TestData {
     std::vector<std::vector<unsigned char>> encoded_chunks;
@@ -132,7 +131,8 @@ static void check_chunk_not_equal(const void* p_chunk1, std::vector<unsigned cha
     BOOST_CHECK(mismatch);
 }
 
-BOOST_AUTO_TEST_SUITE(fec_tests)
+
+BOOST_FIXTURE_TEST_SUITE(fec_tests, FecTestingSetup)
 
 BOOST_AUTO_TEST_CASE(fec_test_buildchunk_invalid_idx)
 {
@@ -260,7 +260,7 @@ BOOST_AUTO_TEST_CASE(fec_test_buildchunk_successful_cm256_encoder)
 }
 
 
-BOOST_DATA_TEST_CASE_F(BasicTestingSetup, fec_test_fecdecoder_filename_pattern, bdata::make({FEC_CHUNK_SIZE + 1, 2000, FEC_CHUNK_SIZE * 2, 1048576}), data_size)
+BOOST_DATA_TEST_CASE(fec_test_fecdecoder_filename_pattern, bdata::make({FEC_CHUNK_SIZE + 1, 2000, FEC_CHUNK_SIZE * 2, 1048576}), data_size)
 {
     // Object ID provided:
     {
@@ -277,7 +277,7 @@ BOOST_DATA_TEST_CASE_F(BasicTestingSetup, fec_test_fecdecoder_filename_pattern, 
     }
 }
 
-BOOST_DATA_TEST_CASE_F(BasicTestingSetup, fec_test_providechunk_invalid_chunk_id, MEMORY_USAGE_TYPE, memory_usage_type)
+BOOST_DATA_TEST_CASE(fec_test_providechunk_invalid_chunk_id, MEMORY_USAGE_TYPE, memory_usage_type)
 {
     // Set data size in a way that CHUNK_COUNT_USES_CM256 is true
     constexpr size_t chunk_count = 2;
@@ -299,7 +299,7 @@ BOOST_DATA_TEST_CASE_F(BasicTestingSetup, fec_test_providechunk_invalid_chunk_id
     BOOST_CHECK(!decoder.DecodeReady());
 }
 
-BOOST_DATA_TEST_CASE_F(BasicTestingSetup, fec_test_providechunk_small_chunk_count, MEMORY_USAGE_TYPE, memory_usage_type)
+BOOST_DATA_TEST_CASE(fec_test_providechunk_small_chunk_count, MEMORY_USAGE_TYPE, memory_usage_type)
 {
     // Generate random data fitting within a single chunk
     size_t data_size = 5;
@@ -355,7 +355,7 @@ void providechunk_test(MemoryUsageMode memory_usage_type, size_t n_uncoded_chunk
     }
 }
 
-BOOST_DATA_TEST_CASE_F(BasicTestingSetup, fec_test_providechunk_cm256, MEMORY_USAGE_TYPE, memory_usage_type)
+BOOST_DATA_TEST_CASE(fec_test_providechunk_cm256, MEMORY_USAGE_TYPE, memory_usage_type)
 {
     // default extra encoded chunk, no drops
     providechunk_test(memory_usage_type, 2, true);
@@ -382,7 +382,7 @@ BOOST_DATA_TEST_CASE_F(BasicTestingSetup, fec_test_providechunk_cm256, MEMORY_US
     providechunk_test(memory_usage_type, CM256_MAX_CHUNKS, false, 10, 12);
 }
 
-BOOST_DATA_TEST_CASE_F(BasicTestingSetup, fec_test_providechunk_wirehair, MEMORY_USAGE_TYPE, memory_usage_type)
+BOOST_DATA_TEST_CASE(fec_test_providechunk_wirehair, MEMORY_USAGE_TYPE, memory_usage_type)
 {
     // default extra encoded chunk, no drops
     providechunk_test(memory_usage_type, CM256_MAX_CHUNKS + 10, true, default_encoding_overhead);
@@ -401,7 +401,7 @@ BOOST_DATA_TEST_CASE_F(BasicTestingSetup, fec_test_providechunk_wirehair, MEMORY
 }
 
 
-BOOST_DATA_TEST_CASE_F(BasicTestingSetup, fec_test_providechunk_repetition, MEMORY_USAGE_TYPE, memory_usage_type)
+BOOST_DATA_TEST_CASE(fec_test_providechunk_repetition, MEMORY_USAGE_TYPE, memory_usage_type)
 {
     constexpr size_t n_encoded_chunks = 3;
     constexpr size_t block_size = 10;
@@ -431,7 +431,7 @@ BOOST_DATA_TEST_CASE_F(BasicTestingSetup, fec_test_providechunk_repetition, MEMO
     check_chunk_equal(&block_fec_chunks.first[2], original_data);
 }
 
-BOOST_FIXTURE_TEST_CASE(fec_test_creation_removal_chunk_file, BasicTestingSetup)
+BOOST_AUTO_TEST_CASE(fec_test_creation_removal_chunk_file)
 {
     fs::path filename;
     {
@@ -694,7 +694,7 @@ BOOST_AUTO_TEST_CASE(fec_test_map_storage_insert)
     }
 }
 
-BOOST_DATA_TEST_CASE_F(BasicTestingSetup, fec_test_decoding_getdataptr, bdata::make({1, 2, CM256_MAX_CHUNKS, CM256_MAX_CHUNKS + 10}) * MEMORY_USAGE_TYPE, n_uncoded_chunks, memory_usage_type)
+BOOST_DATA_TEST_CASE(fec_test_decoding_getdataptr, bdata::make({1, 2, CM256_MAX_CHUNKS, CM256_MAX_CHUNKS + 10}) * MEMORY_USAGE_TYPE, n_uncoded_chunks, memory_usage_type)
 {
     // Random test data that does not fill n_uncoded_chunks exactly (padded)
     TestData test_data;
@@ -731,7 +731,7 @@ BOOST_DATA_TEST_CASE_F(BasicTestingSetup, fec_test_decoding_getdataptr, bdata::m
         test_data.original_data.begin(), test_data.original_data.end());
 }
 
-BOOST_FIXTURE_TEST_CASE(fec_test_decoder_move_assignment_operator, BasicTestingSetup)
+BOOST_AUTO_TEST_CASE(fec_test_decoder_move_assignment_operator)
 {
     {
         // - both decoders without obj_id
@@ -798,7 +798,7 @@ BOOST_FIXTURE_TEST_CASE(fec_test_decoder_move_assignment_operator, BasicTestingS
     }
 }
 
-BOOST_DATA_TEST_CASE_F(BasicTestingSetup, fec_test_decode_using_moved_decoder, bdata::make({1, 2, CM256_MAX_CHUNKS, CM256_MAX_CHUNKS + 10}) * MEMORY_USAGE_TYPE, n_uncoded_chunks, memory_usage_type)
+BOOST_DATA_TEST_CASE(fec_test_decode_using_moved_decoder, bdata::make({1, 2, CM256_MAX_CHUNKS, CM256_MAX_CHUNKS + 10}) * MEMORY_USAGE_TYPE, n_uncoded_chunks, memory_usage_type)
 {
     TestData test_data;
     size_t data_size = FEC_CHUNK_SIZE * n_uncoded_chunks;
@@ -891,7 +891,7 @@ void recovery_test(size_t n_uncoded_chunks, size_t n_overhead_chunks, float abor
     }
 }
 
-BOOST_FIXTURE_TEST_CASE(fec_test_fecdecoder_recovery_in_two_steps, BasicTestingSetup)
+BOOST_AUTO_TEST_CASE(fec_test_fecdecoder_recovery_in_two_steps)
 {
     recovery_test(2, 0, 0.5, 0.5, true);
     recovery_test(2, 0, 0.5, 0, true);
@@ -917,7 +917,7 @@ BOOST_FIXTURE_TEST_CASE(fec_test_fecdecoder_recovery_in_two_steps, BasicTestingS
     recovery_test(90, 10, 0.9, 0, true);    // abort and continue after having enough chunks to decode already
 }
 
-BOOST_DATA_TEST_CASE_F(BasicTestingSetup, fec_test_fecdecoder_recovery_after_decoding, bdata::make({2, CM256_MAX_CHUNKS, CM256_MAX_CHUNKS + 10}), n_uncoded_chunks)
+BOOST_DATA_TEST_CASE(fec_test_fecdecoder_recovery_after_decoding, bdata::make({2, CM256_MAX_CHUNKS, CM256_MAX_CHUNKS + 10}), n_uncoded_chunks)
 {
     // This test case tests the situation in which the mmap-mode decoder has all
     // the chunks and proceeds with the decoding, but for some reason the
@@ -967,7 +967,7 @@ BOOST_DATA_TEST_CASE_F(BasicTestingSetup, fec_test_fecdecoder_recovery_after_dec
     }
 }
 
-BOOST_DATA_TEST_CASE_F(BasicTestingSetup, fec_test_fecdecoder_recovery_with_N_decoders, bdata::make({1, 2, CM256_MAX_CHUNKS, CM256_MAX_CHUNKS + 10}), n_uncoded_chunks)
+BOOST_DATA_TEST_CASE(fec_test_fecdecoder_recovery_with_N_decoders, bdata::make({1, 2, CM256_MAX_CHUNKS, CM256_MAX_CHUNKS + 10}), n_uncoded_chunks)
 {
     // This test will cover the worst-case scenario for recovering chunks
     // If the decoder is going to receive N chunks, it will receive them via N different decoders.
