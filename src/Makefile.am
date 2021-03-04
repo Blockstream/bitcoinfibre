@@ -137,6 +137,7 @@ BITCOIN_CORE_H = \
   core_memusage.h \
   cuckoocache.h \
   dbwrapper.h \
+  exchange.h \
   flatfile.h \
   fs.h \
   fec.h \
@@ -159,6 +160,7 @@ BITCOIN_CORE_H = \
   memusage.h \
   merkleblock.h \
   miner.h \
+  mmapstorage.h \
   net.h \
   net_permissions.h \
   net_processing.h \
