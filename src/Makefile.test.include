@@ -105,6 +105,7 @@ BITCOIN_TESTS =\
   test/merkleblock_tests.cpp \
   test/miner_tests.cpp \
   test/minisketch_tests.cpp \
+  test/mmapstorage_tests.cpp \
   test/multisig_tests.cpp \
   test/net_peer_eviction_tests.cpp \
   test/net_tests.cpp \

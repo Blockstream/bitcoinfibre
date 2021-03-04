@@ -576,7 +576,7 @@ BOOST_AUTO_TEST_CASE(fec_test_map_storage_initialized_correctly)
     generate_encoded_chunks(data_size, test_data);
     std::string obj_id = random_string();
     FECDecoder decoder_a(data_size, MemoryUsageMode::USE_MMAP, obj_id);
-    MapStorage map_storage_a(decoder_a.GetFileName(), decoder_a.GetChunkCount());
+    FecMmapStorage map_storage_a(decoder_a.GetFileName(), decoder_a.GetChunkCount());
 
     bool initialized_fine = true;
     for (size_t i = 0; i < n_chunks; i++) {
@@ -599,7 +599,7 @@ BOOST_AUTO_TEST_CASE(fec_test_map_storage_initialized_correctly)
 
     // The expectation is that the new decoder does not reset the values (chunk
     // data and id) that are already stored in the file
-    MapStorage map_storage_b(decoder_b.GetFileName(), decoder_b.GetChunkCount());
+    FecMmapStorage map_storage_b(decoder_b.GetFileName(), decoder_b.GetChunkCount());
     bool stored_items_untouched = true;
     for (size_t i = 0; i < n_chunks - 1; i++) {
         if (CHUNK_ID_IS_NOT_SET(map_storage_b.GetChunkId(i)) || *map_storage_b.GetChunk(i) == '\0') {
@@ -619,19 +619,19 @@ BOOST_AUTO_TEST_CASE(fec_test_map_storage_recoverable)
     std::string obj_id = random_string();
     FECDecoder decoder(data_size, MemoryUsageMode::USE_MMAP, obj_id);
     {
-        MapStorage map_storage(decoder.GetFileName(), decoder.GetChunkCount(), true);
+        FecMmapStorage map_storage(decoder.GetFileName(), decoder.GetChunkCount(), true);
         BOOST_CHECK(!map_storage.IsRecoverable());
     }
 
     decoder.ProvideChunk(test_data.encoded_chunks[0].data(), test_data.chunk_ids[0]);
     {
-        MapStorage map_storage(decoder.GetFileName(), decoder.GetChunkCount(), true);
+        FecMmapStorage map_storage(decoder.GetFileName(), decoder.GetChunkCount(), true);
         BOOST_CHECK(map_storage.IsRecoverable());
     }
 
     {
-        MapStorage map_storage(decoder.GetFileName(), decoder.GetChunkCount());
-        // When MapStorage is not instantiated with create=true, the IsRecoverable always returns false
+        FecMmapStorage map_storage(decoder.GetFileName(), decoder.GetChunkCount());
+        // When FecMmapStorage is not instantiated with create=true, the IsRecoverable always returns false
         BOOST_CHECK(!map_storage.IsRecoverable());
     }
 }
@@ -639,7 +639,7 @@ BOOST_AUTO_TEST_CASE(fec_test_map_storage_recoverable)
 // checks if the chunk ids stored in the filename match the ids in the expected_chunk_ids vector
 void check_stored_chunk_ids(const FECDecoder& decoder, const std::vector<uint32_t>& expected_chunk_ids)
 {
-    MapStorage map_storage(decoder.GetFileName(), decoder.GetChunkCount());
+    FecMmapStorage map_storage(decoder.GetFileName(), decoder.GetChunkCount());
     std::vector<uint32_t> stored_chunk_ids;
 
     for (size_t i = 0; i < decoder.GetChunksRcvd(); i++) {
@@ -694,7 +694,7 @@ BOOST_AUTO_TEST_CASE(fec_test_map_storage_insert)
     fill_with_random_data(test_data_c);
 
     FECDecoder decoder(FEC_CHUNK_SIZE * 5, MemoryUsageMode::USE_MMAP);
-    MapStorage map_storage(decoder.GetFileName(), decoder.GetChunkCount());
+    FecMmapStorage map_storage(decoder.GetFileName(), decoder.GetChunkCount());
 
     // Insert into consequtive indexes
     map_storage.Insert(test_data_a.data(), 1, 0);
