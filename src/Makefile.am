@@ -155,6 +155,7 @@ BITCOIN_CORE_H = \
   dbwrapper.h \
   deploymentinfo.h \
   deploymentstatus.h \
+  exchange.h \
   external_signer.h \
   fec.h \
   flatfile.h \
@@ -197,6 +198,7 @@ BITCOIN_CORE_H = \
   mapport.h \
   memusage.h \
   merkleblock.h \
+  mmapstorage.h \
   net.h \
   net_permissions.h \
   net_processing.h \

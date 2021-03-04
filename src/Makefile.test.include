@@ -109,6 +109,7 @@ BITCOIN_TESTS =\
   test/miner_tests.cpp \
   test/miniscript_tests.cpp \
   test/minisketch_tests.cpp \
+  test/mmapstorage_tests.cpp \
   test/multisig_tests.cpp \
   test/net_peer_eviction_tests.cpp \
   test/net_tests.cpp \
