@@ -20,6 +20,7 @@
 #include "wirehair/wirehair.h"
 #include "wirehair/cm256.h"
 #include "random.h"
+#include "mmapstorage.h"
 #include "open_hash_set.h"
 
 typedef std::aligned_storage<FEC_CHUNK_SIZE, 16>::type FECChunkType;
@@ -104,32 +105,19 @@ enum class MemoryUsageMode : bool {
     USE_MMAP = true
 };
 
-class MapStorage
+class FecMmapStorage : public MmapStorage<uint32_t>
 {
 public:
-    MapStorage(boost::filesystem::path const& p, int const c, bool create = false);
-    MapStorage(MapStorage&& ms) noexcept;
+    // Initialize all chunk ids to an invalid value (FEC_CHUNK_COUNT_MAX + 1)
+    // when creating the chunk file for the first time. In the future, when
+    // recovering the chunk storage from a pre-existing file, it is possible to
+    // know the chunks that were previously populated by checking whether the
+    // chunk id is a valid one.
+    FecMmapStorage(boost::filesystem::path const& p, int const c, bool create = false) : MmapStorage<uint32_t>(p, create, FEC_CHUNK_SIZE, c, (FEC_CHUNK_COUNT_MAX + 1))
+    {
+    }
 
-    void Insert(const unsigned char* chunk, uint32_t chunk_id, size_t idx);
-    char* GetChunk(size_t idx) const;
-    uint32_t GetChunkId(size_t idx) const;
-    size_t Size() const;
-    char* GetStorage() const { return m_data_storage; }
-
-    // Return value is only valid if MapStorage gets instantiated with 'create=true'
-    bool IsRecoverable() const;
-    ~MapStorage();
-
-private:
-    bool Recoverable(const boost::filesystem::path& filename) const;
-
-private:
-    size_t m_chunk_count = 0;
-    int m_chunk_file = -1;
-    char* m_data_storage = nullptr;
-    char* m_id_storage = nullptr;
-    size_t m_file_size = 0;
-    bool m_recoverable = false;
+    uint32_t GetChunkId(size_t idx) const { return GetChunkMeta(idx); }
 };
 
 class FECDecoder {
