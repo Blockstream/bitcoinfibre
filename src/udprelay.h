@@ -30,8 +30,7 @@ std::shared_ptr<PartialBlockData> GetPartialBlockData(const std::pair<uint64_t, 
 void ResetPartialBlocks();
 
 // Each UDPMessage must be of sizeof(UDPMessageHeader) + MAX_UDP_MESSAGE_LENGTH in length!
-void UDPFillMessagesFromBlock(const CBlock& block, std::vector<UDPMessage>& msgs, int height,
-                              size_t base_overhead=60, double overhead=0.05);
+void UDPFillMessagesFromBlock(const CBlock& block, std::vector<UDPMessage>& msgs, int height, const FecOverhead& overhead);
 void UDPFillMessagesFromTx(const CTransaction& tx, std::vector<std::pair<UDPMessage, size_t>>& msgs);
 
 #endif
