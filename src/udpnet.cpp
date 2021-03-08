@@ -1407,8 +1407,7 @@ static void MulticastBackfillThread(const CService& mcastNode,
                 UDPFillMessagesFromBlock(block,
                     block_it->second.msgs,
                     pindex->nHeight,
-                    info->overhead_rep_blks.fixed,
-                    info->overhead_rep_blks.variable);
+                    info->overhead_rep_blks);
                 pblock_window->bytes_in_window += block_it->second.msgs.size() * FEC_CHUNK_SIZE;
                 lock.unlock(); // safe to release (no other thread mutates the map)
 
@@ -1727,8 +1726,7 @@ void MulticastTxBlock(const int height)
         // Each node gets a different set of FEC chunks
         std::vector<UDPMessage> msgs;
         UDPFillMessagesFromBlock(block, msgs, pindex->nHeight,
-            node.second.overhead_rep_blks.fixed,
-            node.second.overhead_rep_blks.variable);
+            node.second.overhead_rep_blks);
 
         for (const auto& msg : msgs) {
             SendMessage(
