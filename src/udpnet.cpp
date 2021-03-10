@@ -1492,6 +1492,7 @@ static UniValue TxWindowShortInfoToJSON(std::shared_ptr<backfill_block_window> p
         }
     }
     ret.pushKV("size", ((double) pblock_window->bytes_in_window / (1048576)));
+    ret.pushKV("n_blks", (uint64_t)pblock_window->map.size());
     ret.pushKV("min", min_height);
     ret.pushKV("max", max_height);
     ret.pushKV("largest", height_largest_block);
