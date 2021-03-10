@@ -1194,6 +1194,20 @@ static void do_send_messages()
             }
 
             if (queue.buff_id == -1) { // all buffers of this group are empty
+                /* NOTE: although this group is empty, do not assume prematurely
+                 * that the corresponding socket is not full (i.e., do not set
+                 * maybe_all_full=false). Otherwise, we could end up in a
+                 * situation where both maybe_all_full and maybe_all_empty are
+                 * false in case there are other groups with non-empty status to
+                 * set maybe_all_empty=false. In this scenario, the scheduler
+                 * would keep spinning, as it would not call poll and neither
+                 * wait on the non_empty_queues_cv condition variable. Instead,
+                 * set maybe_all_full to false only when we know there is at
+                 * least one non-full socket after trying the "sendto" calls
+                 * below. Meanwhile, for the empty groups we haven't tried any
+                 * sendto call (like the current), simply remove them from the
+                 * list of sockets to be polled. See the assignment to
+                 * "pfds[map_pollfd[group]].fd" below. */
                 continue;
             }
 
@@ -1275,6 +1289,28 @@ static void do_send_messages()
             // there is definitely at least one non-empty queue.
             if (queue.buff_id != -1)
                 maybe_all_empty = false;
+
+            // If this queue is empty, temporarily remove it from the polling
+            // list so that we don't wait for output space on a queue that is
+            // empty. Otherwise, the polling could return immediately, given
+            // that the socket buffer is likely to have available space when the
+            // corresponding queue is empty. Ultimately, the transmission loop
+            // would keep spininning while searching for a non-empty queue
+            // instead of properly blocking on the poll call.
+            //
+            // Nevertheless, note there is an important side-effect of this
+            // approach. Suppose the empty queue is allocated externally with a
+            // high capacity to transmit high-priority but sporadic data, like
+            // new mined blocks. Suppose also this queue shares the network
+            // interface with other slower queues that are constantly full, like
+            // those transmitting historic blocks. In this case, the
+            // fast/sporadic queue that is frequently empty won't have any
+            // influence on the poll call. Instead, only the slow/full queues
+            // will block on the poll, so the fast/sporadic queue will
+            // eventually wait until the slower queues obtain output space. Once
+            // the slower queues find space and return from the poll call, the
+            // fast sporadic queue will carry on with its normal rate.
+            pfds[map_pollfd[group]].fd = (queue.buff_id != -1) ? udp_socks[group] : -1;
 
             /* How long will it take until we have enough quota to send at least
              * one MTU?
