@@ -254,6 +254,7 @@ UniValue gettxwindowinfo(const JSONRPCRequest& request)
                     {RPCResult::Type::OBJ, "idx", "Physical stream index - logical stream index",
                         {
                             {RPCResult::Type::NUM, "size", "Total amount (in MB) of FEC data stored in the window"},
+                            {RPCResult::Type::NUM, "n_blks", "Number of blocks currently in the window"},
                             {RPCResult::Type::NUM, "min", "Minimum height currently in the window"},
                             {RPCResult::Type::NUM, "max", "Maximum height currently in the window"},
                             {RPCResult::Type::NUM, "largest", "Height of the largest block currently in the window"},
