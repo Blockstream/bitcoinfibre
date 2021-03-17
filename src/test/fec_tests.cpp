@@ -1,9 +1,4 @@
-// clang-format off
-// unit_test.hpp needs to be included before test_case.hpp
 #include <boost/test/unit_test.hpp>
-#include <boost/test/data/test_case.hpp>
-#include <boost/test/data/monomorphic.hpp>
-// clang-format on
 #include <fec.h>
 #include <memory>
 #include <sys/mman.h>
@@ -11,12 +6,9 @@
 #include <util/memory.h>
 #include <util/system.h>
 
-namespace bdata = boost::unit_test::data;
-
-static const std::array<MemoryUsageMode, 2> MEMORY_USAGE_TYPE{MemoryUsageMode::USE_MMAP, MemoryUsageMode::USE_MEMORY};
+static const std::array<MemoryUsageMode, 2> memory_usage_modes{MemoryUsageMode::USE_MMAP, MemoryUsageMode::USE_MEMORY};
 
 #define DIV_CEIL(a, b) (((a) + (b)-1) / (b))
-
 
 constexpr char hex_digits[] = "0123456789ABCDEF";
 constexpr size_t default_encoding_overhead = 5;
@@ -260,24 +252,32 @@ BOOST_AUTO_TEST_CASE(fec_test_buildchunk_successful_cm256_encoder)
 }
 
 
-BOOST_DATA_TEST_CASE(fec_test_fecdecoder_filename_pattern, bdata::make({FEC_CHUNK_SIZE + 1, 2000, FEC_CHUNK_SIZE * 2, 1048576}), data_size)
+void test_fecdecoder_filename_pattern(size_t data_size)
 {
     // Object ID provided:
     {
         std::string obj_id = "1234_body";
         FECDecoder decoder(data_size, MemoryUsageMode::USE_MMAP, obj_id);
         // filename should be set as "<obj_id>_<obj_size>"
-        BOOST_CHECK(decoder.GetFileName().filename().c_str() == obj_id + "_" + std::to_string(data_size));
+        BOOST_CHECK_MESSAGE(decoder.GetFileName().filename().c_str() == obj_id + "_" + std::to_string(data_size), data_size);
     }
     // Object ID not provided:
     {
         FECDecoder decoder(data_size, MemoryUsageMode::USE_MMAP);
         // filename should be equal to the FECDecoder object's address
-        BOOST_CHECK(decoder.GetFileName().filename().c_str() == std::to_string(std::uintptr_t(&decoder)));
+        BOOST_CHECK_MESSAGE(decoder.GetFileName().filename().c_str() == std::to_string(std::uintptr_t(&decoder)), data_size);
     }
 }
 
-BOOST_DATA_TEST_CASE(fec_test_providechunk_invalid_chunk_id, MEMORY_USAGE_TYPE, memory_usage_type)
+BOOST_AUTO_TEST_CASE(fec_test_fecdecoder_filename_pattern)
+{
+    std::vector<size_t> data_sizes{FEC_CHUNK_SIZE + 1, 2000, FEC_CHUNK_SIZE * 2, 1048576};
+    for (const auto data_size : data_sizes) {
+        test_fecdecoder_filename_pattern(data_size);
+    }
+}
+
+void test_providechunk_invalid_chunk_id(MemoryUsageMode memory_usage_mode)
 {
     // Set data size in a way that CHUNK_COUNT_USES_CM256 is true
     constexpr size_t chunk_count = 2;
@@ -285,8 +285,8 @@ BOOST_DATA_TEST_CASE(fec_test_providechunk_invalid_chunk_id, MEMORY_USAGE_TYPE, 
     std::vector<unsigned char> chunk(data_size);
     fill_with_random_data(chunk);
 
-    FECDecoder decoder(data_size, memory_usage_type);
-    BOOST_CHECK(!decoder.ProvideChunk(chunk.data(), 256));
+    FECDecoder decoder(data_size, memory_usage_mode);
+    BOOST_CHECK_MESSAGE(!decoder.ProvideChunk(chunk.data(), 256), memory_usage_mode);
 
     // Set data size in a way that CHUNK_COUNT_USES_CM256 is false
     constexpr size_t chunk_count2 = CM256_MAX_CHUNKS + 1;
@@ -294,16 +294,23 @@ BOOST_DATA_TEST_CASE(fec_test_providechunk_invalid_chunk_id, MEMORY_USAGE_TYPE, 
     std::vector<unsigned char> chunk2(data_size2);
     fill_with_random_data(chunk2);
 
-    FECDecoder decoder2(data_size2, memory_usage_type);
-    BOOST_CHECK(!decoder2.ProvideChunk(chunk2.data(), FEC_CHUNK_COUNT_MAX + 1));
-    BOOST_CHECK(!decoder.DecodeReady());
+    FECDecoder decoder2(data_size2, memory_usage_mode);
+    BOOST_CHECK_MESSAGE(!decoder2.ProvideChunk(chunk2.data(), FEC_CHUNK_COUNT_MAX + 1), memory_usage_mode);
+    BOOST_CHECK_MESSAGE(!decoder.DecodeReady(), memory_usage_mode);
 }
 
-BOOST_DATA_TEST_CASE(fec_test_providechunk_small_chunk_count, MEMORY_USAGE_TYPE, memory_usage_type)
+BOOST_AUTO_TEST_CASE(fec_test_providechunk_invalid_chunk_id)
+{
+    for (const auto memory_usage_mode : memory_usage_modes) {
+        test_providechunk_invalid_chunk_id(memory_usage_mode);
+    }
+}
+
+void test_providechunk_small_chunk_count(MemoryUsageMode memory_usage_mode)
 {
     // Generate random data fitting within a single chunk
     size_t data_size = 5;
-    FECDecoder decoder(data_size, memory_usage_type);
+    FECDecoder decoder(data_size, memory_usage_mode);
     std::vector<unsigned char> original_data(data_size);
     fill_with_random_data(original_data);
 
@@ -313,16 +320,25 @@ BOOST_DATA_TEST_CASE(fec_test_providechunk_small_chunk_count, MEMORY_USAGE_TYPE,
 
     // After providing the single chunk of data to the FEC decoder, the latter
     // should be ready to decode the message
-    BOOST_CHECK(decoder.ProvideChunk(padded_chunk.data(), 0));
-    BOOST_CHECK(decoder.HasChunk(0));
-    BOOST_CHECK(decoder.DecodeReady());
+    BOOST_CHECK_MESSAGE(decoder.ProvideChunk(padded_chunk.data(), 0), memory_usage_mode);
+    BOOST_CHECK_MESSAGE(decoder.HasChunk(0), memory_usage_mode);
+    BOOST_CHECK_MESSAGE(decoder.DecodeReady(), memory_usage_mode);
 
     // The original message should be entirely on the single chunk under test
     check_chunk_equal(decoder.GetDataPtr(0), original_data);
 }
 
+BOOST_AUTO_TEST_CASE(fec_test_providechunk_small_chunk_count)
+{
+    for (const auto memory_usage_mode : memory_usage_modes) {
+        test_providechunk_small_chunk_count(memory_usage_mode);
+    }
+}
+
 void providechunk_test(MemoryUsageMode memory_usage_type, size_t n_uncoded_chunks, bool expected_result, size_t n_overhead_chunks = 0, size_t n_dropped_chunks = 0)
 {
+    std::ostringstream check_msg;
+    check_msg << "memory_usage_type = " << memory_usage_type << ", n_uncoded_chunks = " << n_uncoded_chunks << ", expected_result = " << expected_result << ", n_overhead_chunks = " << n_overhead_chunks << ", n_dropped_chunks = " << n_dropped_chunks;
     TestData test_data;
     size_t data_size = FEC_CHUNK_SIZE * n_uncoded_chunks;
     generate_encoded_chunks(data_size, test_data, n_overhead_chunks);
@@ -345,63 +361,67 @@ void providechunk_test(MemoryUsageMode memory_usage_type, size_t n_uncoded_chunk
     }
 
     if (expected_result) {
-        BOOST_CHECK(decoder.DecodeReady());
+        BOOST_CHECK_MESSAGE(decoder.DecodeReady(), check_msg.str());
         std::vector<unsigned char> decoded_data = decoder.GetDecodedData();
         BOOST_CHECK_EQUAL(decoded_data.size(), test_data.original_data.size());
         BOOST_CHECK_EQUAL_COLLECTIONS(decoded_data.begin(), decoded_data.end(),
             test_data.original_data.begin(), test_data.original_data.end());
     } else {
-        BOOST_CHECK(!decoder.DecodeReady());
+        BOOST_CHECK_MESSAGE(!decoder.DecodeReady(), check_msg.str());
     }
 }
 
-BOOST_DATA_TEST_CASE(fec_test_providechunk_cm256, MEMORY_USAGE_TYPE, memory_usage_type)
+BOOST_AUTO_TEST_CASE(fec_test_providechunk_cm256)
 {
-    // default extra encoded chunk, no drops
-    providechunk_test(memory_usage_type, 2, true);
+    for (const auto memory_usage_mode : memory_usage_modes) {
+        // default extra encoded chunk, no drops
+        providechunk_test(memory_usage_mode, 2, true);
 
-    // 2 extra encoded chunks, 2 dropped chunks
-    providechunk_test(memory_usage_type, 2, true, 2, 2);
+        // 2 extra encoded chunks, 2 dropped chunks
+        providechunk_test(memory_usage_mode, 2, true, 2, 2);
 
-    // 2 extra encoded chunks, 1 dropped chunk
-    providechunk_test(memory_usage_type, 2, true, 2, 1);
+        // 2 extra encoded chunks, 1 dropped chunk
+        providechunk_test(memory_usage_mode, 2, true, 2, 1);
 
-    // 2 extra encoded chunks, 3 dropped chunks
-    providechunk_test(memory_usage_type, 2, false, 2, 3);
+        // 2 extra encoded chunks, 3 dropped chunks
+        providechunk_test(memory_usage_mode, 2, false, 2, 3);
 
-    // default extra encoded chunk, no drops
-    providechunk_test(memory_usage_type, CM256_MAX_CHUNKS, true);
+        // default extra encoded chunk, no drops
+        providechunk_test(memory_usage_mode, CM256_MAX_CHUNKS, true);
 
-    // 10 extra encoded chunks, 10 dropped chunks
-    providechunk_test(memory_usage_type, CM256_MAX_CHUNKS, true, 10, 10);
+        // 10 extra encoded chunks, 10 dropped chunks
+        providechunk_test(memory_usage_mode, CM256_MAX_CHUNKS, true, 10, 10);
 
-    // 10 extra encoded chunks, 7 dropped chunks
-    providechunk_test(memory_usage_type, CM256_MAX_CHUNKS, true, 10, 7);
+        // 10 extra encoded chunks, 7 dropped chunks
+        providechunk_test(memory_usage_mode, CM256_MAX_CHUNKS, true, 10, 7);
 
-    // 10 extra encoded chunks, 12 dropped chunks
-    providechunk_test(memory_usage_type, CM256_MAX_CHUNKS, false, 10, 12);
+        // 10 extra encoded chunks, 12 dropped chunks
+        providechunk_test(memory_usage_mode, CM256_MAX_CHUNKS, false, 10, 12);
+    }
 }
 
-BOOST_DATA_TEST_CASE(fec_test_providechunk_wirehair, MEMORY_USAGE_TYPE, memory_usage_type)
+BOOST_AUTO_TEST_CASE(fec_test_providechunk_wirehair)
 {
-    // default extra encoded chunk, no drops
-    providechunk_test(memory_usage_type, CM256_MAX_CHUNKS + 10, true, default_encoding_overhead);
+    for (const auto memory_usage_mode : memory_usage_modes) {
+        // default extra encoded chunk, no drops
+        providechunk_test(memory_usage_mode, CM256_MAX_CHUNKS + 10, true, default_encoding_overhead);
 
-    // 10 extra encoded chunks, 5 dropped chunks
-    providechunk_test(memory_usage_type, CM256_MAX_CHUNKS + 10, true, 10, 5);
+        // 10 extra encoded chunks, 5 dropped chunks
+        providechunk_test(memory_usage_mode, CM256_MAX_CHUNKS + 10, true, 10, 5);
 
-    // 10 extra encoded chunks, 7 dropped chunks
-    providechunk_test(memory_usage_type, CM256_MAX_CHUNKS + 10, true, 10, 7);
+        // 10 extra encoded chunks, 7 dropped chunks
+        providechunk_test(memory_usage_mode, CM256_MAX_CHUNKS + 10, true, 10, 7);
 
-    // 10 extra encoded chunks, 12 dropped chunks
-    providechunk_test(memory_usage_type, CM256_MAX_CHUNKS + 10, false, 10, 12);
+        // 10 extra encoded chunks, 12 dropped chunks
+        providechunk_test(memory_usage_mode, CM256_MAX_CHUNKS + 10, false, 10, 12);
 
-    // 10 extra encoded chunks, 15 dropped chunks
-    providechunk_test(memory_usage_type, CM256_MAX_CHUNKS + 10, false, 10, 15);
+        // 10 extra encoded chunks, 15 dropped chunks
+        providechunk_test(memory_usage_mode, CM256_MAX_CHUNKS + 10, false, 10, 15);
+    }
 }
 
 
-BOOST_DATA_TEST_CASE(fec_test_providechunk_repetition, MEMORY_USAGE_TYPE, memory_usage_type)
+void test_providechunk_repetition(MemoryUsageMode memory_usage_mode)
 {
     constexpr size_t n_encoded_chunks = 3;
     constexpr size_t block_size = 10;
@@ -424,11 +444,18 @@ BOOST_DATA_TEST_CASE(fec_test_providechunk_repetition, MEMORY_USAGE_TYPE, memory
     // There were 3 encoded chunks, but let's assume 2 of them were dropped
     // and the receiver only received the 3rd encoded chunk.
 
-    FECDecoder decoder(block_size, memory_usage_type);
+    FECDecoder decoder(block_size, memory_usage_mode);
     decoder.ProvideChunk(&block_fec_chunks.first[2], 2);
 
-    BOOST_CHECK(decoder.DecodeReady());
+    BOOST_CHECK_MESSAGE(decoder.DecodeReady(), memory_usage_mode);
     check_chunk_equal(&block_fec_chunks.first[2], original_data);
+}
+
+BOOST_AUTO_TEST_CASE(fec_test_providechunk_repetition)
+{
+    for (const auto memory_usage_mode : memory_usage_modes) {
+        test_providechunk_repetition(memory_usage_mode);
+    }
 }
 
 BOOST_AUTO_TEST_CASE(fec_test_creation_removal_chunk_file)
@@ -694,20 +721,22 @@ BOOST_AUTO_TEST_CASE(fec_test_map_storage_insert)
     }
 }
 
-BOOST_DATA_TEST_CASE(fec_test_decoding_getdataptr, bdata::make({1, 2, CM256_MAX_CHUNKS, CM256_MAX_CHUNKS + 10}) * MEMORY_USAGE_TYPE, n_uncoded_chunks, memory_usage_type)
+void test_decoding_getdataptr(size_t n_uncoded_chunks, MemoryUsageMode memory_usage_mode)
 {
+    std::ostringstream check_msg;
+    check_msg << "n_uncoded_chunks = " << n_uncoded_chunks << ", memory_usage_mode = " << memory_usage_mode;
     // Random test data that does not fill n_uncoded_chunks exactly (padded)
     TestData test_data;
     size_t data_size = FEC_CHUNK_SIZE * n_uncoded_chunks - (FEC_CHUNK_SIZE / 2);
-    BOOST_CHECK(generate_encoded_chunks(data_size, test_data, default_encoding_overhead));
+    BOOST_CHECK_MESSAGE(generate_encoded_chunks(data_size, test_data, default_encoding_overhead), check_msg.str());
     size_t n_encoded_chunks = test_data.encoded_chunks.size();
 
     // Provide chunks into the FEC Decoder
-    FECDecoder decoder(data_size, memory_usage_type);
+    FECDecoder decoder(data_size, memory_usage_mode);
     for (size_t i = 0; i < n_encoded_chunks; i++) {
         decoder.ProvideChunk(test_data.encoded_chunks[i].data(), test_data.chunk_ids[i]);
     }
-    BOOST_CHECK(decoder.DecodeReady());
+    BOOST_CHECK_MESSAGE(decoder.DecodeReady(), check_msg.str());
 
     // Get the decoded data using GetDecodedData
     std::vector<unsigned char> decoded_data = decoder.GetDecodedData();
@@ -729,6 +758,16 @@ BOOST_DATA_TEST_CASE(fec_test_decoding_getdataptr, bdata::make({1, 2, CM256_MAX_
         test_data.original_data.begin(), test_data.original_data.end());
     BOOST_CHECK_EQUAL_COLLECTIONS(decoded_data2.begin(), decoded_data2.begin() + data_size,
         test_data.original_data.begin(), test_data.original_data.end());
+}
+
+BOOST_AUTO_TEST_CASE(fec_test_decoding_getdataptr)
+{
+    std::vector<size_t> chunk_counts{1, 2, CM256_MAX_CHUNKS, CM256_MAX_CHUNKS + 10};
+    for (const auto chunk_count : chunk_counts) {
+        for (const auto memory_usage_mode : memory_usage_modes) {
+            test_decoding_getdataptr(chunk_count, memory_usage_mode);
+        }
+    }
 }
 
 BOOST_AUTO_TEST_CASE(fec_test_decoder_move_assignment_operator)
@@ -798,8 +837,11 @@ BOOST_AUTO_TEST_CASE(fec_test_decoder_move_assignment_operator)
     }
 }
 
-BOOST_DATA_TEST_CASE(fec_test_decode_using_moved_decoder, bdata::make({1, 2, CM256_MAX_CHUNKS, CM256_MAX_CHUNKS + 10}) * MEMORY_USAGE_TYPE, n_uncoded_chunks, memory_usage_type)
+void test_decode_using_moved_decoder(size_t n_uncoded_chunks, MemoryUsageMode memory_usage_mode)
 {
+    std::ostringstream check_msg;
+    check_msg << "n_uncoded_chunks = " << n_uncoded_chunks << ", memory_usage_mode = " << memory_usage_mode;
+
     TestData test_data;
     size_t data_size = FEC_CHUNK_SIZE * n_uncoded_chunks;
     generate_encoded_chunks(data_size, test_data, default_encoding_overhead);
@@ -811,12 +853,12 @@ BOOST_DATA_TEST_CASE(fec_test_decode_using_moved_decoder, bdata::make({1, 2, CM2
         // default construct in memory mode
         FECDecoder decoder;
         // Move a non default constructed FECDecoder into decoder
-        decoder = FECDecoder(data_size, memory_usage_type, "1234_header");
+        decoder = FECDecoder(data_size, memory_usage_mode, "1234_header");
         for (size_t i = 0; i < n_encoded_chunks; i++) {
             decoder.ProvideChunk(test_data.encoded_chunks[i].data(), test_data.chunk_ids[i]);
         }
 
-        BOOST_CHECK(decoder.DecodeReady());
+        BOOST_CHECK_MESSAGE(decoder.DecodeReady(), check_msg.str());
         std::vector<unsigned char> decoded_data = decoder.GetDecodedData();
         BOOST_CHECK_EQUAL(decoded_data.size(), test_data.original_data.size());
         BOOST_CHECK_EQUAL_COLLECTIONS(decoded_data.begin(), decoded_data.end(),
@@ -836,11 +878,21 @@ BOOST_DATA_TEST_CASE(fec_test_decode_using_moved_decoder, bdata::make({1, 2, CM2
             decoder2.ProvideChunk(test_data.encoded_chunks[i].data(), test_data.chunk_ids[i]);
         }
 
-        BOOST_CHECK(decoder2.DecodeReady());
+        BOOST_CHECK_MESSAGE(decoder2.DecodeReady(), check_msg.str());
         std::vector<unsigned char> decoded_data = decoder2.GetDecodedData();
         BOOST_CHECK_EQUAL(decoded_data.size(), test_data.original_data.size());
         BOOST_CHECK_EQUAL_COLLECTIONS(decoded_data.begin(), decoded_data.end(),
             test_data.original_data.begin(), test_data.original_data.end());
+    }
+}
+
+BOOST_AUTO_TEST_CASE(fec_test_decode_using_moved_decoder)
+{
+    std::vector<size_t> chunk_counts{1, 2, CM256_MAX_CHUNKS, CM256_MAX_CHUNKS + 10};
+    for (const auto chunk_count : chunk_counts) {
+        for (const auto memory_usage_mode : memory_usage_modes) {
+            test_decode_using_moved_decoder(chunk_count, memory_usage_mode);
+        }
     }
 }
 
@@ -917,7 +969,7 @@ BOOST_AUTO_TEST_CASE(fec_test_fecdecoder_recovery_in_two_steps)
     recovery_test(90, 10, 0.9, 0, true);    // abort and continue after having enough chunks to decode already
 }
 
-BOOST_DATA_TEST_CASE(fec_test_fecdecoder_recovery_after_decoding, bdata::make({2, CM256_MAX_CHUNKS, CM256_MAX_CHUNKS + 10}), n_uncoded_chunks)
+void test_fecdecoder_recovery_after_decoding(size_t n_uncoded_chunks)
 {
     // This test case tests the situation in which the mmap-mode decoder has all
     // the chunks and proceeds with the decoding, but for some reason the
@@ -959,7 +1011,7 @@ BOOST_DATA_TEST_CASE(fec_test_fecdecoder_recovery_after_decoding, bdata::make({2
     // Second session
     {
         FECDecoder decoder(data_size, MemoryUsageMode::USE_MMAP, obj_id);
-        BOOST_CHECK(decoder.DecodeReady());
+        BOOST_CHECK_MESSAGE(decoder.DecodeReady(), n_uncoded_chunks);
         std::vector<unsigned char> decoded_data = decoder.GetDecodedData();
         BOOST_CHECK_EQUAL(decoded_data.size(), test_data.original_data.size());
         BOOST_CHECK_EQUAL_COLLECTIONS(decoded_data.begin(), decoded_data.end(),
@@ -967,7 +1019,15 @@ BOOST_DATA_TEST_CASE(fec_test_fecdecoder_recovery_after_decoding, bdata::make({2
     }
 }
 
-BOOST_DATA_TEST_CASE(fec_test_fecdecoder_recovery_with_N_decoders, bdata::make({1, 2, CM256_MAX_CHUNKS, CM256_MAX_CHUNKS + 10}), n_uncoded_chunks)
+BOOST_AUTO_TEST_CASE(fec_test_fecdecoder_recovery_after_decoding)
+{
+    std::vector<size_t> chunk_counts{2, CM256_MAX_CHUNKS, CM256_MAX_CHUNKS + 10};
+    for (const auto chunk_count : chunk_counts) {
+        test_fecdecoder_recovery_after_decoding(chunk_count);
+    }
+}
+
+void test_fecdecoder_recovery_with_N_decoders(size_t n_uncoded_chunks)
 {
     // This test will cover the worst-case scenario for recovering chunks
     // If the decoder is going to receive N chunks, it will receive them via N different decoders.
@@ -992,11 +1052,20 @@ BOOST_DATA_TEST_CASE(fec_test_fecdecoder_recovery_with_N_decoders, bdata::make({
     FECDecoder final_decoder(data_size, MemoryUsageMode::USE_MMAP, obj_id);
     final_decoder.ProvideChunk(test_data.encoded_chunks[n_encoded_chunks - 1].data(), test_data.chunk_ids[n_encoded_chunks - 1]);
 
-    BOOST_CHECK(final_decoder.DecodeReady());
+    BOOST_CHECK_MESSAGE(final_decoder.DecodeReady(), n_uncoded_chunks);
     std::vector<unsigned char> decoded_data = final_decoder.GetDecodedData();
     BOOST_CHECK_EQUAL(decoded_data.size(), test_data.original_data.size());
     BOOST_CHECK_EQUAL_COLLECTIONS(decoded_data.begin(), decoded_data.end(),
         test_data.original_data.begin(), test_data.original_data.end());
 }
+
+BOOST_AUTO_TEST_CASE(fec_test_fecdecoder_recovery_with_N_decoders)
+{
+    std::vector<size_t> chunk_counts{1, 2, CM256_MAX_CHUNKS, CM256_MAX_CHUNKS + 10};
+    for (const auto chunk_count : chunk_counts) {
+        test_fecdecoder_recovery_with_N_decoders(chunk_count);
+    }
+}
+
 
 BOOST_AUTO_TEST_SUITE_END()
