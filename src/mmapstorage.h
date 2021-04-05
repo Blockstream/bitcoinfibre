@@ -49,17 +49,17 @@ public:
         }
 
         const int flags = create ? (O_RDWR | O_CREAT) : O_RDWR;
-        m_chunk_file = ::open(m_file_path.c_str(), flags, 0755);
-        if (m_chunk_file == -1) {
+        const int chunk_file = ::open(m_file_path.c_str(), flags, 0755);
+        if (chunk_file == -1) {
             throw std::runtime_error("failed to open file: " + m_file_path.string() + " " + ::strerror(errno));
         }
 
         // Convention: data chunks are stored first, while the metadata is
         // stored by the end of the mmapped file.
         m_data_storage = static_cast<char*>(::mmap(nullptr, m_file_size,
-            PROT_READ | PROT_WRITE, MAP_SHARED, m_chunk_file, 0));
+            PROT_READ | PROT_WRITE, MAP_SHARED, chunk_file, 0));
         if (m_data_storage == MAP_FAILED) {
-            ::close(m_chunk_file);
+            ::close(chunk_file);
             throw std::runtime_error("mmap failed " + m_file_path.string() + " " + ::strerror(errno));
         }
         m_meta_storage = m_data_storage + (m_chunk_count * m_chunk_data_size);
@@ -71,7 +71,7 @@ public:
         if (create) {
             m_recoverable = Recoverable();
             if (!m_recoverable) {
-                int const ret = ::ftruncate(m_chunk_file, m_file_size);
+                int const ret = ::ftruncate(chunk_file, m_file_size);
                 if (ret != 0) {
                     ::unlink(m_file_path.c_str());
                     throw std::runtime_error("ftruncate failed " + m_file_path.string() + " " + ::strerror(errno));
@@ -83,12 +83,15 @@ public:
                 }
             }
         }
+
+        // After the mmap() call, the file descriptor can be closed without
+        // invalidating the mapping.
+        ::close(chunk_file);
     }
 
     MmapStorage(MmapStorage&& ms) noexcept : m_chunk_data_size(ms.m_chunk_data_size),
                                              m_chunk_meta_size(ms.m_chunk_meta_size),
                                              m_chunk_count(ms.m_chunk_count),
-                                             m_chunk_file(exchange(ms.m_chunk_file, -1)),
                                              m_data_storage(exchange(ms.m_data_storage, nullptr))
     {
     }
@@ -167,15 +170,13 @@ public:
     }
 
     /**
-     * @brief Destroy the object, unmap, and close the file descriptor.
+     * @brief Destroy the object and unmap the memory region.
      * @note This destructor does not remove the underlying file.
      */
     ~MmapStorage()
     {
         if (m_data_storage != nullptr)
             ::munmap(m_data_storage, m_file_size);
-        if (m_chunk_file != -1)
-            ::close(m_chunk_file);
     }
 
 private:
@@ -221,7 +222,6 @@ private:
     size_t m_chunk_count = 0;
     size_t m_file_size = 0;
     T m_meta_init_val;
-    int m_chunk_file = -1;
     char* m_data_storage = nullptr;
     char* m_meta_storage = nullptr;
     bool m_recoverable = false;
