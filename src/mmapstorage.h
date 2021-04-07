@@ -89,11 +89,17 @@ public:
         ::close(chunk_file);
     }
 
-    MmapStorage(MmapStorage&& ms) noexcept : m_chunk_data_size(ms.m_chunk_data_size),
+    MmapStorage(MmapStorage&& ms) noexcept : m_file_path(std::move(ms.m_file_path)),
+                                             m_chunk_data_size(ms.m_chunk_data_size),
                                              m_chunk_meta_size(ms.m_chunk_meta_size),
                                              m_chunk_count(ms.m_chunk_count),
-                                             m_data_storage(exchange(ms.m_data_storage, nullptr))
+                                             m_file_size(ms.m_file_size),
+                                             m_meta_init_val(std::move(ms.m_meta_init_val)),
+                                             m_data_storage(exchange(ms.m_data_storage, nullptr)),
+                                             m_meta_storage(exchange(ms.m_meta_storage, nullptr)),
+                                             m_recoverable(ms.m_recoverable)
     {
+        ms.m_file_path.clear();
     }
 
     /**
@@ -165,8 +171,10 @@ public:
      */
     void Remove()
     {
-        ::madvise(GetStorage(), Size(), MADV_REMOVE);
-        ::unlink(m_file_path.c_str());
+        if (m_data_storage != nullptr && !m_file_path.empty()) {
+            ::madvise(m_data_storage, m_file_size, MADV_REMOVE);
+            ::unlink(m_file_path.c_str());
+        }
     }
 
     /**
@@ -216,7 +224,7 @@ private:
 
 
 private:
-    const boost::filesystem::path m_file_path;
+    boost::filesystem::path m_file_path;
     size_t m_chunk_data_size = 0;
     size_t m_chunk_meta_size = 0;
     size_t m_chunk_count = 0;

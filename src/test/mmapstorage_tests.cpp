@@ -270,5 +270,62 @@ BOOST_AUTO_TEST_CASE_TEMPLATE(map_storage_index_validation, T, storage_data_type
     BOOST_CHECK_THROW(map_storage.Insert(test_data.data(), 1, n_chunks), std::runtime_error);
 }
 
+BOOST_AUTO_TEST_CASE_TEMPLATE(map_storage_movable, T, storage_data_types)
+{
+    size_t n_chunks = 5;
+    size_t chunk_data_size = 1000;
+    T meta_init_val = 127;
+
+    {
+        auto filename = get_random_temp_file();
+
+        // Create storage A and fill in some random chunks
+        MmapStorage<T> map_storage_a(filename, true /* create */, chunk_data_size, n_chunks, meta_init_val);
+
+        std::vector<std::vector<unsigned char>> chunks;
+        for (size_t i = 0; i < n_chunks; i++) {
+            chunks.push_back(generate_random_string(chunk_data_size));
+            map_storage_a.Insert(chunks.back().data(), i, i);
+        }
+
+        // Create storage B and move A into B
+        MmapStorage<T> map_storage_b(std::move(map_storage_a));
+
+        // Once storage A is in moved-from state, it should no longer be able to
+        // remove the memory-mapped storage file
+        map_storage_a.Remove();
+        BOOST_CHECK(fs::exists(filename));
+
+        // Confirm that B has the contents moved from A
+        BOOST_CHECK(map_storage_b.Size() == ((chunk_data_size + sizeof(T)) * n_chunks));
+        BOOST_CHECK(map_storage_b.IsRecoverable() == false);
+        BOOST_CHECK(map_storage_b.GetStorage() != nullptr);
+        BOOST_CHECK(map_storage_a.GetStorage() == nullptr);
+        for (size_t i = 0; i < n_chunks; i++) {
+            check_chunk_equal(map_storage_b.GetChunk(i), chunks[i], chunk_data_size);
+            BOOST_CHECK(map_storage_b.GetChunkMeta(i) == (T)i);
+        }
+
+        // Storage B can remove the memory-mapped file
+        map_storage_b.Remove();
+        BOOST_CHECK(!fs::exists(filename));
+    }
+
+    // Check that the recoverable state can be moved
+    {
+        auto filename = get_random_temp_file();
+
+        MmapStorage<T> map_storage_a(filename, true /* create */, chunk_data_size, n_chunks, meta_init_val);
+        auto random_data = generate_random_string(chunk_data_size);
+        map_storage_a.Insert(random_data.data(), 0, 0);
+
+        MmapStorage<T> map_storage_b(filename, true /* create */, chunk_data_size, n_chunks, meta_init_val);
+        BOOST_CHECK(map_storage_b.IsRecoverable());
+
+        MmapStorage<T> map_storage_c(std::move(map_storage_b));
+        BOOST_CHECK(map_storage_c.IsRecoverable());
+    }
+}
+
 
 BOOST_AUTO_TEST_SUITE_END()
