@@ -34,7 +34,7 @@ xcompile-aarch64:
     - set -e
     - ./autogen.sh
     - ./configure --disable-wallet --prefix=/src/depends/aarch64-linux-gnu --enable-glibc-back-compat --enable-reduce-exports LDFLAGS=-static-libstdc++
-    - make -j$(nproc) CXXFLAGS='-g -O2 -DLINUX_ARM -DHAVE_ARM_NEON_H'
+    - make -j$(nproc)
   only:
     refs:
       - web
@@ -50,7 +50,7 @@ xcompile-armhf:
     - set -e
     - ./autogen.sh
     - ./configure --disable-wallet --prefix=/src/depends/arm-linux-gnueabihf --enable-glibc-back-compat --enable-reduce-exports LDFLAGS=-static-libstdc++
-    - make -j$(nproc) CXXFLAGS='-g -O2 -DLINUX_ARM'
+    - make -j$(nproc)
   only:
     refs:
       - web
