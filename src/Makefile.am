@@ -24,6 +24,7 @@ BITCOIN_INCLUDES=-I$(builddir) $(BDB_CPPFLAGS) $(BOOST_CPPFLAGS) $(LEVELDB_CPPFL
 BITCOIN_INCLUDES += -I$(srcdir)/secp256k1/include -I$(srcdir)/wirehair/src
 BITCOIN_INCLUDES += $(UNIVALUE_CFLAGS)
 
+LIBBITCOIN_FEC=wirehair/libbitcoin_fec.a
 LIBBITCOIN_SERVER=libbitcoin_server.a
 LIBBITCOIN_COMMON=libbitcoin_common.a
 LIBBITCOIN_CONSENSUS=libbitcoin_consensus.a
@@ -69,6 +70,7 @@ EXTRA_LIBRARIES += \
   $(LIBBITCOIN_COMMON) \
   $(LIBBITCOIN_CONSENSUS) \
   $(LIBBITCOIN_SERVER) \
+  $(LIBBITCOIN_FEC) \
   $(LIBBITCOIN_CLI) \
   $(LIBBITCOIN_WALLET) \
   $(LIBBITCOIN_WALLET_TOOL) \
@@ -251,25 +253,32 @@ BITCOIN_CORE_H = \
   zmq/zmqpublishnotifier.h \
   zmq/zmqrpc.h
 
-FEC_H = \
-  wirehair/gf256.h \
-  wirehair/cm256.h \
-  wirehair/wirehair.h \
-  wirehair/WirehairCodec.h \
-  wirehair/WirehairTools.h
-
-FEC_CPP = \
-  wirehair/gf256.cpp \
-  wirehair/cm256.cpp \
-  wirehair/WirehairCodec.cpp \
-  wirehair/WirehairTools.cpp \
-  wirehair/wirehair.cpp
-
 obj/build.h: FORCE
 	@$(MKDIR_P) $(builddir)/obj
 	@$(top_srcdir)/share/genbuild.sh "$(abs_top_builddir)/src/obj/build.h" \
 	  "$(abs_top_srcdir)"
 libbitcoin_util_a-clientversion.$(OBJEXT): obj/build.h
+
+wirehair_libbitcoin_fec_a_CXXFLAGS = $(AM_CXXFLAGS) $(PIE_FLAGS)
+wirehair_libbitcoin_fec_a_CPPFLAGS = $(AM_CPPFLAGS)
+if ENABLE_SSE3
+wirehair_libbitcoin_fec_a_CXXFLAGS += $(SSE3_CXXFLAGS)
+endif
+if ENABLE_AVX2
+wirehair_libbitcoin_fec_a_CXXFLAGS += $(AVX2_CXXFLAGS)
+endif
+
+wirehair_libbitcoin_fec_a_SOURCES = \
+  wirehair/gf256.h \
+  wirehair/gf256.cpp \
+  wirehair/cm256.h \
+  wirehair/cm256.cpp \
+  wirehair/wirehair.h \
+  wirehair/wirehair.cpp \
+  wirehair/WirehairCodec.h \
+  wirehair/WirehairCodec.cpp \
+  wirehair/WirehairTools.h \
+  wirehair/WirehairTools.cpp
 
 # server: shared between bitcoind and bitcoin-qt
 # Contains code accessing mempool and chain state that is meant to be separated
@@ -330,8 +339,6 @@ libbitcoin_server_a_SOURCES = \
   validation.cpp \
   validationinterface.cpp \
   versionbits.cpp \
-  $(FEC_CPP) \
-  $(FEC_H) \
   $(BITCOIN_CORE_H)
 
 if ENABLE_WALLET
@@ -570,6 +577,7 @@ bitcoind_LDADD = \
   $(LIBBITCOIN_SERVER) \
   $(LIBBITCOIN_WALLET) \
   $(LIBBITCOIN_SERVER) \
+  $(LIBBITCOIN_FEC) \
   $(LIBBITCOIN_COMMON) \
   $(LIBUNIVALUE) \
   $(LIBBITCOIN_UTIL) \
