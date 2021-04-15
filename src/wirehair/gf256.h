@@ -53,50 +53,46 @@
 //------------------------------------------------------------------------------
 // Platform/Architecture
 
+#if defined(__ARM_ARCH) || defined(__ARM_NEON) || defined(__ARM_NEON__)
+    #define LINUX_ARM
+#endif
+
 #if defined(ANDROID) || defined(IOS) || defined(LINUX_ARM) || defined(__powerpc__) || defined(__s390__)
     #define GF256_TARGET_MOBILE
 #endif // ANDROID
 
-#if defined(__AVX2__) || (defined (_MSC_VER) && _MSC_VER >= 1900)
+#if defined(__AVX2__) && (!defined (_MSC_VER) || _MSC_VER >= 1900)
     #define GF256_TRY_AVX2 /* 256-bit */
     #include <immintrin.h>
     #define GF256_ALIGN_BYTES 32
+    #define GF256_M256 __m256i
 #else // __AVX2__
     #define GF256_ALIGN_BYTES 16
 #endif // __AVX2__
 
-#if !defined(GF256_TARGET_MOBILE)
-    // Note: MSVC currently only supports SSSE3 but not AVX2
-    #include <tmmintrin.h> // SSSE3: _mm_shuffle_epi8
+#if defined(__SSE2__)
     #include <emmintrin.h> // SSE2
-#endif // GF256_TARGET_MOBILE
+#elif !defined(GF256_TARGET_MOBILE)
+    #error "SSE2 is required for non-mobile target"
+#endif // __SSE2__
 
-#if defined(HAVE_ARM_NEON_H)
+#if defined(__SSE3__)
+    #define GF256_TRY_SSE3
+    #include <tmmintrin.h> // SSSE3: _mm_shuffle_epi8
+#endif // __SSE3__
+
+#if defined(__ARM_NEON) || defined(__ARM_NEON__)
     #include <arm_neon.h>
-#endif // HAVE_ARM_NEON_H
-
-#if defined(GF256_TARGET_MOBILE)
-
-    #define GF256_ALIGNED_ACCESSES /* Inputs must be aligned to GF256_ALIGN_BYTES */
-
-# if defined(HAVE_ARM_NEON_H)
-    // Compiler-specific 128-bit SIMD register keyword
-    #define GF256_M128 uint8x16_t
     #define GF256_TRY_NEON
+#endif // __ARM_NEON__
+
+// Compiler-specific 128-bit SIMD register keyword
+#if defined(GF256_TARGET_MOBILE) && defined(GF256_TRY_NEON)
+    #define GF256_M128 uint8x16_t
+#elif defined(__SSE2__) || defined(GF256_TRY_SSE3)
+    #define GF256_M128 __m128i
 #else
     #define GF256_M128 uint64_t
-# endif
-
-#else // GF256_TARGET_MOBILE
-
-    // Compiler-specific 128-bit SIMD register keyword
-    #define GF256_M128 __m128i
-
-#endif // GF256_TARGET_MOBILE
-
-#ifdef GF256_TRY_AVX2
-    // Compiler-specific 256-bit SIMD register keyword
-    #define GF256_M256 __m256i
 #endif
 
 // Compiler-specific C++11 restrict keyword
