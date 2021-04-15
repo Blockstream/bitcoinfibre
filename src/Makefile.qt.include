@@ -312,7 +312,7 @@ bitcoin_qt_sources = qt/main.cpp
 if TARGET_WINDOWS
   bitcoin_qt_sources += $(BITCOIN_RC)
 endif
-bitcoin_qt_ldadd = qt/libbitcoinqt.a $(LIBBITCOIN_SERVER)
+bitcoin_qt_ldadd = qt/libbitcoinqt.a $(LIBBITCOIN_SERVER) $(LIBBITCOIN_FEC)
 if ENABLE_WALLET
 bitcoin_qt_ldadd += $(LIBBITCOIN_UTIL) $(LIBBITCOIN_WALLET)
 endif

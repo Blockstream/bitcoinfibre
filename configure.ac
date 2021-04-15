@@ -439,9 +439,6 @@ if test "x$CXXFLAGS_overridden" = "xno"; then
   AX_CHECK_COMPILE_FLAG([-Wdeprecated-register],[NOWARN_CXXFLAGS="$NOWARN_CXXFLAGS -Wno-deprecated-register"],,[[$CXXFLAG_WERROR]])
   AX_CHECK_COMPILE_FLAG([-Wimplicit-fallthrough],[NOWARN_CXXFLAGS="$NOWARN_CXXFLAGS -Wno-implicit-fallthrough"],,[[$CXXFLAG_WERROR]])
   AX_CHECK_COMPILE_FLAG([-Wdeprecated-copy],[NOWARN_CXXFLAGS="$NOWARN_CXXFLAGS -Wno-deprecated-copy"],,[[$CXXFLAG_WERROR]])
-
-  # Need this for wh256, but this is really not what we should be doing...
-  AX_CHECK_COMPILE_FLAG([-march=native],[CXXFLAGS="$CXXFLAGS -march=native"],,[[$CXXFLAG_WERROR]])
 fi
 
 dnl Don't allow extended (non-ASCII) symbols in identifiers. This is easier for code review.
@@ -449,8 +446,10 @@ AX_CHECK_COMPILE_FLAG([-fno-extended-identifiers],[[CXXFLAGS="$CXXFLAGS -fno-ext
 
 enable_sse42=no
 enable_sse41=no
+enable_sse3=no
 enable_avx2=no
 enable_shani=no
+enable_neon=no
 
 if test "x$use_asm" = "xyes"; then
 
@@ -461,6 +460,7 @@ dnl compatibility.
 dnl x86
 AX_CHECK_COMPILE_FLAG([-msse4.2],[[SSE42_CXXFLAGS="-msse4.2"]],,[[$CXXFLAG_WERROR]])
 AX_CHECK_COMPILE_FLAG([-msse4.1],[[SSE41_CXXFLAGS="-msse4.1"]],,[[$CXXFLAG_WERROR]])
+AX_CHECK_COMPILE_FLAG([-msse3],[[SSE3_CXXFLAGS="-msse3"]],,[[$CXXFLAG_WERROR]])
 AX_CHECK_COMPILE_FLAG([-mavx -mavx2],[[AVX2_CXXFLAGS="-mavx -mavx2"]],,[[$CXXFLAG_WERROR]])
 AX_CHECK_COMPILE_FLAG([-msse4 -msha],[[SHANI_CXXFLAGS="-msse4 -msha"]],,[[$CXXFLAG_WERROR]])
 
@@ -497,6 +497,20 @@ AC_COMPILE_IFELSE([AC_LANG_PROGRAM([[
     return _mm_extract_epi32(l, 3);
   ]])],
  [ AC_MSG_RESULT(yes); enable_sse41=yes; AC_DEFINE(ENABLE_SSE41, 1, [Define this symbol to build code that uses SSE4.1 intrinsics]) ],
+ [ AC_MSG_RESULT(no)]
+)
+CXXFLAGS="$TEMP_CXXFLAGS"
+
+TEMP_CXXFLAGS="$CXXFLAGS"
+CXXFLAGS="$CXXFLAGS $SSE3_CXXFLAGS"
+AC_MSG_CHECKING(for SSE3 intrinsics)
+AC_COMPILE_IFELSE([AC_LANG_PROGRAM([[
+    #include <tmmintrin.h>
+  ]],[[
+   __m128 x = _mm_addsub_ps(_mm_cvtpd_ps(_mm_setzero_pd()),
+                            _mm_cvtpd_ps(_mm_setzero_pd()));
+  ]])],
+ [ AC_MSG_RESULT(yes); enable_sse3=yes; AC_DEFINE(ENABLE_SSE3, 1, [Define this symbol to build code that uses SSE3 intrinsics]) ],
  [ AC_MSG_RESULT(no)]
 )
 CXXFLAGS="$TEMP_CXXFLAGS"
@@ -550,6 +564,17 @@ AC_COMPILE_IFELSE([AC_LANG_PROGRAM([[
  [ AC_MSG_RESULT(no)]
 )
 CXXFLAGS="$TEMP_CXXFLAGS"
+
+AC_MSG_CHECKING(for ARM Neon)
+AC_COMPILE_IFELSE([AC_LANG_PROGRAM([[
+    #include <arm_neon.h>
+    int32x4_t testfunc(int16_t *a, int16_t *b) {
+        return vmull_s16(vld1_s16(a), vld1_s16(b));
+    }
+  ]])],
+[ AC_MSG_RESULT(yes); enable_neon=yes ],
+[ AC_MSG_RESULT(no)]
+)
 
 fi
 
@@ -1620,6 +1645,7 @@ AM_CONDITIONAL([GLIBC_BACK_COMPAT],[test x$use_glibc_compat = xyes])
 AM_CONDITIONAL([HARDEN],[test x$use_hardening = xyes])
 AM_CONDITIONAL([ENABLE_SSE42],[test x$enable_sse42 = xyes])
 AM_CONDITIONAL([ENABLE_SSE41],[test x$enable_sse41 = xyes])
+AM_CONDITIONAL([ENABLE_SSE3],[test x$enable_sse3 = xyes])
 AM_CONDITIONAL([ENABLE_AVX2],[test x$enable_avx2 = xyes])
 AM_CONDITIONAL([ENABLE_SHANI],[test x$enable_shani = xyes])
 AM_CONDITIONAL([ENABLE_ARM_CRC],[test x$enable_arm_crc = xyes])
@@ -1667,6 +1693,7 @@ AC_SUBST(PIC_FLAGS)
 AC_SUBST(PIE_FLAGS)
 AC_SUBST(SANITIZER_CXXFLAGS)
 AC_SUBST(SANITIZER_LDFLAGS)
+AC_SUBST(SSE3_CXXFLAGS)
 AC_SUBST(SSE42_CXXFLAGS)
 AC_SUBST(SSE41_CXXFLAGS)
 AC_SUBST(AVX2_CXXFLAGS)
@@ -1779,4 +1806,11 @@ echo "  CXX           = $CXX"
 echo "  CXXFLAGS      = $DEBUG_CXXFLAGS $HARDENED_CXXFLAGS $WARN_CXXFLAGS $NOWARN_CXXFLAGS $ERROR_CXXFLAGS $GPROF_CXXFLAGS $CXXFLAGS"
 echo "  LDFLAGS       = $PTHREAD_LIBS $HARDENED_LDFLAGS $GPROF_LDFLAGS $LDFLAGS"
 echo "  ARFLAGS       = $ARFLAGS"
+echo
+echo "Intrinsics Options:"
+echo "  sse3          = $enable_sse3"
+echo "  sse41         = $enable_sse41"
+echo "  avx2          = $enable_avx2"
+echo "  shani         = $enable_shani"
+echo "  neon          = $enable_neon"
 echo
