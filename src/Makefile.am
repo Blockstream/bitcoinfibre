@@ -18,6 +18,7 @@ EXTRA_LIBRARIES =
 BITCOIN_INCLUDES=-I$(builddir) -I$(srcdir)/$(MINISKETCH_INCLUDE_DIR_INT) -I$(srcdir)/secp256k1/include -I$(srcdir)/$(UNIVALUE_INCLUDE_DIR_INT) $(BDB_CPPFLAGS) $(BOOST_CPPFLAGS) $(LEVELDB_CPPFLAGS)
 BITCOIN_INCLUDES += -I$(srcdir)/wirehair/src
 
+LIBBITCOIN_FEC=wirehair/libbitcoin_fec.a
 LIBBITCOIN_NODE=libbitcoin_node.a
 LIBBITCOIN_COMMON=libbitcoin_common.a
 LIBBITCOIN_CONSENSUS=libbitcoin_consensus.a
@@ -67,6 +68,7 @@ EXTRA_LIBRARIES += \
   $(LIBBITCOIN_COMMON) \
   $(LIBBITCOIN_CONSENSUS) \
   $(LIBBITCOIN_NODE) \
+  $(LIBBITCOIN_FEC) \
   $(LIBBITCOIN_CLI) \
   $(LIBBITCOIN_IPC) \
   $(LIBBITCOIN_WALLET) \
@@ -317,20 +319,6 @@ BITCOIN_CORE_H = \
   zmq/zmqrpc.h \
   zmq/zmqutil.h
 
-FEC_H = \
-  wirehair/gf256.h \
-  wirehair/cm256.h \
-  wirehair/wirehair.h \
-  wirehair/WirehairCodec.h \
-  wirehair/WirehairTools.h
-
-FEC_CPP = \
-  wirehair/gf256.cpp \
-  wirehair/cm256.cpp \
-  wirehair/WirehairCodec.cpp \
-  wirehair/WirehairTools.cpp \
-  wirehair/wirehair.cpp
-
 obj/build.h: FORCE
 	@$(MKDIR_P) $(builddir)/obj
 	@$(top_srcdir)/share/genbuild.sh "$(abs_top_builddir)/src/obj/build.h" \
@@ -338,6 +326,27 @@ obj/build.h: FORCE
 libbitcoin_util_a-clientversion.$(OBJEXT): obj/build.h
 
 ipc/capnp/libbitcoin_ipc_a-ipc.$(OBJEXT): $(libbitcoin_ipc_mpgen_input:=.h)
+
+wirehair_libbitcoin_fec_a_CXXFLAGS = $(AM_CXXFLAGS) $(PIE_FLAGS)
+wirehair_libbitcoin_fec_a_CPPFLAGS = $(AM_CPPFLAGS)
+if ENABLE_SSE3
+wirehair_libbitcoin_fec_a_CXXFLAGS += $(SSE3_CXXFLAGS)
+endif
+if ENABLE_AVX2
+wirehair_libbitcoin_fec_a_CXXFLAGS += $(AVX2_CXXFLAGS)
+endif
+
+wirehair_libbitcoin_fec_a_SOURCES = \
+  wirehair/gf256.h \
+  wirehair/gf256.cpp \
+  wirehair/cm256.h \
+  wirehair/cm256.cpp \
+  wirehair/wirehair.h \
+  wirehair/wirehair.cpp \
+  wirehair/WirehairCodec.h \
+  wirehair/WirehairCodec.cpp \
+  wirehair/WirehairTools.h \
+  wirehair/WirehairTools.cpp
 
 # server: shared between bitcoind and bitcoin-qt
 # Contains code accessing mempool and chain state that is meant to be separated
@@ -411,8 +420,6 @@ libbitcoin_node_a_SOURCES = \
   validation.cpp \
   validationinterface.cpp \
   versionbits.cpp \
-  $(FEC_CPP) \
-  $(FEC_H) \
   $(BITCOIN_CORE_H)
 
 if ENABLE_WALLET
@@ -693,6 +700,7 @@ endif
 
 bitcoin_bin_ldadd = \
   $(LIBBITCOIN_WALLET) \
+  $(LIBBITCOIN_FEC) \
   $(LIBBITCOIN_COMMON) \
   $(LIBBITCOIN_UTIL) \
   $(LIBUNIVALUE) \
