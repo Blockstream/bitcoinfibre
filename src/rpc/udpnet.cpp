@@ -1,16 +1,15 @@
-\
 // Copyright (c) 2017 Matt Corallo
 // Unlike the rest of Bitcoin Core, this file is
 // distributed under the Affero General Public License (AGPL v3)
 
-#include <rpc/server.h>
 #include <rpc/protocol.h>
+#include <rpc/server.h>
 #include <rpc/util.h>
 
 #include <hash.h>
-#include <util/strencodings.h>
-#include <udpapi.h>
 #include <netbase.h>
+#include <udpapi.h>
+#include <util/strencodings.h>
 
 #include <univalue.h>
 
@@ -22,24 +21,24 @@ UniValue getudppeerinfo(const JSONRPCRequest& request)
         "\nReturns data about each connected UDP unicast peer as a json array of objects.\n",
         {},
         RPCResult{
-            "[\n"
-            "  {\n"
-            "    \"addr\":\"host:port\",        (string)  The ip address and port of the peer\n"
-            "    \"group\": nnn                 (numeric) The group this peer belongs to\n"
-            "    \"lastrecv\": ttt,             (numeric) The time in seconds since epoch (Jan 1 1970 GMT) of the last receive\n"
-            "    \"ultimatetrust\": true/false  (boolean) Whether this peer, and all of its peers, are trusted\n"
-            "    \"min_recent_rtt\": nnn        (numeric) The minimum RTT among recent pings (in ms)\n"
-            "    \"max_recent_rtt\": nnn        (numeric) The maximum RTT among recent pings (in ms)\n"
-            "    \"avg_recent_rtt\": nnn        (numeric) The average RTT among recent pings (in ms)\n"
-            "  }\n"
-            "  ,...\n"
-            "]\n"
-        },
+            RPCResult::Type::ARR,
+            "",
+            "",
+            {
+                {RPCResult::Type::OBJ, "", "",
+                    {
+                        {RPCResult::Type::STR, "addr", "(host:port) The IP address and port of the peer"},
+                        {RPCResult::Type::NUM, "group", "The group this peer belongs to"},
+                        {RPCResult::Type::NUM, "lastrecv", "The time in seconds since epoch (Jan 1 1970 GMT) of the last receive"},
+                        {RPCResult::Type::BOOL, "ultimatetrust", "Whether this peer, and all of its peers, are trusted"},
+                        {RPCResult::Type::NUM, "min_recent_rtt", "The minimum RTT among recent pings (in ms)"},
+                        {RPCResult::Type::NUM, "max_recent_rtt", "The maximum RTT among recent pings (in ms)"},
+                        {RPCResult::Type::NUM, "avg_recent_rtt", "The average RTT among recent pings (in ms)"},
+                    }},
+            }},
         RPCExamples{
-            HelpExampleCli("getudppeerinfo", "")
-            + HelpExampleRpc("getudppeerinfo", "")
-        }
-    }.Check(request);
+            HelpExampleCli("getudppeerinfo", "") + HelpExampleRpc("getudppeerinfo", "")}}
+        .Check(request);
 
     vector<UDPConnectionStats> vstats;
     GetUDPConnectionList(vstats);
@@ -93,10 +92,8 @@ UniValue addudpnode(const JSONRPCRequest& request)
                 },
                 RPCResults{},
                 RPCExamples{
-                    HelpExampleCli("addudpnode", "\"192.168.0.6:8333\" \"PA$$WORD\" \"THEIR_PA$$\" false \"onetry\"")
-                    + HelpExampleRpc("addudpnode", "\"192.168.0.6:8333\" \"PA$$WORD\" \"THEIR_PA$$\" false \"onetry\"")
-                }
-        }.ToString());
+                    HelpExampleCli("addudpnode", "\"192.168.0.6:8333\" \"PA$$WORD\" \"THEIR_PA$$\" false \"onetry\"") + HelpExampleRpc("addudpnode", "\"192.168.0.6:8333\" \"PA$$WORD\" \"THEIR_PA$$\" false \"onetry\"")}}
+                .ToString());
 
     string strNode = request.params[0].get_str();
 
@@ -144,10 +141,8 @@ UniValue disconnectudpnode(const JSONRPCRequest& request)
         },
         RPCResults{},
         RPCExamples{
-            HelpExampleCli("disconnectudpnode", "\"192.168.0.6:8333\"")
-            + HelpExampleRpc("disconnectudpnode", "\"192.168.0.6:8333\"")
-        }
-    }.Check(request);
+            HelpExampleCli("disconnectudpnode", "\"192.168.0.6:8333\"") + HelpExampleRpc("disconnectudpnode", "\"192.168.0.6:8333\"")}}
+        .Check(request);
 
     string strNode = request.params[0].get_str();
 
@@ -160,87 +155,70 @@ UniValue disconnectudpnode(const JSONRPCRequest& request)
     return NullUniValue;
 }
 
-UniValue getudpmulticastinfo(const JSONRPCRequest& request) {
+UniValue getudpmulticastinfo(const JSONRPCRequest& request)
+{
     RPCHelpMan{"getudpmulticastinfo",
         "\nRetrieve information about the UDP multicast Rx instances.\n",
-        {
-        },
-        RPCResults{
-             RPCResult{
-                 "{\n"
-                 "  \"peer address\" : {   (json object)\n"
-                 "    \"bitrate\"    : (string) Incoming bit rate\n"
-                 "    \"group\"      : (numeric) UDP group number\n"
-                 "    \"groupname\"  : (string) Group label set on option udpmulticast\n"
-                 "    \"ifname\"     : (string) Network interface name\n"
-                 "    \"mcast_ip\"   : (string) Multicast IP address this group listens to\n"
-                 "    \"port\"       : (numeric) UDP port this group listens to\n"
-                 "    \"rcvd_bytes\" : (numeric) Number of bytes received so far\n"
-                 "    \"trusted\"    : (boolean) Whether the sending peer is trusted\n"
-                 "  }\n"
-                 "  ... (all UDP peers)\n"
-                 "}\n"
-             }
-        },
+        {},
+        RPCResult{
+            RPCResult::Type::OBJ, "", "",
+            {
+                {RPCResult::Type::OBJ, "addr", "UDP Multicast peer address",
+                    {
+                        {RPCResult::Type::STR, "bitrate", "Incoming bit rate"},
+                        {RPCResult::Type::NUM, "group", "UDP group number"},
+                        {RPCResult::Type::STR, "groupname", "Group name"},
+                        {RPCResult::Type::STR, "ifname", "Network interface name"},
+                        {RPCResult::Type::STR, "mcast_ip", "Multicast IP address this group listens to"},
+                        {RPCResult::Type::NUM, "port", "UDP port this group listens to"},
+                        {RPCResult::Type::NUM, "rcvd_bytes", "Number of bytes received so far"},
+                        {RPCResult::Type::BOOL, "trusted", "Whether the sending peer is trusted"},
+                    }},
+            }},
         RPCExamples{
-            HelpExampleCli("getudpmulticastinfo", "")
-            + HelpExampleRpc("getudpmulticastinfo", "")
-        }
-    }.Check(request);
+            HelpExampleCli("getudpmulticastinfo", "") + HelpExampleRpc("getudpmulticastinfo", "")}}
+        .Check(request);
 
     return UdpMulticastRxInfoToJson();
 }
 
-static std::string StatsDescriptionString()
+static std::vector<RPCResult> StatsDescriptionString()
 {
-    return "  \"height\": n,                  (numeric) Block height (if already decoded)\n"
-        "  \"header_chunks\": \"rx / exp\",  (string)  Header FEC chunks received / expected\n"
-        "  \"body_chunks\": \"rx / exp\",    (string)  Body FEC chunks received / expected\n"
-        "  \"progress\": \"x%\"              (string)  Percentage of chunks received\n";
+    return {
+        RPCResult{RPCResult::Type::NUM, "height", "Block height (if already decoded)"},
+        RPCResult{RPCResult::Type::STR, "header_chunks", "Header FEC chunks received / expected"},
+        RPCResult{RPCResult::Type::STR, "body_chunks", "Body FEC chunks received / expected"},
+        RPCResult{RPCResult::Type::STR, "progress", "Percentage of chunks received"},
+    };
 }
 
 UniValue getchunkstats(const JSONRPCRequest& request)
 {
     RPCHelpMan{"getchunkstats",
-    "\nReturns chunk statistics of current partial blocks.\n",
-    {
-        {"height", RPCArg::Type::NUM, RPCArg::Optional::OMITTED, "Height of the partial block of interest. If set to 0, shows all current partial blocks."},
-    },
-    {
-        RPCResult{
-        "if height is omitted",
-        "{\n"
-        "\"min_blk\": {                    (json object)\n"
-        + StatsDescriptionString()
-        + "},\n"
-        "\"max_blk\": {                    (json object)\n"
-        + StatsDescriptionString()
-        + "},\n"
-        "\"n_blks\": n,                    (numeric) Total number of partial blocks currently under processing\n"
-        "\"n_chunks\": n                   (numeric) Total number of chunks within current partial blocks\n"
-        "}\n"
+        "\nReturns chunk statistics of current partial blocks.\n",
+        {
+            {"height", RPCArg::Type::NUM, RPCArg::Optional::OMITTED, "Height of the partial block of interest. If set to 0, shows all current partial blocks."},
         },
-        RPCResult{
-        "for height > 0",
-        "{                               (json object)\n"
-        + StatsDescriptionString()
-        + "}\n"
+        {
+            RPCResult{"if height is omitted",
+                RPCResult::Type::OBJ, "", "",
+                {
+                    {RPCResult::Type::OBJ, "min_blk", "Partial block with lowest height", StatsDescriptionString()},
+                    {RPCResult::Type::OBJ, "max_blk", "Partial block with highest height", StatsDescriptionString()},
+                    {RPCResult::Type::NUM, "n_blks", "Total number of partial blocks currently under processing"},
+                    {RPCResult::Type::NUM, "n_chunks", "Total number of chunks within current partial blocks"},
+                }},
+            RPCResult{"for height > 0",
+                RPCResult::Type::OBJ, "", "Selected partial block", StatsDescriptionString()},
+            RPCResult{"for height = 0",
+                RPCResult::Type::OBJ, "", "",
+                {
+                    {RPCResult::Type::OBJ, "hash_prefix", "Block hash prefix", StatsDescriptionString()},
+                }},
         },
-        RPCResult{
-        "for height = 0",
-        "{                               (json object)\n"
-        "  \"block_hash_prefix\": {        (json object)\n"
-        + StatsDescriptionString()
-        + "  },\n"
-        "  ...\n"
-        "}\n"
-        }
-    },
-    RPCExamples{
-        HelpExampleCli("getchunkstats", "")
-        + HelpExampleRpc("getchunkstats", "100000")
-    }
-    }.Check(request);
+        RPCExamples{
+            HelpExampleCli("getchunkstats", "") + HelpExampleRpc("getchunkstats", "100000")}}
+        .Check(request);
 
     if (request.params[0].isNull())
         return MaxMinBlkChunkStatsToJSON();
@@ -259,51 +237,48 @@ UniValue getchunkstats(const JSONRPCRequest& request)
     }
 }
 
-UniValue gettxwindowinfo(const JSONRPCRequest& request) {
-    RPCHelpMan{"gettxwindowinfo",
-        "\nGet info from the multicast Tx block-interleave window.\n",
+UniValue gettxwindowinfo(const JSONRPCRequest& request)
+{
+    RPCHelpMan{
+        "gettxwindowinfo",
+        "\nGet information from the multicast Tx block-interleave window.\n",
         {
             {"physical_idx", RPCArg::Type::NUM, RPCArg::Optional::OMITTED, "Physical stream index"},
             {"logical_idx", RPCArg::Type::NUM, RPCArg::Optional::OMITTED, "Logical stream index"},
         },
-        RPCResults{
-             RPCResult{
-                 "When the physical and logical indexes are omitted:\n"
-                 "{\n"
-                 "  physical_idx-logical_idx : {       (json object)\n"
-                 "    \"size\"    : n  (numeric) Total amount (in MB) of FEC data stored in the window\n"
-                 "    \"min\"     : n  (numeric) Minimum height currently in the window\n"
-                 "    \"max\"     : n  (numeric) Maximum height currently in the window\n"
-                 "    \"largest\" : n  (numeric) Height of the largest block currently in the window\n"
-                 "  }\n"
-                 "  ...\n"
-                 "}\n"
-             },
-             RPCResult{
-                 "When the physical and logical indexes are specified:\n"
-                 "{\n"
-                 "  height : {       (json object) Height of a block in the window\n"
-                 "    \"index\" : n  (numeric) Index of next chunk to be transmitted from this block\n"
-                 "    \"total\" : n  (numeric) Total number of chunks from this block\n"
-                 "  }\n"
-                 "  ...\n"
-                 "}\n"
-             }
+        {
+            RPCResult{"when the physical and logical indexes are omitted",
+                RPCResult::Type::OBJ, "", "",
+                {
+                    {RPCResult::Type::OBJ, "idx", "Physical stream index - logical stream index",
+                        {
+                            {RPCResult::Type::NUM, "size", "Total amount (in MB) of FEC data stored in the window"},
+                            {RPCResult::Type::NUM, "min", "Minimum height currently in the window"},
+                            {RPCResult::Type::NUM, "max", "Maximum height currently in the window"},
+                            {RPCResult::Type::NUM, "largest", "Height of the largest block currently in the window"},
+                        }},
+                }},
+            RPCResult{"when the physical and logical indexes are specified",
+                RPCResult::Type::OBJ, "", "",
+                {
+                    {RPCResult::Type::OBJ, "height", "Block height",
+                        {
+                            {RPCResult::Type::NUM, "index", "Index of next chunk to be transmitted from this block"},
+                            {RPCResult::Type::NUM, "total", "Total number of chunks from this block"},
+                        }},
+                }},
         },
-        RPCExamples{
-            HelpExampleCli("gettxwindowinfo", "")
-            + HelpExampleRpc("gettxwindowinfo", "0, 0")
-        }
-    }.Check(request);
+        RPCExamples{HelpExampleCli("gettxwindowinfo", "") + HelpExampleRpc("gettxwindowinfo", "0, 0")}}
+        .Check(request);
 
     if (request.params[1].isNull() && !request.params[0].isNull())
         throw JSONRPCError(RPC_INVALID_PARAMS,
-                           "Both physical and logical indexes are required");
+            "Both physical and logical indexes are required");
 
     const int phy_idx = request.params[0].isNull() ? -1 :
-        request.params[0].get_int();
+                                                     request.params[0].get_int();
     const int log_idx = request.params[1].isNull() ? -1 :
-        request.params[1].get_int();
+                                                     request.params[1].get_int();
 
     UniValue info = TxWindowInfoToJSON(phy_idx, log_idx);
     if (info.isNull())
@@ -312,26 +287,23 @@ UniValue gettxwindowinfo(const JSONRPCRequest& request) {
     return info;
 }
 
-UniValue gettxntxinfo(const JSONRPCRequest& request) {
-    RPCHelpMan{"gettxntxinfo",
+UniValue gettxntxinfo(const JSONRPCRequest& request)
+{
+    RPCHelpMan{
+        "gettxntxinfo",
         "\nGet information regarding multicast transmissions of mempool txns.\n",
-        {
-        },
-        RPCResults{
-             RPCResult{
-                 "{\n"
-                 "  physical_idx-logical_idx : {       (json object)\n"
-                 "    \"tx_count\" : n  (numeric) Total number of txns transmitted\n"
-                 "  }\n"
-                 "  ...\n"
-                 "}\n"
-             }
-        },
+        {},
+        RPCResult{
+            RPCResult::Type::OBJ, "", "",
+            {
+                {RPCResult::Type::OBJ, "idx", "Physical stream index - logical stream index",
+                    {
+                        {RPCResult::Type::NUM, "tx_count", "Total number of txns transmitted"},
+                    }},
+            }},
         RPCExamples{
-            HelpExampleCli("gettxntxinfo", "")
-            + HelpExampleRpc("gettxntxinfo", "")
-        }
-    }.Check(request);
+            HelpExampleCli("gettxntxinfo", "") + HelpExampleRpc("gettxntxinfo", "")}}
+        .Check(request);
 
     UniValue info = TxnTxInfoToJSON();
     if (info.isNull())
@@ -340,35 +312,26 @@ UniValue gettxntxinfo(const JSONRPCRequest& request) {
     return info;
 }
 
-UniValue gettxqueueinfo(const JSONRPCRequest& request) {
-    RPCHelpMan{"gettxqueueinfo",
+UniValue gettxqueueinfo(const JSONRPCRequest& request)
+{
+    RPCHelpMan{
+        "gettxqueueinfo",
         "\nGet information from the UDP Tx queues.\n",
-        {
-        },
-        RPCResults{
-             RPCResult{
-                 "{\n"
-                 "  \"Group 0\" : {          (json object)\n"
-                 "    \"Buffer 0\" : {       (json object)\n"
-                 "      \"tx_bytes\"    : n  (numeric) Bytes transmitted through the ring buffer\n"
-                 "      \"tx_pkts\"     : n  (numeric) Packets transmitted through the ring buffer\n"
-                 "      \"pkt_per_sec\" : n  (numeric) Packets transmitted per second on average\n"
-                 "      \"bitrate\"     : n  (numeric) Average bitrate (in bps) of the ring buffer\n"
-                 "    }\n"
-                 "    \"Buffer 1\" : {       (json object)\n"
-                 "        ...\n"
-                 "    }\n"
-                 "    ... (all buffers)\n"
-                 "  }\n"
-                 "  ... (all queue groups)\n"
-                 "}\n"
-             }
-        },
-        RPCExamples{
-            HelpExampleCli("gettxqueueinfo", "")
-            + HelpExampleRpc("gettxqueueinfo", "")
-        }
-    }.Check(request);
+        {},
+        RPCResult{
+            RPCResult::Type::OBJ, "", "",
+            {
+                {RPCResult::Type::OBJ, "group", "Tx group",
+                    {
+                        {RPCResult::Type::OBJ, "buffer", "Ring buffer number",
+                            {
+                                {RPCResult::Type::NUM, "tx_bytes", "Bytes transmitted"},
+                                {RPCResult::Type::NUM, "tx_pkts", "Packets transmitted"},
+                            }},
+                    }},
+            }},
+        RPCExamples{HelpExampleCli("gettxqueueinfo", "") + HelpExampleRpc("gettxqueueinfo", "")}}
+        .Check(request);
 
     UniValue info = TxQueueInfoToJSON();
     if (info.isNull())
@@ -377,8 +340,10 @@ UniValue gettxqueueinfo(const JSONRPCRequest& request) {
     return info;
 }
 
-UniValue getfechitratio(const JSONRPCRequest& request) {
-    RPCHelpMan{"getfechitratio",
+UniValue getfechitratio(const JSONRPCRequest& request)
+{
+    RPCHelpMan{
+        "getfechitratio",
         "\nGet the last FEC hit ratios achieved on reception of blocks coming via UDP.\n"
         "\nNew blocks are relayed over UDP connections using compact block format. On\n"
         "reception of such a cmpctblock, the node tries to form the original block and\n"
@@ -386,26 +351,22 @@ UniValue getfechitratio(const JSONRPCRequest& request) {
         "already has. Furthermore, the receiving node tries to prefill the FEC chunks\n"
         "corresponding to the FEC-coded version of the original block, which is sent\n"
         "after the cmpctblock. The hit ratios indicate the number of txns or FEC chunks\n"
-        "already available locally in relation to the total number of txns or FEC chunks\n"
+        "already available locally relative to the total number of txns or FEC chunks\n"
         "composing the block.\n",
-        {
-        },
-        RPCResults{
-             RPCResult{
-                 "{\n"
-                 "  \"peer address\" : {   (json object)\n"
-                 "    \"txn_ratio\"   : n  (numeric) Txns already available / total txns\n"
-                 "    \"chunk_ratio\" : n  (numeric) FEC chunks prefilled / total chunks\n"
-                 "  }\n"
-                 "  ... (all UDP peers)\n"
-                 "}\n"
-             }
-        },
-        RPCExamples{
-            HelpExampleCli("getfechitratio", "")
-            + HelpExampleRpc("getfechitratio", "")
-        }
-    }.Check(request);
+        {},
+        RPCResult{
+            RPCResult::Type::OBJ, "", "",
+            {
+                {RPCResult::Type::OBJ, "addr", "UDP multicast sender peer address",
+                    {
+                        {
+                            {RPCResult::Type::NUM, "txn_ratio", "Txns already available / total txns"},
+                            {RPCResult::Type::NUM, "chunk_ratio", "FEC chunks prefilled / total chunks"},
+                        },
+                    }},
+            }},
+        RPCExamples{HelpExampleCli("getfechitratio", "") + HelpExampleRpc("getfechitratio", "")}}
+        .Check(request);
 
     return FecHitRatioToJson();
 }
@@ -413,17 +374,15 @@ UniValue getfechitratio(const JSONRPCRequest& request) {
 UniValue txblock(const JSONRPCRequest& request)
 {
     RPCHelpMan{"txblock",
-    "Transmit a chosen block over all active UDP multicast Tx streams.\n"
-    "\nSends a different set of FEC chunks over each Tx stream.\n",
-    {
-        {"height", RPCArg::Type::NUM, RPCArg::Optional::NO, "Block height."},
-    },
-    RPCResults{},
-    RPCExamples{
-        HelpExampleCli("txblock", "600000")
-        + HelpExampleRpc("txblock", "600000")
-    }
-    }.Check(request);
+        "Transmit a chosen block over all active UDP multicast Tx streams.\n"
+        "\nSends a different set of FEC chunks over each Tx stream.\n",
+        {
+            {"height", RPCArg::Type::NUM, RPCArg::Optional::NO, "Block height."},
+        },
+        RPCResults{},
+        RPCExamples{
+            HelpExampleCli("txblock", "600000") + HelpExampleRpc("txblock", "600000")}}
+        .Check(request);
 
     MulticastTxBlock(request.params[0].get_int());
 
@@ -431,21 +390,20 @@ UniValue txblock(const JSONRPCRequest& request)
 }
 
 static const CRPCCommand commands[] =
-{ //  category              name                      actor (function)         argNames
-  //  --------------------- ------------------------  -----------------------  ----------
-    { "udpnetwork",         "getudppeerinfo",         &getudppeerinfo,         {} },
-    { "udpnetwork",         "addudpnode",             &addudpnode,             {"node", "local_magic", "remote_magic", "ultimately_trusted", "command", "group"} },
-    { "udpnetwork",         "disconnectudpnode",      &disconnectudpnode,      {"node"} },
-    { "udpnetwork",         "getudpmulticastinfo",    &getudpmulticastinfo,    {} },
-    { "udpnetwork",         "getchunkstats",          &getchunkstats,          {"height"} },
-    { "udpnetwork",         "gettxwindowinfo",        &gettxwindowinfo,        {"physical_idx", "logical_idx"} },
-    { "udpnetwork",         "gettxntxinfo",           &gettxntxinfo,           {} },
-    { "udpnetwork",         "gettxqueueinfo",         &gettxqueueinfo,         {} },
-    { "udpnetwork",         "getfechitratio",         &getfechitratio,         {} },
-    { "udpnetwork",         "txblock",                &txblock,                {"height"} }
-};
+    { //  category              name                      actor (function)         argNames
+        //  --------------------- ------------------------  -----------------------  ----------
+        {"udpnetwork", "getudppeerinfo", &getudppeerinfo, {}},
+        {"udpnetwork", "addudpnode", &addudpnode, {"node", "local_magic", "remote_magic", "ultimately_trusted", "command", "group"}},
+        {"udpnetwork", "disconnectudpnode", &disconnectudpnode, {"node"}},
+        {"udpnetwork", "getudpmulticastinfo", &getudpmulticastinfo, {}},
+        {"udpnetwork", "getchunkstats", &getchunkstats, {"height"}},
+        {"udpnetwork", "gettxwindowinfo", &gettxwindowinfo, {"physical_idx", "logical_idx"}},
+        {"udpnetwork", "gettxntxinfo", &gettxntxinfo, {}},
+        {"udpnetwork", "gettxqueueinfo", &gettxqueueinfo, {}},
+        {"udpnetwork", "getfechitratio", &getfechitratio, {}},
+        {"udpnetwork", "txblock", &txblock, {"height"}}};
 
-void RegisterUDPNetRPCCommands(CRPCTable &t)
+void RegisterUDPNetRPCCommands(CRPCTable& t)
 {
     for (unsigned int vcidx = 0; vcidx < ARRAYLEN(commands); vcidx++)
         t.appendCommand(commands[vcidx].name, &commands[vcidx]);
