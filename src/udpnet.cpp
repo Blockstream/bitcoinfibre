@@ -18,7 +18,6 @@
 #include <hash.h>
 #include <init.h> // for ShutdownRequested()
 #include <validation.h>
-#include <net.h>
 #include <netbase.h>
 #include <primitives/block.h>
 #include <primitives/transaction.h>
@@ -82,6 +81,8 @@ static std::map<int64_t, std::tuple<CService, uint64_t, size_t> > nodesToRepeatD
 static std::map<CService, UDPConnectionInfo> mapPersistentNodes;
 
 static int g_mcast_log_interval = 10;
+
+static CConnman* g_connman; // Initialized by InitializeUDPConnections
 
 /*
  * UDP multicast service
@@ -604,8 +605,9 @@ UniValue UdpMulticastRxInfoToJson() {
     return ret;
 }
 
-bool InitializeUDPConnections() {
+bool InitializeUDPConnections(CConnman* const connman) {
     assert(udp_write_threads.empty() && !udp_read_thread);
+    g_connman = connman;
 
     if (gArgs.IsArgSet("-udpmulticastloginterval") && (atoi(gArgs.GetArg("-udpmulticastloginterval", "")) > 0))
         g_mcast_log_interval = atoi(gArgs.GetArg("-udpmulticastloginterval", ""));
@@ -857,7 +859,7 @@ static void read_socket_func(evutil_socket_t fd, short event, void* arg) {
         if (msg_type_masked == MSG_TYPE_BLOCK_HEADER ||
             msg_type_masked == MSG_TYPE_BLOCK_CONTENTS ||
             msg_type_masked == MSG_TYPE_TX_CONTENTS) {
-            if (!HandleBlockTxMessage(msg, sizeof(UDPMessage) - 1, it->first, it->second, start, fd))
+            if (!HandleBlockTxMessage(msg, sizeof(UDPMessage) - 1, it->first, it->second, start, fd, g_connman))
                 send_and_disconnect(it);
             else
                 UpdateUdpMulticastRxBytes(mcast_info, res);
@@ -906,7 +908,7 @@ static void read_socket_func(evutil_socket_t fd, short event, void* arg) {
         return;
 
     if (msg_type_masked == MSG_TYPE_BLOCK_HEADER || msg_type_masked == MSG_TYPE_BLOCK_CONTENTS) {
-        if (!HandleBlockTxMessage(msg, res, it->first, it->second, start, fd)) {
+	    if (!HandleBlockTxMessage(msg, res, it->first, it->second, start, fd, g_connman)) {
             send_and_disconnect(it);
             return;
         }

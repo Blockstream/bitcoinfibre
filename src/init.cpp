@@ -1883,7 +1883,7 @@ bool AppInitMain(NodeContext& node)
     // Start UDP at the very end since it has no concept of whether the res of the code is already up or not
 
     if (GetUDPInboundPorts().size() || gArgs.GetArg("-udpmulticast", "") != "" || gArgs.GetArg("-udpmulticasttx", "") != "") {
-        if (!InitializeUDPConnections())
+        if (!InitializeUDPConnections(node.connman.get()))
             return InitError(_("Failed to initialize UDP connections").translated);
     }
 

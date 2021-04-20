@@ -7,13 +7,14 @@
 #ifndef BITCOIN_UDPAPI_H
 #define BITCOIN_UDPAPI_H
 
+#include <net.h>
 #include <netaddress.h>
 #include <univalue.h>
 
 class CBlock;
 
 std::vector<std::pair<unsigned short, uint64_t> > GetUDPInboundPorts(); // port, outbound bandwidth for group
-bool InitializeUDPConnections();
+bool InitializeUDPConnections(CConnman* const connman);
 void StopUDPConnections();
 
 enum UDPConnectionType {

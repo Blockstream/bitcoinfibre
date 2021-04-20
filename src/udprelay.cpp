@@ -1336,7 +1336,7 @@ static void BlockMsgHToLE(UDPMessage& msg) {
     msg.msg.block.chunk_id    = htole32(msg.msg.block.chunk_id);
 }
 
-static bool HandleTx(UDPMessage& msg, size_t length, const CService& node, UDPConnectionState& state) {
+static bool HandleTx(UDPMessage& msg, size_t length, const CService& node, UDPConnectionState& state, const CConnman* const connman) {
     if (msg.msg.block.obj_length > 400000) {
         LogPrintf("UDP: Got massive tx obj_length of %u\n", msg.msg.block.obj_length);
         return false;
@@ -1377,7 +1377,7 @@ static bool HandleTx(UDPMessage& msg, size_t length, const CService& node, UDPCo
             LOCK(cs_main);
             TxValidationState state;
             if (AcceptToMemoryPool(mempool, state, tx, nullptr, false, 0)) {
-                RelayTransaction(tx->GetHash(), *g_connman);
+                RelayTransaction(tx->GetHash(), *connman);
             }
         } catch (std::exception& e) {
             LogPrintf("UDP: Tx decode failed for tx %lu from %s: %s\n", msg.msg.block.hash_prefix, node.ToString(), e.what());
@@ -1389,7 +1389,7 @@ static bool HandleTx(UDPMessage& msg, size_t length, const CService& node, UDPCo
     return true;
 }
 
-bool HandleBlockTxMessage(UDPMessage& msg, size_t length, const CService& node, UDPConnectionState& state, const std::chrono::steady_clock::time_point& packet_process_start, const int sockfd) {
+bool HandleBlockTxMessage(UDPMessage& msg, size_t length, const CService& node, UDPConnectionState& state, const std::chrono::steady_clock::time_point& packet_process_start, const int sockfd, const CConnman* const connman) {
     //TODO: There are way too many damn tree lookups here...either cut them down or increase parallelism
     const bool fBench = LogAcceptCategory(BCLog::BENCH);
     std::chrono::steady_clock::time_point start;
@@ -1408,7 +1408,7 @@ bool HandleBlockTxMessage(UDPMessage& msg, size_t length, const CService& node, 
     msg.msg.block.chunk_id    = le32toh(msg.msg.block.chunk_id);
 
     if ((msg.header.msg_type & UDP_MSG_TYPE_TYPE_MASK) == MSG_TYPE_TX_CONTENTS)
-        return HandleTx(msg, length, node, state);
+	    return HandleTx(msg, length, node, state, connman);
 
     const bool is_blk_header_chunk  = (msg.header.msg_type & UDP_MSG_TYPE_TYPE_MASK) == MSG_TYPE_BLOCK_HEADER;
     const bool is_blk_content_chunk = (msg.header.msg_type & UDP_MSG_TYPE_TYPE_MASK) == MSG_TYPE_BLOCK_CONTENTS;
