@@ -6,7 +6,7 @@
 
 #include <chainparams.h>
 #include <consensus/consensus.h> // for MAX_BLOCK_SERIALIZED_SIZE
-#include <consensus/validation.h> // for CValidationState
+#include <consensus/validation.h> // for BlockValidationState/TxValidationState
 #include <logging.h>
 #include <streams.h>
 #include <validation.h>
@@ -957,7 +957,7 @@ static void ProcessBlockThread() {
                             LOCK(cs_main);
 
                             have_prev = BlockIndex().count(pdecoded_block->hashPrevBlock);
-                            CValidationState state;
+                            BlockValidationState state;
                             outoforder_and_valid = !have_prev &&
                                 CheckBlock(*pdecoded_block, state, Params().GetConsensus());
                         }
@@ -1375,8 +1375,8 @@ static bool HandleTx(UDPMessage& msg, size_t length, const CService& node, UDPCo
             CTransactionRef tx;
             stream >> CTxCompressor(tx, codec_version);
             LOCK(cs_main);
-            CValidationState state;
-            if (AcceptToMemoryPool(mempool, state, tx, nullptr, nullptr, false, 0)) {
+            TxValidationState state;
+            if (AcceptToMemoryPool(mempool, state, tx, nullptr, false, 0)) {
                 RelayTransaction(tx->GetHash(), *g_connman);
             }
         } catch (std::exception& e) {
