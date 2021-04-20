@@ -2743,16 +2743,20 @@ static UniValue getoooblocks(const JSONRPCRequest& request)
             {"verbose", RPCArg::Type::BOOL, /* default */ "false",
                 "False to obtain the number of OOOBs in disk, true to obtain their hashes"},
         },
-        RPCResults{
-            RPCResult{"for verbose = true",
-                "{                         (json object) predecessor to successor hash mapping\n"
-                "  \"predecessor_hash\": [   (array) list with hashes of successor blocks\n"
-                "      \"successor_hash\",   (string) successor block hash\n"
-                "      ...\n"
-                "  ], ...\n"
-                "}\n"},
+        {
+            RPCResult{
+                "for verbose = true",
+                RPCResult::Type::OBJ,
+                "",
+                "",
+                {
+                    {RPCResult::Type::ARR, "predecessor_hash", "list with the hashes from successor blocks",
+                        {
+                            {RPCResult::Type::STR_HEX, "", "successor block hash"},
+                        }},
+                }},
             RPCResult{"for verbose = false",
-                "n    (numeric) Number of OOOBs available in disk\n"},
+                RPCResult::Type::NUM, "", "Number of OOOBs available in disk"},
         },
         RPCExamples{
             HelpExampleCli("getoooblocks", "true") + HelpExampleRpc("getoooblocks", "true")},
