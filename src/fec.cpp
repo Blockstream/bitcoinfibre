@@ -480,7 +480,6 @@ void FECDecoder::DecodeCm256()
 void FECDecoder::CopyCm256MmapChunksToMemory()
 {
     MapStorage map_storage(filename, chunk_count);
-    char* chunk_storage = map_storage.GetStorage();
 
     // cm256_chunks will be used to store the decoded chunks
     cm256_chunks.reserve(chunk_count);
