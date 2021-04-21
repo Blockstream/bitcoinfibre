@@ -1200,9 +1200,9 @@ static void do_send_messages() {
                 // Try to transmit
                 ssize_t res = sendto(udp_socks[group], &next_tx->msg, next_tx->length, 0, (sockaddr *) &ss, addrlen);
                 if (res != next_tx->length) {
-                    /* Likely EAGAIN. Don't advance the buffer's read pointer
-                     * and try again later */
-                    if (errno == EAGAIN || errno == EWOULDBLOCK) {
+                    /* Likely EAGAIN/EWOULDBLOCK. Don't advance the buffer's
+                     * read pointer and try again later */
+                    if (errno == EWOULDBLOCK) {
                         wouldblock = true;
                     } else {
                         LogPrintf("UDP: sendto to group %d failed: %s\n",
