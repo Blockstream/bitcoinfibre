@@ -763,7 +763,7 @@ bool IsFromScriptHashWitnessScriptHashPubKeyHash(Span<valtype const> stack, Span
 {
     if (IsFromScriptHashWitnessScriptHash(stack, witnessstack) && witnessstack.size() == 3) {
         unsigned char newpubkeyhash[20];
-        CHash160().Write(witnessstack[1].data(), witnessstack[1].size()).Finalize(newpubkeyhash);
+        CHash160().Write(witnessstack[1]).Finalize(newpubkeyhash);
         valtype oldpubkeyhash;
         CScript const pubkeyhash (witnessstack[2].begin(), witnessstack[2].end());
         if (IsToPubKeyHash(pubkeyhash, oldpubkeyhash) && (memcmp(newpubkeyhash, &oldpubkeyhash[0], 20) == 0)) {
@@ -1222,7 +1222,7 @@ valtype PadHash(Span<unsigned char const> const h, bool const iswitnesshash)
         uint8_t scriptpubkeycode = 0;
         PadScriptPubKey(scriptpubkeycode, pubkeyhash);
         valtype temp(pubkeyhash.begin(), pubkeyhash.end());
-        CHash160().Write(temp.data(), temp.size()).Finalize(hashcache);
+        CHash160().Write(temp).Finalize(hashcache);
         valtype ret(22);
         ret[0] = 0x00;
         ret[1] = 20;
@@ -1330,7 +1330,7 @@ std::vector<valtype> PadSingleKeyStack(Span<unsigned char const> const strippeds
         if (TemplateType == scriptSigTemplate::P2SH_P2WSH_P2PKH) {
             iswitnesshash = true;
             unsigned char h[20];
-            CHash160().Write(ret[1].data(), ret[1].size()).Finalize(h);
+            CHash160().Write(ret[1]).Finalize(h);
             CScript pubkeyhash (std::begin(h), std::end(h));
             uint8_t scriptpubkeycode = 0;
             PadScriptPubKey(scriptpubkeycode, pubkeyhash);
