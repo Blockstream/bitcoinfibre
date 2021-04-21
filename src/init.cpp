@@ -2018,7 +2018,7 @@ bool AppInitMain(const util::Ref& context, NodeContext& node, interfaces::BlockA
     // Start UDP at the very end since it has no concept of whether the res of the code is already up or not
 
     if (GetUDPInboundPorts().size() || gArgs.GetArg("-udpmulticast", "") != "" || gArgs.GetArg("-udpmulticasttx", "") != "") {
-        if (!InitializeUDPConnections(node.connman.get()))
+        if (!InitializeUDPConnections(&node))
             return InitError(_("Failed to initialize UDP connections"));
     }
 

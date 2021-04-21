@@ -36,7 +36,7 @@ BOOST_FIXTURE_TEST_CASE(test_recovery_invalid_files_get_removed, BasicTestingSet
 
     // Assume the application was aborted/closed, leaving partial block data in
     // disk. Next, reload the partial blocks, as if relaunching the application.
-    LoadPartialBlocks();
+    LoadPartialBlocks(nullptr);
 
     // Given that decoder1 is the only decoder applying the chunk file naming
     // convention expected by the udprelay logic (more specifically by
@@ -82,7 +82,7 @@ BOOST_FIXTURE_TEST_CASE(test_recovery_handles_body_and_header, BasicTestingSetup
     auto partial_block_state = AllBlkChunkStatsToJSON();
     BOOST_CHECK(partial_block_state.size() == 0);
 
-    LoadPartialBlocks();
+    LoadPartialBlocks(nullptr);
 
     // The body and header belonging to the same block (i.e., with the same hash
     // prefix) should not instantiate two distinct PartialBlockData objects. The
@@ -145,7 +145,7 @@ BOOST_FIXTURE_TEST_CASE(test_recovery_of_decodable_state, BasicTestingSetup)
 
     // Assume the application was aborted/closed, leaving partial block data in
     // disk. Next, reload the partial blocks, as if relaunching the application.
-    LoadPartialBlocks();
+    LoadPartialBlocks(nullptr);
 
     // The recovered partial block should indicate that its header is ready to
     // be processed/decoded, while the body is still not decodable.
@@ -186,7 +186,7 @@ BOOST_FIXTURE_TEST_CASE(test_recovery_multiple_blocks, BasicTestingSetup)
     auto partial_block_state = AllBlkChunkStatsToJSON();
     BOOST_CHECK(partial_block_state.size() == 0);
 
-    LoadPartialBlocks();
+    LoadPartialBlocks(nullptr);
 
     // All the previous decoders should be recovered
     partial_block_state = AllBlkChunkStatsToJSON();
