@@ -1815,7 +1815,7 @@ bool AppInitMain(NodeContext& node, interfaces::BlockAndHeaderTipInfo* tip_info)
 
     if (GetUDPInboundPorts().size() || gArgs.GetArg("-udpmulticast", "") != "" || gArgs.GetArg("-udpmulticasttx", "") != "") {
         if (!InitializeUDPConnections(node.connman.get()))
-            return InitError(_("Failed to initialize UDP connections").translated);
+            return InitError(_("Failed to initialize UDP connections"));
     }
 
 
