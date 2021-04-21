@@ -872,14 +872,14 @@ valtype StripSig(const valtype &sig, bool const sighashall)
 
     right_align(Span<const uint8_t>(sig.data() + offset, s_len), MakeSpan(ret).subspan(32, 32));
     if (!sighashall) {
-        assert(sig.size() == offset + s_len + 1);
+        assert((long int) sig.size() == offset + s_len + 1);
         ret.push_back(sig.back());
     }
-	 else {
-		 // the sighashall flag tells us that we already know what this flag is,
-		 // so we can avoid including it
-		 assert(sig.back() == SIGHASH_ALL);
-	 }
+     else {
+         // the sighashall flag tells us that we already know what this flag is,
+         // so we can avoid including it
+         assert(sig.back() == SIGHASH_ALL);
+     }
 
     return ret;
 }
@@ -935,7 +935,7 @@ valtype StripAllPubKeys(Span<valtype const> stack)
     }
     valtype ret;
     ret.insert(ret.begin(), prefixoffset, 0x00);
-    for (int i = 0; i < stack.size(); ++i) {
+    for (size_t i = 0; i < stack.size(); ++i) {
         valtype pubkeycache = StripPubKey(stack[i]);
         pubkeyprefixes[i] = pubkeycache[0];
         pubkeycache.erase(pubkeycache.begin());
@@ -1314,7 +1314,7 @@ std::vector<valtype> PadSingleKeyStack(Span<unsigned char const> const strippeds
 {
     std::vector<valtype> ret(2);
 
-    int const sig_length = 64 + (sighashall ? 0 : 1);
+    size_t const sig_length = 64 + (sighashall ? 0 : 1);
     if (strippedstack.size() < sig_length + 32) throw std::runtime_error("invalid compressed transaction");
     ret[0] = PadSig(strippedstack.subspan(0, sig_length), sighashall);
     ret[1] = PadPubKey(strippedstack.subspan(sig_length), TemplateCode);
