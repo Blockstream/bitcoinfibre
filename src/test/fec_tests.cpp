@@ -2,7 +2,7 @@
 #include <fec.h>
 #include <memory>
 #include <sys/mman.h>
-#include <test/setup_common.h>
+#include <test/util/setup_common.h>
 #include <unordered_set>
 #include <util/memory.h>
 #include <util/system.h>

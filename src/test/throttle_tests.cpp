@@ -1,6 +1,6 @@
 #include <boost/test/unit_test.hpp>
 #include <iostream>
-#include <test/setup_common.h>
+#include <test/util/setup_common.h>
 #include <throttle.h>
 
 BOOST_FIXTURE_TEST_SUITE(throttle_tests, BasicTestingSetup)
