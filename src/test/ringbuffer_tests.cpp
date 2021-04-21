@@ -1,7 +1,7 @@
 #include <boost/test/unit_test.hpp>
 #include <iostream>
 #include <ringbuffer.h>
-#include <test/setup_common.h>
+#include <test/util/setup_common.h>
 #include <thread>
 namespace tt = boost::test_tools;
 
