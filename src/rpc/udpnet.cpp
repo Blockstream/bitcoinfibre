@@ -103,9 +103,9 @@ UniValue addudpnode(const JSONRPCRequest& request)
         throw JSONRPCError(RPC_INVALID_PARAMS, "Error: Failed to lookup node, address not valid or port missing.");
 
     string local_pass = request.params[1].get_str();
-    uint64_t local_magic = Hash(&local_pass[0], &local_pass[0] + local_pass.size()).GetUint64(0);
+    uint64_t local_magic = Hash(local_pass).GetUint64(0);
     string remote_pass = request.params[2].get_str();
-    uint64_t remote_magic = Hash(&remote_pass[0], &remote_pass[0] + local_pass.size()).GetUint64(0);
+    uint64_t remote_magic = Hash(remote_pass).GetUint64(0);
 
     bool fTrust = request.params[3].get_bool();
 
