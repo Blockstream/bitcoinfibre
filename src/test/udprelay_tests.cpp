@@ -1,6 +1,6 @@
 #include <boost/test/unit_test.hpp>
 #include <fec.h>
-#include <test/setup_common.h>
+#include <test/util/setup_common.h>
 #include <udprelay.h>
 #include <util/system.h>
 
