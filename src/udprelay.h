@@ -11,15 +11,15 @@
 class CBlock;
 class CTransaction;
 
-void BlockRecvInit();
+void BlockRecvInit(ChainstateManager* chainman);
 
 void BlockRecvShutdown();
 
-void LoadPartialBlocks();
+void LoadPartialBlocks(CTxMemPool* mempool);
 
 bool IsChunkFileRecoverable(const std::string& filename, ChunkFileNameParts& cfp);
 
-bool HandleBlockTxMessage(UDPMessage& msg, size_t length, const CService& node, UDPConnectionState& state, const std::chrono::steady_clock::time_point& packet_process_start, const int sockfd, const CConnman* const connman);
+bool HandleBlockTxMessage(UDPMessage& msg, size_t length, const CService& node, UDPConnectionState& state, const std::chrono::steady_clock::time_point& packet_process_start, const int sockfd, const NodeContext* const context);
 
 void ProcessDownloadTimerEvents();
 
