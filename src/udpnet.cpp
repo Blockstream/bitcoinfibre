@@ -95,8 +95,8 @@ static CConnman* g_connman; // Initialized by InitializeUDPConnections
  */
 namespace {
     std::map<std::tuple<CService, int, uint16_t>, UDPMulticastInfo> mapMulticastNodes;
-    char const* const multicast_pass = "multicast";
-    uint64_t const multicast_magic = Hash(&multicast_pass[0], &multicast_pass[0] + strlen(multicast_pass)).GetUint64(0);
+    const std::string multicast_pass = "multicast";
+    uint64_t const multicast_magic = Hash(multicast_pass).GetUint64(0);
 }
 uint64_t const multicast_checksum_magic = htole64(multicast_magic);
 
@@ -241,14 +241,14 @@ static void AddConnectionFromString(const std::string& node, bool fTrust) {
     }
 
     std::string local_pass = node.substr(host_port_end + 1, local_pass_end - host_port_end - 1);
-    uint64_t local_magic = Hash(&local_pass[0], &local_pass[0] + local_pass.size()).GetUint64(0);
+    uint64_t local_magic = Hash(local_pass).GetUint64(0);
 
     std::string remote_pass;
     if(remote_pass_end == std::string::npos)
         remote_pass = node.substr(local_pass_end + 1);
     else
         remote_pass = node.substr(local_pass_end + 1, remote_pass_end - local_pass_end - 1);
-    uint64_t remote_magic = Hash(&remote_pass[0], &remote_pass[0] + local_pass.size()).GetUint64(0);
+    uint64_t remote_magic = Hash(remote_pass).GetUint64(0);
 
     size_t group = 0;
     if (remote_pass_end != std::string::npos) {
