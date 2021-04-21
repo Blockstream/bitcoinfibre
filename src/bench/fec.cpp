@@ -181,20 +181,18 @@ void Send(CBlock& block, Receiver& recv, bool fIncludeBlock) {
 }
 
 // noinline here for easier profiling
-void __attribute__((noinline)) DoRealFECedBlockRoundTripTest(benchmark::State& state, CTxMemPool& pool, CBlock& block, bool fIncludeBlock) {
+void __attribute__((noinline)) DoRealFECedBlockRoundTripTest(benchmark::Bench& bench, CTxMemPool& pool, CBlock& block, bool fIncludeBlock) {
     size_t total_chunks_consumed, total_chunks_in_mempool, non_fec_chunks;
-    while (state.KeepRunning()) {
+    bench.run([&] {
         total_chunks_consumed = 0;
         total_chunks_in_mempool = 0;
         non_fec_chunks = 0;
         Receiver recv(pool, &total_chunks_consumed, &total_chunks_in_mempool, &non_fec_chunks, fIncludeBlock);
         Send(block, recv, fIncludeBlock);
-    }
-
-    fprintf(stderr, "Ate %lu/%lu chunks after getting %lu for free\n", total_chunks_consumed, non_fec_chunks, total_chunks_in_mempool);
+    });
 }
 
-static void RealFECedBlockRoundTripTest(benchmark::State& state, int ntxn, bool fIncludeBlock=true)
+static void RealFECedBlockRoundTripTest(benchmark::Bench& bench, int ntxn, bool fIncludeBlock=true)
 {
     CBlock block;
 
@@ -220,6 +218,7 @@ static void RealFECedBlockRoundTripTest(benchmark::State& state, int ntxn, bool 
     txtmp.vout[0].nValue = 10;
 
     CTxMemPool pool;
+    LOCK2(cs_main, pool.cs);
     for (int i = 0; i < ntxn; i++) {
         pool.addUnchecked(CTxMemPoolEntry(vtx2[i], 0, 0, 0, false, 0, LockPoints()));
         for (int j = 0; j < 32; j++) {
@@ -228,32 +227,32 @@ static void RealFECedBlockRoundTripTest(benchmark::State& state, int ntxn, bool 
         }
     }
 
-    DoRealFECedBlockRoundTripTest(state, pool, block, fIncludeBlock);
+    DoRealFECedBlockRoundTripTest(bench, pool, block, fIncludeBlock);
 }
 
-static void FECBlockRTTTest0(benchmark::State& state) { RealFECedBlockRoundTripTest(state, 0); }
-static void FECBlockRTTTest0500(benchmark::State& state) { RealFECedBlockRoundTripTest(state, 500); }
-static void FECBlockRTTTest1000(benchmark::State& state) { RealFECedBlockRoundTripTest(state, 1000); }
-static void FECBlockRTTTest1500(benchmark::State& state) { RealFECedBlockRoundTripTest(state, 1500); }
-static void FECBlockRTTTest1550(benchmark::State& state) { RealFECedBlockRoundTripTest(state, 1550); }
-static void FECBlockRTTTest1555(benchmark::State& state) { RealFECedBlockRoundTripTest(state, 1555); }
+static void FECBlockRTTTest0(benchmark::Bench& bench) { RealFECedBlockRoundTripTest(bench, 0); }
+static void FECBlockRTTTest0500(benchmark::Bench& bench) { RealFECedBlockRoundTripTest(bench, 500); }
+static void FECBlockRTTTest1000(benchmark::Bench& bench) { RealFECedBlockRoundTripTest(bench, 1000); }
+static void FECBlockRTTTest1500(benchmark::Bench& bench) { RealFECedBlockRoundTripTest(bench, 1500); }
+static void FECBlockRTTTest1550(benchmark::Bench& bench) { RealFECedBlockRoundTripTest(bench, 1550); }
+static void FECBlockRTTTest1555(benchmark::Bench& bench) { RealFECedBlockRoundTripTest(bench, 1555); }
 
-static void FECHeaderRTTTest1550(benchmark::State& state) { RealFECedBlockRoundTripTest(state, 1550, false); }
+static void FECHeaderRTTTest1550(benchmark::Bench& bench) { RealFECedBlockRoundTripTest(bench, 1550, false); }
 
-BENCHMARK(FECBlockRTTTest0, 100);
-BENCHMARK(FECBlockRTTTest0500, 100);
-BENCHMARK(FECBlockRTTTest1000, 100);
-BENCHMARK(FECBlockRTTTest1500, 100);
-BENCHMARK(FECBlockRTTTest1550, 100);
-BENCHMARK(FECBlockRTTTest1555, 100);
+BENCHMARK(FECBlockRTTTest0);
+BENCHMARK(FECBlockRTTTest0500);
+BENCHMARK(FECBlockRTTTest1000);
+BENCHMARK(FECBlockRTTTest1500);
+BENCHMARK(FECBlockRTTTest1550);
+BENCHMARK(FECBlockRTTTest1555);
 
-BENCHMARK(FECHeaderRTTTest1550, 100);
+BENCHMARK(FECHeaderRTTTest1550);
 
-static void FECEncodeBenchmark(benchmark::State& state, bool fAll) {
+static void FECEncodeBenchmark(benchmark::Bench& bench, bool fAll) {
     std::vector<unsigned char> data((const unsigned char*)blockencodings_tests::block413567,
             (const unsigned char*)&blockencodings_tests::block413567[sizeof(blockencodings_tests::block413567)]);
 
-    while (state.KeepRunning()) {
+    bench.run([&] {
         size_t fec_chunk_count = DIV_CEIL(data.size(), FEC_CHUNK_SIZE);
         std::pair<std::unique_ptr<FECChunkType[]>, std::vector<uint32_t>> fec(std::piecewise_construct, std::forward_as_tuple(new FECChunkType[fec_chunk_count]), std::forward_as_tuple(fec_chunk_count));
         FECEncoder enc(&data, &fec);
@@ -261,13 +260,13 @@ static void FECEncodeBenchmark(benchmark::State& state, bool fAll) {
             assert(enc.PrefillChunks());
         else
             assert(enc.BuildChunk(0));
-    }
+    });
 }
 
-static void FECEncodeOneBenchmark(benchmark::State& state) { FECEncodeBenchmark(state, false); }
-static void FECEncodeAllBenchmark(benchmark::State& state) { FECEncodeBenchmark(state, true); }
+static void FECEncodeOneBenchmark(benchmark::Bench& bench) { FECEncodeBenchmark(bench, false); }
+static void FECEncodeAllBenchmark(benchmark::Bench& bench) { FECEncodeBenchmark(bench, true); }
 
-static void FECDecodeBenchmark(benchmark::State& state, unsigned mask, const MemoryUsageMode memory_usage_mode) {
+static void FECDecodeBenchmark(benchmark::Bench& bench, unsigned mask, const MemoryUsageMode memory_usage_mode) {
     std::vector<unsigned char> data((const unsigned char*)blockencodings_tests::block413567,
             (const unsigned char*)&blockencodings_tests::block413567[sizeof(blockencodings_tests::block413567)]);
     size_t fec_chunk_count = DIV_CEIL(data.size(), FEC_CHUNK_SIZE);
@@ -277,7 +276,7 @@ static void FECDecodeBenchmark(benchmark::State& state, unsigned mask, const Mem
 
     std::mt19937 g(0xdeadbeef);
 
-    while (state.KeepRunning()) {
+    bench.run([&] {
         size_t chunks = DIV_CEIL(data.size(), FEC_CHUNK_SIZE);
         FECDecoder dec(data.size(), memory_usage_mode);
         for (size_t i = 0; i < chunks && !dec.DecodeReady(); i++) {
@@ -291,21 +290,21 @@ static void FECDecodeBenchmark(benchmark::State& state, unsigned mask, const Mem
         }
 
         assert(dec.DecodeReady());
-    }
+    });
 }
 
-static void FECDecodeBenchmark3Mem(benchmark::State& state) { FECDecodeBenchmark(state, 0x3, MemoryUsageMode::USE_MEMORY); }
-static void FECDecodeBenchmark7Mem(benchmark::State& state) { FECDecodeBenchmark(state, 0x7, MemoryUsageMode::USE_MEMORY); }
-static void FECDecodeBenchmarkFMem(benchmark::State& state) { FECDecodeBenchmark(state, 0xf, MemoryUsageMode::USE_MEMORY); }
-static void FECDecodeBenchmark3Mmap(benchmark::State& state) { FECDecodeBenchmark(state, 0x3, MemoryUsageMode::USE_MMAP); }
-static void FECDecodeBenchmark7Mmap(benchmark::State& state) { FECDecodeBenchmark(state, 0x7, MemoryUsageMode::USE_MMAP); }
-static void FECDecodeBenchmarkFMmap(benchmark::State& state) { FECDecodeBenchmark(state, 0xf, MemoryUsageMode::USE_MMAP); }
+static void FECDecodeBenchmark3Mem(benchmark::Bench& bench) { FECDecodeBenchmark(bench, 0x3, MemoryUsageMode::USE_MEMORY); }
+static void FECDecodeBenchmark7Mem(benchmark::Bench& bench) { FECDecodeBenchmark(bench, 0x7, MemoryUsageMode::USE_MEMORY); }
+static void FECDecodeBenchmarkFMem(benchmark::Bench& bench) { FECDecodeBenchmark(bench, 0xf, MemoryUsageMode::USE_MEMORY); }
+static void FECDecodeBenchmark3Mmap(benchmark::Bench& bench) { FECDecodeBenchmark(bench, 0x3, MemoryUsageMode::USE_MMAP); }
+static void FECDecodeBenchmark7Mmap(benchmark::Bench& bench) { FECDecodeBenchmark(bench, 0x7, MemoryUsageMode::USE_MMAP); }
+static void FECDecodeBenchmarkFMmap(benchmark::Bench& bench) { FECDecodeBenchmark(bench, 0xf, MemoryUsageMode::USE_MMAP); }
 
-BENCHMARK(FECEncodeAllBenchmark, 100);
-BENCHMARK(FECEncodeOneBenchmark, 100);
-BENCHMARK(FECDecodeBenchmark3Mem, 100);
-BENCHMARK(FECDecodeBenchmark7Mem, 100);
-BENCHMARK(FECDecodeBenchmarkFMem, 100);
-BENCHMARK(FECDecodeBenchmark3Mmap, 100);
-BENCHMARK(FECDecodeBenchmark7Mmap, 100);
-BENCHMARK(FECDecodeBenchmarkFMmap, 100);
+BENCHMARK(FECEncodeAllBenchmark);
+BENCHMARK(FECEncodeOneBenchmark);
+BENCHMARK(FECDecodeBenchmark3Mem);
+BENCHMARK(FECDecodeBenchmark7Mem);
+BENCHMARK(FECDecodeBenchmarkFMem);
+BENCHMARK(FECDecodeBenchmark3Mmap);
+BENCHMARK(FECDecodeBenchmark7Mmap);
+BENCHMARK(FECDecodeBenchmarkFMmap);
