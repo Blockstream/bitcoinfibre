@@ -171,28 +171,33 @@ public:
 
     // Fills a map from offset within a FEC-coded block to the tx index in the block
     // Returns false if this object is invalid (txlens.size() != shortxids.size())
-    template<typename F>
+    template <typename F>
     ReadStatus FillIndexOffsetMap(F& callback) const;
 
-    ADD_SERIALIZE_METHODS;
+    template <typename Stream>
+    void Serialize(Stream& s) const
+    {
+        s << static_cast<std::uint8_t>(codec_version);
+        s << height;
+        s << *(CBlockHeaderAndShortTxIDs*)this;
+        for (size_t i = 0; i < txlens.size(); i++)
+            s << VARINT(txlens[i]);
+    }
 
-    template <typename Stream, typename Operation>
-    inline void SerializationOp(Stream& s, Operation ser_action) {
-        READWRITE(*reinterpret_cast<std::uint8_t*>(&codec_version));
-        READWRITE(height);
-
-        READWRITE(*(CBlockHeaderAndShortTxIDs*)this);
-        if (ser_action.ForRead()) {
-            txlens.clear();
-            txlens.reserve(shorttxids.size());
-            for (size_t i = 0; i < shorttxids.size(); i++) {
-                uint32_t len;
-                READWRITE(VARINT(len));
-                txlens.emplace_back(len);
-            }
-        } else {
-            for (size_t i = 0; i < txlens.size(); i++)
-                READWRITE(VARINT(txlens[i]));
+    template <typename Stream>
+    void Unserialize(Stream& s)
+    {
+        uint8_t codec_version_u8;
+        s >> codec_version_u8;
+        codec_version = static_cast<codec_version_t>(codec_version_u8);
+        s >> height;
+        s >> *static_cast<CBlockHeaderAndShortTxIDs*>(this);
+        txlens.clear();
+        txlens.reserve(shorttxids.size());
+        for (size_t i = 0; i < shorttxids.size(); i++) {
+            uint32_t len;
+            s >> VARINT(len);
+            txlens.emplace_back(len);
         }
     }
 };
