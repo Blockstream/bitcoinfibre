@@ -12,6 +12,7 @@
 #include <throttle.h>
 #include <ringbuffer.h>
 
+#include <bloom.h>
 #include <chainparams.h>
 #include <consensus/validation.h>
 #include <compat/endian.h>
@@ -83,7 +84,7 @@ static std::map<CService, UDPConnectionInfo> mapPersistentNodes;
 
 static int g_mcast_log_interval = 10;
 
-static CConnman* g_connman; // Initialized by InitializeUDPConnections
+static NodeContext* g_node_context; // Initialized by InitializeUDPConnections
 
 /*
  * UDP multicast service
@@ -606,9 +607,9 @@ UniValue UdpMulticastRxInfoToJson() {
     return ret;
 }
 
-bool InitializeUDPConnections(CConnman* const connman) {
+bool InitializeUDPConnections(NodeContext* const node_context) {
     assert(udp_write_threads.empty() && !udp_read_thread);
-    g_connman = connman;
+    g_node_context = node_context;
 
     if (gArgs.IsArgSet("-udpmulticastloginterval") && (atoi(gArgs.GetArg("-udpmulticastloginterval", "")) > 0))
         g_mcast_log_interval = atoi(gArgs.GetArg("-udpmulticastloginterval", ""));
@@ -695,10 +696,10 @@ bool InitializeUDPConnections(CConnman* const connman) {
     /* Multicast transmission threads */
     LaunchMulticastBackfillThreads();
 
-    BlockRecvInit();
+    BlockRecvInit(node_context->chainman);
 
     /* Load partial blocks acquired in previous sessions */
-    LoadPartialBlocks();
+    LoadPartialBlocks(node_context->mempool.get());
 
     udp_read_thread.reset(new std::thread(&TraceThread<void (*)()>, "udpread", &ThreadRunReadEventLoop));
 
@@ -860,7 +861,7 @@ static void read_socket_func(evutil_socket_t fd, short event, void* arg) {
         if (msg_type_masked == MSG_TYPE_BLOCK_HEADER ||
             msg_type_masked == MSG_TYPE_BLOCK_CONTENTS ||
             msg_type_masked == MSG_TYPE_TX_CONTENTS) {
-            if (!HandleBlockTxMessage(msg, sizeof(UDPMessage) - 1, it->first, it->second, start, fd, g_connman))
+            if (!HandleBlockTxMessage(msg, sizeof(UDPMessage) - 1, it->first, it->second, start, fd, g_node_context))
                 send_and_disconnect(it);
             else
                 UpdateUdpMulticastRxBytes(mcast_info, res);
@@ -909,7 +910,7 @@ static void read_socket_func(evutil_socket_t fd, short event, void* arg) {
         return;
 
     if (msg_type_masked == MSG_TYPE_BLOCK_HEADER || msg_type_masked == MSG_TYPE_BLOCK_CONTENTS) {
-	    if (!HandleBlockTxMessage(msg, res, it->first, it->second, start, fd, g_connman)) {
+        if (!HandleBlockTxMessage(msg, res, it->first, it->second, start, fd, g_node_context)) {
             send_and_disconnect(it);
             return;
         }
@@ -1583,6 +1584,7 @@ static void MulticastTxnThread(const CService& mcastNode,
         txn_to_send.reserve(txn_tx_quota);
         {
             std::set<uint256> txids_to_send;
+            CTxMemPool& mempool = *g_node_context->mempool.get();
             LOCK(mempool.cs);
             for (const auto& iter : mempool.mapTx.get<ancestor_score>()) {
                 if (txn_to_send.size() >= (unsigned int)txn_tx_quota)

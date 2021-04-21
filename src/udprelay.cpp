@@ -723,7 +723,7 @@ static void DoBackgroundBlockProcessing(const std::pair<std::pair<uint64_t, CSer
     block_process_cv.notify_all();
 }
 
-static void ProcessBlockThread() {
+static void ProcessBlockThread(ChainstateManager* chainman) {
     const bool fBench = LogAcceptCategory(BCLog::BENCH);
 
     while (true) {
@@ -952,12 +952,12 @@ static void ProcessBlockThread() {
                     const bool force_requested = (node == TRUSTED_PEER_DUMMY);
 
                     bool fNewBlock;
-                    if (!ProcessNewBlock(Params(), pdecoded_block, force_requested, &fNewBlock)) {
+                    if (!chainman->ProcessNewBlock(Params(), pdecoded_block, force_requested, &fNewBlock)) {
                         bool have_prev, outoforder_and_valid;
                         {
                             LOCK(cs_main);
 
-                            have_prev = BlockIndex().count(pdecoded_block->hashPrevBlock);
+                            have_prev = chainman->BlockIndex().count(pdecoded_block->hashPrevBlock);
                             BlockValidationState state;
                             outoforder_and_valid = !have_prev &&
                                 CheckBlock(*pdecoded_block, state, Params().GetConsensus());
@@ -1061,8 +1061,9 @@ static void ProcessBlockThread() {
     }
 }
 
-void BlockRecvInit() {
-    process_block_thread.reset(new std::thread(&TraceThread<void (*)()>, "udpprocess", &ProcessBlockThread));
+void BlockRecvInit(ChainstateManager* chainman)
+{
+    process_block_thread.reset(new std::thread(&TraceThread<std::function<void()>>, "udpprocess", std::function<void()>(std::bind(&ProcessBlockThread, chainman))));
 }
 
 void BlockRecvShutdown() {
@@ -1126,7 +1127,7 @@ bool IsChunkFileRecoverable(const std::string& filename, ChunkFileNameParts& cfp
 
 // Scan the disk for recoverable FEC chunk files and try to rebuild the
 // mapPartialBlocks state. Clean up the chunk files that are not recoverable.
-void LoadPartialBlocks()
+void LoadPartialBlocks(CTxMemPool* mempool)
 {
     uint32_t n_imported = 0;
     uint32_t n_removed = 0;
@@ -1146,7 +1147,7 @@ void LoadPartialBlocks()
             auto block = GetPartialBlockData(hash_peer_pair);
             if (!block) {
                 // new block
-                mapPartialBlocks.insert(std::make_pair(hash_peer_pair, std::make_shared<PartialBlockData>(peer, cfp)));
+                mapPartialBlocks.insert(std::make_pair(hash_peer_pair, std::make_shared<PartialBlockData>(peer, mempool, cfp)));
                 n_imported++;
             } else {
                 // header or body was already recovered
@@ -1229,13 +1230,13 @@ bool PartialBlockData::Init(const UDPMessage& msg)
     return true;
 }
 
-PartialBlockData::PartialBlockData(const CService& peer, const UDPMessage& msg, const std::chrono::steady_clock::time_point& packet_recv) :
+PartialBlockData::PartialBlockData(const CService& peer, CTxMemPool* mempool, const UDPMessage& msg, const std::chrono::steady_clock::time_point& packet_recv) :
         timeHeaderRecvd(packet_recv), peer(peer),
         in_header(true), blk_initialized(false), header_initialized(false),
         is_decodeable(false), is_header_processing(false),
         packet_awaiting_lock(false), awaiting_processing(false),
         chain_lookup(false), currentlyProcessing(false), blk_len(0),
-        header_len(0), block_data(&mempool)
+        header_len(0), block_data(mempool)
 {
     bool const ret = Init(msg);
     assert(ret);
@@ -1276,13 +1277,13 @@ bool PartialBlockData::Init(const ChunkFileNameParts& cfp)
     return true;
 }
 
-PartialBlockData::PartialBlockData(const CService& peer, const ChunkFileNameParts& cfp) :
+PartialBlockData::PartialBlockData(const CService& peer, CTxMemPool* mempool, const ChunkFileNameParts& cfp) :
         timeHeaderRecvd(std::chrono::steady_clock::now()), peer(peer),
         in_header(true), blk_initialized(false), header_initialized(false),
         is_decodeable(false), is_header_processing(false),
         packet_awaiting_lock(false), awaiting_processing(false),
         chain_lookup(false), currentlyProcessing(false), blk_len(0),
-        header_len(0), block_data(&mempool), tip_blk(false)
+        header_len(0), block_data(mempool), tip_blk(false)
 {
     bool const ret = Init(cfp);
     assert(ret);
@@ -1337,7 +1338,7 @@ static void BlockMsgHToLE(UDPMessage& msg) {
     msg.msg.block.chunk_id    = htole32(msg.msg.block.chunk_id);
 }
 
-static bool HandleTx(UDPMessage& msg, size_t length, const CService& node, UDPConnectionState& state, const CConnman* const connman) {
+static bool HandleTx(UDPMessage& msg, size_t length, const CService& node, UDPConnectionState& state, const NodeContext* const node_context) {
     if (msg.msg.block.obj_length > 400000) {
         LogPrintf("UDP: Got massive tx obj_length of %u\n", msg.msg.block.obj_length);
         return false;
@@ -1377,8 +1378,8 @@ static bool HandleTx(UDPMessage& msg, size_t length, const CService& node, UDPCo
             stream >> CTxCompressor(tx, codec_version);
             LOCK(cs_main);
             TxValidationState state;
-            if (AcceptToMemoryPool(mempool, state, tx, nullptr, false, 0)) {
-                RelayTransaction(tx->GetHash(), *connman);
+            if (AcceptToMemoryPool(*node_context->mempool.get(), state, tx, nullptr, false, 0)) {
+                RelayTransaction(tx->GetHash(), tx->GetWitnessHash(), *node_context->connman.get());
             }
         } catch (std::exception& e) {
             LogPrintf("UDP: Tx decode failed for tx %lu from %s: %s\n", msg.msg.block.hash_prefix, node.ToString(), e.what());
@@ -1390,7 +1391,7 @@ static bool HandleTx(UDPMessage& msg, size_t length, const CService& node, UDPCo
     return true;
 }
 
-bool HandleBlockTxMessage(UDPMessage& msg, size_t length, const CService& node, UDPConnectionState& state, const std::chrono::steady_clock::time_point& packet_process_start, const int sockfd, const CConnman* const connman) {
+bool HandleBlockTxMessage(UDPMessage& msg, size_t length, const CService& node, UDPConnectionState& state, const std::chrono::steady_clock::time_point& packet_process_start, const int sockfd, const NodeContext* const node_context) {
     //TODO: There are way too many damn tree lookups here...either cut them down or increase parallelism
     const bool fBench = LogAcceptCategory(BCLog::BENCH);
     std::chrono::steady_clock::time_point start;
@@ -1409,7 +1410,7 @@ bool HandleBlockTxMessage(UDPMessage& msg, size_t length, const CService& node, 
     msg.msg.block.chunk_id    = le32toh(msg.msg.block.chunk_id);
 
     if ((msg.header.msg_type & UDP_MSG_TYPE_TYPE_MASK) == MSG_TYPE_TX_CONTENTS)
-	    return HandleTx(msg, length, node, state, connman);
+        return HandleTx(msg, length, node, state, node_context);
 
     const bool is_blk_header_chunk  = (msg.header.msg_type & UDP_MSG_TYPE_TYPE_MASK) == MSG_TYPE_BLOCK_HEADER;
     const bool is_blk_content_chunk = (msg.header.msg_type & UDP_MSG_TYPE_TYPE_MASK) == MSG_TYPE_BLOCK_CONTENTS;
@@ -1485,7 +1486,7 @@ bool HandleBlockTxMessage(UDPMessage& msg, size_t length, const CService& node, 
     bool new_block = false;
     auto it = mapPartialBlocks.find(hash_peer_pair);
     if (it == mapPartialBlocks.end()) {
-        it = mapPartialBlocks.insert(std::make_pair(hash_peer_pair, std::make_shared<PartialBlockData>(peer, msg, packet_process_start))).first;
+        it = mapPartialBlocks.insert(std::make_pair(hash_peer_pair, std::make_shared<PartialBlockData>(peer, node_context->mempool.get(), msg, packet_process_start))).first;
         new_block = true;
     }
     PartialBlockData& block = *it->second;

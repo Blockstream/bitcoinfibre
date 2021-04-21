@@ -140,8 +140,8 @@ struct PartialBlockData {
     bool Init(const ChunkFileNameParts& cfp);
 
     ReadStatus ProvideHeaderData(const CBlockHeaderAndLengthShortTxIDs& header);
-    PartialBlockData(const CService& node, const UDPMessage& header_msg, const std::chrono::steady_clock::time_point& packet_recv); // Must be a MSG_TYPE_BLOCK_HEADER
-    PartialBlockData(const CService& peer, const ChunkFileNameParts& cfp);
+	PartialBlockData(const CService& node, CTxMemPool* mempool, const UDPMessage& header_msg, const std::chrono::steady_clock::time_point& packet_recv); // Must be a MSG_TYPE_BLOCK_HEADER
+	PartialBlockData(const CService& peer, CTxMemPool* mempool, const ChunkFileNameParts& cfp);
 
     void ReconstructBlockFromDecoder();
     std::string GetSenders();
