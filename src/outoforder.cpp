@@ -82,7 +82,7 @@ bool StoreOoOBlock(const CChainParams& chainparams, const std::shared_ptr<const 
     return true;
 }
 
-void ProcessSuccessorOoOBlocks(const CChainParams& chainparams, const uint256& prev_block_hash, const bool force)
+void ProcessSuccessorOoOBlocks(ChainstateManager& chainman, const CChainParams& chainparams, const uint256& prev_block_hash, const bool force)
 {
     std::deque<uint256> queue;
     queue.push_back(prev_block_hash);
@@ -105,7 +105,7 @@ void ProcessSuccessorOoOBlocks(const CChainParams& chainparams, const uint256& p
                 continue;
             }
             LogPrintf("Accepting deferred block %s from out-of-order disk cache\n", block.GetHash().GetHex());
-            ProcessNewBlock(chainparams, pblock, force, /*is new block?=*/nullptr, &successor.second, /*do_ooob=*/false);
+            chainman.ProcessNewBlock(chainparams, pblock, force, /*is new block?=*/nullptr, &successor.second, /*do_ooob=*/false);
             queue.push_back(pblock->GetHash());
         }
 
@@ -113,7 +113,7 @@ void ProcessSuccessorOoOBlocks(const CChainParams& chainparams, const uint256& p
     }
 }
 
-void CheckForOoOBlocks(const CChainParams& chainparams)
+void CheckForOoOBlocks(ChainstateManager& chainman, const CChainParams& chainparams)
 {
     std::vector<uint256> to_process;
     {
@@ -128,14 +128,14 @@ void CheckForOoOBlocks(const CChainParams& chainparams)
             if (!(pcursor->GetKey(key) && key.first == DB_SUBSEQUENT_BLOCK)) break;
 
             const uint256& prev_block_hash = key.second;
-            if (::BlockIndex().count(prev_block_hash)) {
+            if (chainman.BlockIndex().count(prev_block_hash)) {
                 to_process.push_back(prev_block_hash);
             }
         }
     }
 
     for (const auto& prev_block_hash : to_process) {
-        ProcessSuccessorOoOBlocks(chainparams, prev_block_hash);
+        ProcessSuccessorOoOBlocks(chainman, chainparams, prev_block_hash);
     }
 }
 
