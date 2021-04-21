@@ -1216,8 +1216,8 @@ CScript decode_push_only(Span<valtype const> values)
 
 valtype PadHash(Span<unsigned char const> const h, bool const iswitnesshash)
 {
-    unsigned char hashcache[32];
     if (!iswitnesshash) {
+        unsigned char hashcache[CRIPEMD160::OUTPUT_SIZE];
         CScript pubkeyhash(h.begin(), h.end());
         uint8_t scriptpubkeycode = 0;
         PadScriptPubKey(scriptpubkeycode, pubkeyhash);
@@ -1229,6 +1229,7 @@ valtype PadHash(Span<unsigned char const> const h, bool const iswitnesshash)
         memcpy(ret.data() + 2, hashcache, 20);
         return ret;
     } else {
+        unsigned char hashcache[CSHA256::OUTPUT_SIZE];
         CSHA256().Write(h.data(), h.size()).Finalize(hashcache);
         valtype ret(34);
         ret[0] = 0x00;
