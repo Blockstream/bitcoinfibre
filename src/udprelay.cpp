@@ -1129,6 +1129,7 @@ bool IsChunkFileRecoverable(const std::string& filename, ChunkFileNameParts& cfp
 // mapPartialBlocks state. Clean up the chunk files that are not recoverable.
 void LoadPartialBlocks(CTxMemPool* mempool)
 {
+    LogPrintf("Loading partial blocks from disk...\n");
     uint32_t n_imported = 0;
     uint32_t n_removed = 0;
     fs::path chunk_files_dir = GetDataDir() / "partial_blocks";
@@ -1158,7 +1159,7 @@ void LoadPartialBlocks(CTxMemPool* mempool)
             }
         }
     }
-    LogPrintf("Imported %lu partial blocks from disk\n", n_imported);
+    LogPrintf("Loaded %lu partial blocks from disk\n", n_imported);
     if (n_removed > 0) {
         LogPrintf("Removed %lu non-recoverable partial blocks from disk\n", n_removed);
     }
