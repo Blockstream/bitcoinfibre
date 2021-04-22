@@ -3,6 +3,7 @@
 // distributed under the Affero General Public License (AGPL v3)
 
 #include "bench.h"
+#include "data.h"
 
 #include "blockencodings.h"
 #include "consensus/merkle.h"
@@ -13,8 +14,6 @@
 
 #include "version.h"
 #include "streams.h"
-
-#include "bench/data/block413567.hex.h"
 
 #include <random>
 
@@ -196,9 +195,7 @@ static void RealFECedBlockRoundTripTest(benchmark::Bench& bench, int ntxn, bool 
 {
     CBlock block;
 
-    CDataStream stream((const char*)blockencodings_tests::block413567,
-            (const char*)&blockencodings_tests::block413567[sizeof(blockencodings_tests::block413567)],
-            SER_NETWORK, PROTOCOL_VERSION);
+    CDataStream stream(benchmark::data::block413567, SER_NETWORK, PROTOCOL_VERSION);
     stream >> block;
 
     bool mutated;
@@ -249,9 +246,7 @@ BENCHMARK(FECBlockRTTTest1555);
 BENCHMARK(FECHeaderRTTTest1550);
 
 static void FECEncodeBenchmark(benchmark::Bench& bench, bool fAll) {
-    std::vector<unsigned char> data((const unsigned char*)blockencodings_tests::block413567,
-            (const unsigned char*)&blockencodings_tests::block413567[sizeof(blockencodings_tests::block413567)]);
-
+    const auto& data = benchmark::data::block413567;
     bench.run([&] {
         size_t fec_chunk_count = DIV_CEIL(data.size(), FEC_CHUNK_SIZE);
         std::pair<std::unique_ptr<FECChunkType[]>, std::vector<uint32_t>> fec(std::piecewise_construct, std::forward_as_tuple(new FECChunkType[fec_chunk_count]), std::forward_as_tuple(fec_chunk_count));
@@ -267,8 +262,7 @@ static void FECEncodeOneBenchmark(benchmark::Bench& bench) { FECEncodeBenchmark(
 static void FECEncodeAllBenchmark(benchmark::Bench& bench) { FECEncodeBenchmark(bench, true); }
 
 static void FECDecodeBenchmark(benchmark::Bench& bench, unsigned mask, const MemoryUsageMode memory_usage_mode) {
-    std::vector<unsigned char> data((const unsigned char*)blockencodings_tests::block413567,
-            (const unsigned char*)&blockencodings_tests::block413567[sizeof(blockencodings_tests::block413567)]);
+    const auto& data = benchmark::data::block413567;
     size_t fec_chunk_count = DIV_CEIL(data.size(), FEC_CHUNK_SIZE);
     std::pair<std::unique_ptr<FECChunkType[]>, std::vector<uint32_t>> fec(std::piecewise_construct, std::forward_as_tuple(new FECChunkType[fec_chunk_count]), std::forward_as_tuple(fec_chunk_count));
     FECEncoder enc(&data, &fec);

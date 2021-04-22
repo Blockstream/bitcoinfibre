@@ -2,6 +2,7 @@
 // Unlike the rest of Bitcoin Core, this file is
 // distributed under the Affero General Public License (AGPL v3)
 
+#include <bench/data.h>
 #include <blockencodings.h>
 #include <chainparams.h>
 #include <consensus/merkle.h>
@@ -10,8 +11,6 @@
 #include <streams.h>
 
 #include <test/util/setup_common.h>
-
-#include "test/data/block413567.hex.h"
 
 #include <boost/test/unit_test.hpp>
 #include <random>
@@ -603,9 +602,7 @@ BOOST_AUTO_TEST_CASE(RealFECedBlockRoundTripTest)
 {
     CBlock block;
 
-    CDataStream stream((const char*)blockencodings_tests::block413567,
-            (const char*)&blockencodings_tests::block413567[sizeof(blockencodings_tests::block413567)],
-            SER_NETWORK, PROTOCOL_VERSION);
+    CDataStream stream(benchmark::data::block413567, SER_NETWORK, PROTOCOL_VERSION);
     stream >> block;
 
     bool mutated;
