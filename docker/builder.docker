@@ -14,9 +14,7 @@ RUN apt install -y gcc-arm-linux-gnueabihf g++-arm-linux-gnueabihf \
 	binutils-arm-linux-gnueabihf
 
 # build depends for aarch64 and armhf
-RUN mkdir src && cd src && \
-	git clone https://github.com/Blockstream/bitcoinsatellite && \
-	mv bitcoinsatellite/depends . && rm -r bitcoinsatellite && \
-	cd depends && make HOST=aarch64-linux-gnu NO_QT=1 && \
+RUN mkdir src
+COPY depends /src/depends
+RUN cd /src/depends/ && make HOST=aarch64-linux-gnu NO_QT=1 && \
 	make HOST=arm-linux-gnueabihf NO_QT=1
-
