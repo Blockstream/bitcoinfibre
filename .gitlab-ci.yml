@@ -6,13 +6,13 @@ builder:
   image: docker
   stage: .pre
   only:
-    changes:
-      - docker/builder.docker
-      - depends/**/*
+    refs:
+      - web
   except:
     refs:
       - web
   script:
+    - docker pull $DOCKER_IMAGE || true
     - docker build -f docker/builder.docker -t $DOCKER_IMAGE .
     - echo "$CI_BUILD_TOKEN" | docker login -u gitlab-ci-token --password-stdin $DOCKER_REGISTRY
     - docker push $DOCKER_IMAGE
