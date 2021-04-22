@@ -1,59 +1,41 @@
 variables:
-  DOCKER_REGISTRY: glregistry.blockstream.io
-  DOCKER_IMAGE: $DOCKER_REGISTRY/satellite/bitcoinsatellite:latest
+  XBUILDER_IMAGE: $DOCKER_REGISTRY/satellite/bitcoinsatellite:latest
 
 builder:
   image: docker
   stage: .pre
   only:
-    changes:
-      - docker/builder.docker
-      - depends/**/*
-  except:
     refs:
       - web
-  script:
-    - docker build -f docker/builder.docker -t $DOCKER_IMAGE .
+  before_script:
     - echo "$CI_BUILD_TOKEN" | docker login -u gitlab-ci-token --password-stdin $DOCKER_REGISTRY
-    - docker push $DOCKER_IMAGE
+  script:
+    - docker pull $XBUILDER_IMAGE || true
+    - docker build -f docker/builder.docker -t $XBUILDER_IMAGE .
+    - docker push $XBUILDER_IMAGE
 
 test:
-  image: $DOCKER_IMAGE
+  image: $XBUILDER_IMAGE
   stage: test
   script:
-    - set -e
     - ./autogen.sh
     - ./configure --disable-wallet --enable-debug --with-gui=no
     - make -j$(nproc)
     - make check
 
-xcompile-aarch64:
-  image: $DOCKER_IMAGE
+xcompile:
+  image: $XBUILDER_IMAGE
   stage: build
-  script:
-    - set -e
-    - ./autogen.sh
-    - ./configure --disable-wallet --prefix=/src/depends/aarch64-linux-gnu --enable-glibc-back-compat --enable-reduce-exports LDFLAGS=-static-libstdc++
-    - make -j$(nproc)
   only:
     refs:
       - web
-  artifacts:
-    paths:
-      - src/bitcoind
-      - src/bitcoin-cli
-
-xcompile-armhf:
-  image: $DOCKER_IMAGE
-  stage: build
+  parallel:
+    matrix:
+      - HOST: ["aarch64-linux-gnu", "arm-linux-gnueabihf"]
   script:
-    - set -e
     - ./autogen.sh
-    - ./configure --disable-wallet --prefix=/src/depends/arm-linux-gnueabihf --enable-glibc-back-compat --enable-reduce-exports LDFLAGS=-static-libstdc++
+    - ./configure --disable-wallet --prefix=/src/depends/$HOST --enable-glibc-back-compat --enable-reduce-exports LDFLAGS=-static-libstdc++
     - make -j$(nproc)
-  only:
-    refs:
-      - web
   artifacts:
     paths:
       - src/bitcoind
