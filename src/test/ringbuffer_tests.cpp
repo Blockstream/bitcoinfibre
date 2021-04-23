@@ -34,6 +34,7 @@ BOOST_AUTO_TEST_CASE(test_ringbuffer_overflow_ctrl)
 {
     RingBuffer<int> buffer;
 
+    // Write until the buffer is full, and then try to write one more element
     std::thread t1([&] {
         for (size_t i = 0; i < (BUFF_DEPTH + 1); i++) {
             int new_val = std::rand();
@@ -44,12 +45,10 @@ BOOST_AUTO_TEST_CASE(test_ringbuffer_overflow_ctrl)
     });
 
     std::thread t2([&] {
-        // Let thread 1 run alone
-        std::this_thread::sleep_for(std::chrono::milliseconds(50));
-
-        // At this point, the buffer should be full, and thread 1 should be
-        // waiting for buffer space
-        BOOST_CHECK(buffer.IsFull());
+        // Let thread 1 fill up the ring buffer
+        while (!buffer.IsFull()) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        }
 
         // Read two elements: one to free space and allow thread 1 to complete
         // its work, the other so that the buffer is no longer full.
@@ -107,6 +106,7 @@ BOOST_AUTO_TEST_CASE(test_ringbuffer_read_proxy)
     // Read element using the read proxy
     {
         ReadProxy<Element> rd_proxy(&buffer);
+        BOOST_CHECK(rd_proxy->val == new_val);
         // When the read proxy object is destructed, it aborts the read
     }
 
@@ -144,13 +144,10 @@ BOOST_AUTO_TEST_CASE(test_ringbuffer_write_abort)
     });
 
     std::thread t2([&] {
-        // Let thread 1 run alone
-        std::this_thread::sleep_for(std::chrono::milliseconds(50));
-
-        // At this point, the buffer should be full, and thread 1 should be
-        // waiting for buffer space
-        BOOST_CHECK(buffer.IsFull());
-
+        // Let thread 1 fill up the ring buffer
+        while (!buffer.IsFull()) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        }
         // Abort the pending write transaction, so that thread 1 can exit
         buffer.AbortWrite();
     });
