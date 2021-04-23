@@ -1817,8 +1817,8 @@ UniValue MaxMinBlkChunkStatsToJSON() {
     if (s.max_height != 0)
         ret.pushKV("max_blk", BlkChunkStatsToJSON(s.max_blk));
 
-    ret.pushKV("n_blks", s.n_blks);
-    ret.pushKV("n_chunks", s.n_chunks);
+    ret.pushKV("n_blks", (uint64_t)s.n_blks);
+    ret.pushKV("n_chunks", (uint64_t)s.n_chunks);
 
     return ret;
 }
