@@ -3006,7 +3006,7 @@ static RPCHelpMan getoooblocks()
         fVerbose = request.params[0].get_bool();
 
     if (!fVerbose)
-        return CountOoOBlocks();
+        return (uint64_t)CountOoOBlocks();
     else {
         const auto ooob_map = GetOoOBlockMap();
         UniValue ret(UniValue::VOBJ);
