@@ -595,7 +595,7 @@ UniValue UdpMulticastRxInfoToJson() {
 
         UniValue info(UniValue::VOBJ);
         info.pushKV("bitrate", std::to_string(bitrate) + " " + unit);
-        info.pushKV("group", node.second.group);
+        info.pushKV("group", (uint64_t)node.second.group);
         info.pushKV("groupname", node.second.groupname);
         info.pushKV("ifname", node.second.ifname);
         info.pushKV("mcast_ip", node.second.mcast_ip);
@@ -1505,8 +1505,8 @@ static UniValue TxWindowFullInfoToJSON(std::shared_ptr<backfill_block_window> pb
     std::unique_lock<std::mutex> lock(pblock_window->mutex);
     for (const auto& b : pblock_window->map) {
         UniValue info(UniValue::VOBJ);
-        info.pushKV("index", b.second.idx);
-        info.pushKV("total", b.second.msgs.size());
+        info.pushKV("index", (uint64_t)b.second.idx);
+        info.pushKV("total", (uint64_t)b.second.msgs.size());
         ret.__pushKV(std::to_string(b.first), info);
     }
     return ret;
