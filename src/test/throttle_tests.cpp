@@ -7,9 +7,11 @@ BOOST_FIXTURE_TEST_SUITE(throttle_tests, BasicTestingSetup)
 
 BOOST_AUTO_TEST_CASE(test_quota_usage)
 {
-    const double units_per_sec = 1000;
-    const unsigned int wait_ms = 100;
-    uint32_t expected_quota = (units_per_sec * wait_ms / 1000);
+    const double units_per_sec = 10;
+    // NOTE: use a low rate of units per second such that the accumulated quota
+    // does not vary significantly on slow builds
+    const unsigned int wait_ms = 400;
+    uint32_t nominal_quota = (units_per_sec * wait_ms / 1000);
 
     Throttle throttle(units_per_sec);
 
@@ -22,7 +24,7 @@ BOOST_AUTO_TEST_CASE(test_quota_usage)
 
     // Get the accumulated quota
     quota = throttle.GetQuota();
-    BOOST_CHECK(quota == expected_quota);
+    BOOST_CHECK(quota == nominal_quota);
 
     // Use the full quota
     BOOST_CHECK(throttle.UseQuota(quota));
@@ -32,15 +34,14 @@ BOOST_AUTO_TEST_CASE(test_quota_usage)
     // Accumulate quota once again
     std::this_thread::sleep_for(std::chrono::milliseconds(wait_ms));
     quota = throttle.GetQuota();
-    BOOST_CHECK(quota == expected_quota);
+    BOOST_CHECK(quota == nominal_quota);
 
     // Use only half of the quota
     BOOST_CHECK(throttle.UseQuota(quota / 2));
 
     // Check that the other half remains
-    expected_quota = quota / 2;
     quota = throttle.GetQuota();
-    BOOST_CHECK(quota == expected_quota);
+    BOOST_CHECK(quota == (nominal_quota / 2));
 }
 
 BOOST_AUTO_TEST_CASE(test_quota_capping)
@@ -69,11 +70,12 @@ BOOST_AUTO_TEST_CASE(test_quota_wait_estimate)
     for (int i = 0; i < 10; i++) {
         // Predict the wait to accumulate the expected quota
         const uint32_t wait_ms = throttle.EstimateWait(expected_quota);
-        BOOST_CHECK((wait_ms == target_wait_ms) ||
-                    (wait_ms == (target_wait_ms - 1)));
-        // Given that the quota accumulates continuously as a fractional number
-        // and only integer quotas can be consumed, eventually the wait may be
-        // one millisecond shorter.
+        BOOST_CHECK(wait_ms <= target_wait_ms);
+        // The quota accumulates continuously as a fractional number. However,
+        // only integer quotas can be consumed. As a result, some fractional
+        // quota remains after every quota consumption. Over time, this residual
+        // quota accumulates such that the estimated wait on any iteration can
+        // become lower than the nominal wait.
 
         // Wait and accumulate
         std::this_thread::sleep_for(std::chrono::milliseconds(wait_ms));
