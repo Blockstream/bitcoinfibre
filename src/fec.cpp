@@ -63,7 +63,7 @@ T exchange(T& var, T&& new_value)
 }
 
 template <typename T>
-T* exchange(T*& var, nullptr_t)
+T* exchange(T*& var, std::nullptr_t)
 {
     T* tmp = std::move(var);
     var = nullptr;
@@ -137,7 +137,7 @@ char* MapStorage::GetChunk(size_t idx) const
     if (idx < m_chunk_count) {
         return m_data_storage + (idx * FEC_CHUNK_SIZE);
     }
-    throw std::runtime_error("Invalid chunk index: " + idx);
+    throw std::runtime_error("Invalid chunk index: " + std::to_string(idx));
 }
 
 uint32_t MapStorage::GetChunkId(size_t idx) const
@@ -147,7 +147,7 @@ uint32_t MapStorage::GetChunkId(size_t idx) const
         memcpy(&chunk_id, m_id_storage + (idx * CHUNK_ID_SIZE), CHUNK_ID_SIZE);
         return chunk_id;
     }
-    throw std::runtime_error("Invalid chunk id index: " + idx);
+    throw std::runtime_error("Invalid chunk id index: " + std::to_string(idx));
 }
 
 size_t MapStorage::Size() const

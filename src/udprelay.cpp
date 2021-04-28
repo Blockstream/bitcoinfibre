@@ -49,7 +49,7 @@ static std::map<std::pair<uint64_t, CService>, std::shared_ptr<PartialBlockData>
     uint64_t const hash_prefix = it->first.first;
     std::lock_guard<std::mutex> lock(it->second->state_mutex);
     // Note that we do not modify perNodeChunkCount, as it might be "read-only" due to currentlyProcessing
-    for (const std::pair<CService, std::pair<uint32_t, uint32_t> >& node : it->second->perNodeChunkCount) {
+    for (const auto& node : it->second->perNodeChunkCount) {
         std::map<CService, UDPConnectionState>::iterator nodeIt = mapUDPNodes.find(node.first);
         if (nodeIt == mapUDPNodes.end())
             continue;
@@ -928,7 +928,7 @@ static void ProcessBlockThread(ChainstateManager* chainman) {
                     if (fBench) {
                         uint32_t total_chunks_recvd = 0, total_chunks_used = 0;
                         std::map<CService, std::pair<uint32_t, uint32_t> >& chunksProvidedByNode = block.perNodeChunkCount;
-                        for (const std::pair<CService, std::pair<uint32_t, uint32_t> >& provider : chunksProvidedByNode) {
+                        for (const auto& provider : chunksProvidedByNode) {
                             total_chunks_recvd += provider.second.second;
                             total_chunks_used += provider.second.first;
                         }
@@ -937,7 +937,7 @@ static void ProcessBlockThread(ChainstateManager* chainman) {
                          * is decoded. However, further chunks may still be
                          * received after the block is decoded. */
                         LogPrintf("UDP: Block %s reconstructed with %u chunks in %lf ms (%u recvd from %u peers)\n", decoded_block.GetHash().ToString(), total_chunks_used, to_millis_double(std::chrono::steady_clock::now() - block.timeHeaderRecvd), total_chunks_recvd, chunksProvidedByNode.size());
-                        for (const std::pair<CService, std::pair<uint32_t, uint32_t> >& provider : chunksProvidedByNode)
+                        for (const auto& provider : chunksProvidedByNode)
                             LogPrintf("UDP:    %u/%u used from %s\n", provider.second.first, provider.second.second, provider.first.ToString());
                     }
 
@@ -1735,7 +1735,7 @@ struct ChunkStats {
     BlkChunkStats max_blk;
 };
 
-BlkChunkStats GetBlkChunkStats(const PartialBlockData& b) EXCLUSIVE_LOCKS_REQUIRED(cs_mapUDPNodes) {
+BlkChunkStats GetBlkChunkStats(const PartialBlockData& b) {
     BlkChunkStats s;
     s.height          = b.height;
     s.header_rcvd     = b.header_decoder.GetChunksRcvd();
@@ -1751,7 +1751,7 @@ BlkChunkStats GetBlkChunkStats(const PartialBlockData& b) EXCLUSIVE_LOCKS_REQUIR
 }
 
 /* Convert block stats to JSON */
-UniValue BlkChunkStatsToJSON(const BlkChunkStats& s) EXCLUSIVE_LOCKS_REQUIRED(cs_mapUDPNodes) {
+UniValue BlkChunkStatsToJSON(const BlkChunkStats& s) {
         std::ostringstream h_stream;
         std::ostringstream b_stream;
         std::ostringstream p_stream;
