@@ -1,0 +1,32 @@
+FROM buildpack-deps:focal
+
+# Add blockstream/satellite PPA to fetch libdb4.8
+RUN apt update && apt install -y software-properties-common
+RUN add-apt-repository ppa:blockstream/satellite
+
+RUN apt update && DEBIAN_FRONTEND="noninteractive" apt install -y \
+	automake \
+	autotools-dev \
+	bsdmainutils \
+	build-essential \
+	clang \
+	libboost-filesystem-dev \
+	libboost-system-dev \
+	libboost-test-dev \
+	libboost-thread-dev \
+	libdb4.8++-dev \
+	libdb4.8-dev \
+	libevent-dev \
+	libminiupnpc-dev \
+	libnatpmp-dev \
+	libqrencode-dev \
+	libqt5core5a \
+	libqt5dbus5 \
+	libqt5gui5 \
+	libsqlite3-dev \
+	libtool \
+	libzmq3-dev \
+	pkg-config \
+	python3 \
+	qttools5-dev \
+	qttools5-dev-tools

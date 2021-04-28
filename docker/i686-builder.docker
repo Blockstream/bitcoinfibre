@@ -1,0 +1,29 @@
+FROM buildpack-deps:focal
+
+RUN apt update && apt install -y \
+	automake \
+	autotools-dev \
+	bsdmainutils \
+	build-essential \
+	libtool \
+	pkg-config \
+	python3
+
+# i686 build tools
+RUN apt install -y \
+	binutils-i686-linux-gnu \
+	g++-i686-linux-gnu \
+	gcc-i686-linux-gnu
+
+# multilib support
+RUN apt install -y \
+	g++-multilib \
+	gcc-multilib
+
+# build depends for i686
+RUN mkdir src
+COPY depends /src/depends
+RUN cd /src/depends/ && bash -c "make HOST=i686-pc-linux-gnu > /dev/null"
+
+# Add qemu-user to run cross-built tests
+RUN apt install -y qemu-user

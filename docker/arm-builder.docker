@@ -1,0 +1,28 @@
+FROM buildpack-deps:focal
+
+RUN apt update && apt install -y \
+	automake \
+	autotools-dev \
+	bsdmainutils \
+	build-essential \
+	libtool \
+	pkg-config \
+	python3
+
+# aarch64 and armhf build tools
+RUN apt install -y \
+	binutils-aarch64-linux-gnu \
+	binutils-arm-linux-gnueabihf \
+	g++-aarch64-linux-gnu \
+	g++-arm-linux-gnueabihf \
+	gcc-aarch64-linux-gnu \
+	gcc-arm-linux-gnueabihf
+
+# build depends for aarch64 and armhf
+RUN mkdir src
+COPY depends /src/depends
+RUN cd /src/depends/ && bash -c "make HOST=aarch64-linux-gnu > /dev/null"
+RUN cd /src/depends/ && bash -c "make HOST=arm-linux-gnueabihf > /dev/null"
+
+# Add qemu-user to run cross-built tests
+RUN apt install -y qemu-user
