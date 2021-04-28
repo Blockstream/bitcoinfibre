@@ -1,42 +1,128 @@
 variables:
-  XBUILDER_IMAGE: $DOCKER_REGISTRY/satellite/bitcoinsatellite:latest
+  UBUNTU_BUILDER: $DOCKER_REGISTRY/satellite/bitcoinsatellite/ubuntu-builder:latest
+  FEDORA_BUILDER: $DOCKER_REGISTRY/satellite/bitcoinsatellite/fedora-builder:latest
+  CENTOS_BUILDER: $DOCKER_REGISTRY/satellite/bitcoinsatellite/centos-builder:latest
+  I686_BUILDER: $DOCKER_REGISTRY/satellite/bitcoinsatellite/i686-builder:latest
+  ARM_BUILDER: $DOCKER_REGISTRY/satellite/bitcoinsatellite/arm-builder:latest
 
-builder:
+builders:
   image: docker
   stage: .pre
+  tags:
+    - k8s-docker
+  services:
+    - docker:19-dind
   only:
-    refs:
-      - web
+    changes:
+       - docker/**/*
+       - depends/**/*
   before_script:
     - echo "$CI_BUILD_TOKEN" | docker login -u gitlab-ci-token --password-stdin $DOCKER_REGISTRY
+  parallel:
+    matrix:
+      - IMAGE: ["ubuntu-builder", "fedora-builder", "centos-builder", "i686-builder", "arm-builder"]
+  variables:
+    TAG: $DOCKER_REGISTRY/satellite/bitcoinsatellite/$IMAGE:latest
+    DOCKER_DRIVER: overlay2
+    DOCKER_HOST: tcp://localhost:2375
+    DOCKER_TLS_CERTDIR: ""
   script:
-    - docker pull $XBUILDER_IMAGE || true
-    - docker build -f docker/builder.docker -t $XBUILDER_IMAGE .
-    - docker push $XBUILDER_IMAGE
+    - docker pull $TAG || true
+    - docker build --cache-from $TAG -f docker/$IMAGE.docker -t $TAG --build-arg BUILDKIT_INLINE_CACHE=1 .
+    - docker push $TAG
 
-test:
-  image: $XBUILDER_IMAGE
-  stage: test
+.build:
+  stage: build
+  tags:
+    - k8s
+
+.build:x86:gcc:
+  extends: .build
   script:
     - ./autogen.sh
-    - ./configure --disable-wallet --enable-debug --with-gui=no
+    - mkdir build && cd build
+    - if [ -z "$CI_COMMIT_TAG" ]; then export CONFIG_FLAGS="--disable-wallet --with-gui=no"; fi
+    - ../configure $CONFIG_FLAGS
     - make -j$(nproc)
     - make check
 
-xcompile:
-  image: $XBUILDER_IMAGE
-  stage: build
-  only:
-    refs:
-      - web
-  parallel:
-    matrix:
-      - HOST: ["aarch64-linux-gnu", "arm-linux-gnueabihf"]
+build:x86:ubuntu:
+  extends: .build:x86:gcc
+  image: $UBUNTU_BUILDER
+
+build:x86:fedora:
+  extends: .build:x86:gcc
+  image: $FEDORA_BUILDER
+
+build:x86:centos:
+  extends: .build:x86:gcc
+  image: $CENTOS_BUILDER
+
+build:x86:clang:
+  extends: .build
+  image: $UBUNTU_BUILDER
   script:
     - ./autogen.sh
-    - ./configure --disable-wallet --prefix=/src/depends/$HOST --enable-glibc-back-compat --enable-reduce-exports LDFLAGS=-static-libstdc++
+    - mkdir build && cd build
+    - CC=clang CXX=clang++ ../configure --disable-wallet --with-gui=no
+    - make -j$(nproc)
+    - make check
+
+.build:cross:
+  extends: .build
+  image: $ARM_BUILDER
+  script:
+    - ./autogen.sh
+    - mkdir build && cd build
+    - if [ -z "$CI_COMMIT_TAG" ]; then export CONFIG_FLAGS="--disable-wallet --with-gui=no"; fi
+    - ../configure --prefix=/src/depends/$HOST --enable-glibc-back-compat --enable-reduce-exports $CONFIG_FLAGS
     - make -j$(nproc)
   artifacts:
     paths:
-      - src/bitcoind
-      - src/bitcoin-cli
+      - build/src/test/test_bitcoin
+    expire_in: 10 minutes
+
+build:aarch64:
+  extends: .build:cross
+  variables:
+    HOST: "aarch64-linux-gnu"
+
+build:armhf:
+  extends: .build:cross
+  variables:
+    HOST: "arm-linux-gnueabihf"
+
+build:i686:
+  extends: .build:cross
+  image: $I686_BUILDER
+  variables:
+    HOST: "i686-pc-linux-gnu"
+
+# Run cross-build tests on the deb-packer runner, which has qemu-user support.
+.test:cross:
+  image: $ARM_BUILDER
+  stage: test
+  tags:
+    - k8s
+
+test:aarch64:
+  extends: .test:cross
+  needs:
+    - build:aarch64
+  script:
+    - qemu-aarch64 -L /usr/aarch64-linux-gnu build/src/test/test_bitcoin
+
+test:armhf:
+  extends: .test:cross
+  needs:
+    - build:armhf
+  script:
+    - qemu-arm -L /usr/arm-linux-gnueabihf build/src/test/test_bitcoin
+
+test:i686:
+  extends: .test:cross
+  image: $I686_BUILDER
+  needs:
+    - build:i686
+  script:
+    - build/src/test/test_bitcoin

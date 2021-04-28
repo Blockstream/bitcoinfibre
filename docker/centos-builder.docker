@@ -1,0 +1,30 @@
+FROM centos:8
+
+# Add the powertools repo for qrencode-devel
+RUN dnf install -y dnf-plugins-core
+RUN dnf config-manager --set-enabled powertools
+
+# Add EPEL to fetch zeromq-devel
+RUN dnf install -y epel-release
+
+# Add blockstream/satellite copr repo to fetch libdb4
+RUN dnf copr enable -y blockstream/satellite
+
+RUN dnf install -y \
+	autoconf \
+	automake \
+	boost-devel \
+	gcc \
+	gcc-c++ \
+	git \
+	libdb4-cxx-devel \
+	libdb4-devel \
+	libevent-devel \
+	libtool \
+	make \
+	python3 \
+	qrencode-devel \
+	qt5-qtbase-devel \
+	qt5-qttools-devel \
+	sqlite-devel \
+	zeromq-devel
