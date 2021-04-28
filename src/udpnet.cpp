@@ -153,7 +153,6 @@ static std::vector<event*> read_events;
 static struct timeval timer_interval;
 
 // ~10MB of outbound messages pending
-static const size_t PENDING_MESSAGES_BUFF_SIZE = 8192;
 static std::atomic_bool send_messages_break(false);
 std::mutex non_empty_queues_cv_mutex;
 std::condition_variable non_empty_queues_cv;
@@ -1250,7 +1249,7 @@ static void do_send_messages() {
 
         // Wait until at least one socket is writable
         if (maybe_all_full) {
-            int n_ready;
+            int n_ready = 0;
             bool retry_poll = true;
             while (retry_poll) {
                 n_ready = poll(pfds, nfds, -1 /* Wait indefinitely */);
