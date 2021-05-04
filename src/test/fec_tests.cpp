@@ -905,20 +905,23 @@ BOOST_AUTO_TEST_CASE(fec_test_decode_using_moved_decoder)
  * @param[in] expected_result      whether the test is expected to pass successfully or not
  *
  */
-void recovery_test(size_t n_uncoded_chunks, size_t n_overhead_chunks, float abort_at, float start_second_at, bool expected_result)
+void recovery_test(size_t n_uncoded_chunks, size_t n_overhead_chunks, size_t abort_at, size_t start_second_at, bool expected_result)
 {
-    assert(abort_at <= 1 && abort_at > 0 && start_second_at < 1 && start_second_at >= 0);
+    size_t n_encoded_chunks = n_uncoded_chunks + n_overhead_chunks;
+    assert(abort_at <= n_encoded_chunks);
+    assert(start_second_at <= n_encoded_chunks);
+
+    BOOST_TEST_MESSAGE("Two-step recovery test - Uncoded chunks: " << n_uncoded_chunks << " - Overhead: " << n_overhead_chunks << " - First batch: [0, " << abort_at << ") - Second: [" << start_second_at << ", " << n_encoded_chunks << ")");
 
     TestData test_data;
     size_t data_size = FEC_CHUNK_SIZE * n_uncoded_chunks;
     generate_encoded_chunks(data_size, test_data, n_overhead_chunks);
-    size_t n_encoded_chunks = n_uncoded_chunks + n_overhead_chunks;
 
     std::string obj_id = "1234_body";
 
     FECDecoder first_decoder(data_size, MemoryUsageMode::USE_MMAP, obj_id);
 
-    for (size_t i = 0; i < ceil(n_encoded_chunks * abort_at); i++) {
+    for (size_t i = 0; i < abort_at; i++) {
         first_decoder.ProvideChunk(test_data.encoded_chunks[i].data(), test_data.chunk_ids[i]);
     }
 
@@ -928,7 +931,7 @@ void recovery_test(size_t n_uncoded_chunks, size_t n_overhead_chunks, float abor
     // try to recover the data on disk first, and continue decoding with second_decoder
     FECDecoder second_decoder(data_size, MemoryUsageMode::USE_MMAP, obj_id);
 
-    for (size_t i = floor(n_encoded_chunks * start_second_at); i < n_encoded_chunks; i++) {
+    for (size_t i = start_second_at; i < n_encoded_chunks; i++) {
         second_decoder.ProvideChunk(test_data.encoded_chunks[i].data(), test_data.chunk_ids[i]);
     }
 
@@ -945,28 +948,30 @@ void recovery_test(size_t n_uncoded_chunks, size_t n_overhead_chunks, float abor
 
 BOOST_AUTO_TEST_CASE(fec_test_fecdecoder_recovery_in_two_steps)
 {
-    recovery_test(2, 0, 0.5, 0.5, true);
-    recovery_test(2, 0, 0.5, 0, true);
-    recovery_test(10, 0, 0.5, 0.5, true);
-    recovery_test(10, 0, 0.3, 0.3, true);
-    recovery_test(10, 0, 0.3, 0.4, false);
-    recovery_test(10, 0, 0.3, 0.1, true);
-    recovery_test(10, 0, 0.9, 0, true);
-    recovery_test(6, 4, 0.4, 0, true);
-    recovery_test(6, 4, 0.4, 0.4, true);
-    recovery_test(6, 4, 0.4, 0.6, true);  // there is a gap, but still decodable due to overhead
-    recovery_test(6, 4, 0.4, 0.9, false); // if gap is bigger than the overhead, decoding is not possible
-    recovery_test(6, 4, 0.6, 0, true);    // abort and continue after having enough chunks to decode already
-    recovery_test(6, 4, 0.8, 0, true);    // receive most of the chunks twice
-    recovery_test(6, 4, 1.0, 0, true);    // receive all the chunks twice
+    // cm256
+    recovery_test(2, 0, 1, 1, true);   // decode half of the chunks in each step
+    recovery_test(2, 0, 1, 0, true);   // decode all over again in the second step
+    recovery_test(10, 0, 5, 5, true);  // decode half of the chunks in each step
+    recovery_test(10, 0, 3, 3, true);  // decode 30% first, then the other 70%
+    recovery_test(10, 0, 3, 4, false); // miss 1 chunk (> overhead) and fail decoding
+    recovery_test(10, 0, 9, 0, true);  // decode all over again in the second step
+    recovery_test(6, 4, 5, 5, true);   // decode half of the chunks in each step
+    recovery_test(6, 4, 4, 0, true);   // decode all over again in the second step
+    recovery_test(6, 4, 3, 3, true);   // decode 30% first, then the other 70%
+    recovery_test(6, 4, 4, 6, true);   // miss 2 chunks (< overhead) and decode successfully
+    recovery_test(6, 4, 4, 9, false);  // miss 5 chunks (> overhead) and fail decoding
+    recovery_test(6, 4, 6, 0, true);   // abort and continue after having enough chunks
+    recovery_test(6, 4, 8, 0, true);   // receive most of the chunks twice
+    recovery_test(6, 4, 10, 0, true);  // receive all chunks twice
 
-    recovery_test(90, 10, 0.7, 0, true);
-    recovery_test(90, 10, 0.5, 0.5, true);
-    recovery_test(90, 10, 0.4, 0.45, true); // there is a gap, but still decodable due to overhead
-    recovery_test(90, 10, 0.4, 0.6, false); // if gap is bigger than the overhead, decoding is not possible
-    recovery_test(90, 10, 0.8, 0, true);    // receive most of the chunks twice
-    recovery_test(90, 10, 1.0, 0, true);    // receive all the chunks twice
-    recovery_test(90, 10, 0.9, 0, true);    // abort and continue after having enough chunks to decode already
+    // wirehair
+    recovery_test(90, 10, 70, 0, true);   // decode all over again in the second step
+    recovery_test(90, 10, 50, 50, true);  // decode half of the chunks in each step
+    recovery_test(90, 10, 40, 45, true);  // miss 5 chunks (< overhead) and decode successfully
+    recovery_test(90, 10, 40, 60, false); // miss 20 chunks (> overhead) and fail decoding
+    recovery_test(90, 10, 80, 0, true);   // receive most of the chunks twice
+    recovery_test(90, 10, 100, 0, true);  // receive all chunks twice
+    recovery_test(90, 10, 90, 0, true);   // abort and continue after having enough chunks
 }
 
 void test_fecdecoder_recovery_after_decoding(size_t n_uncoded_chunks)
