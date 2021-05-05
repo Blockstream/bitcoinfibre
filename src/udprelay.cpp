@@ -1830,10 +1830,11 @@ UniValue AllBlkChunkStatsToJSON() {
     for (const auto& b : mapPartialBlocks) {
         std::unique_lock<std::mutex> block_lock(b.second->state_mutex);
         const uint64_t hash_prefix = b.first.first;
-        char hex_hash_prefix[17];
-        snprintf(hex_hash_prefix, sizeof(hex_hash_prefix), "%016lx", hash_prefix);
+        std::stringstream stream;
+        stream << std::hex << hash_prefix;
+        std::string hex_hash_prefix(stream.str());
         const BlkChunkStats s = GetBlkChunkStats(*b.second);
-        UniValue info       = BlkChunkStatsToJSON(s);
+        UniValue info = BlkChunkStatsToJSON(s);
         o.__pushKV(hex_hash_prefix, info);
     }
     return o;
