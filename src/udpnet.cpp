@@ -323,7 +323,7 @@ static struct in_addr GetIfIpAddr(const char* const ifname) {
  */
 static bool InitializeUDPMulticast(std::vector<int> &udp_socks,
                                    std::vector<UDPMulticastInfo> &multicast_list) {
-    int group = udp_socks.size() - 1;
+    size_t group = udp_socks.size() - 1;
     std::map<std::pair<CService, int>, int> physical_idx_map;
     std::map<std::pair<CService, int>, int> logical_idx_map;
 
@@ -557,7 +557,7 @@ static bool InitializeUDPMulticast(std::vector<int> &udp_socks,
         }
         mapMulticastNodes[mcast_map_key] = mcast_info;
 
-        LogPrintf("UDP: Socket %d bound to port %hd for multicast group %d %s\n",
+        LogPrintf("UDP: Socket %d bound to port %hd for multicast group %zu %s\n",
                   udp_socks.back(), multicast_port, group,
                   mcast_info.groupname);
     }
@@ -635,7 +635,7 @@ bool InitializeUDPConnections(NodeContext* const node_context) {
             return false;
         }
 
-        LogPrintf("UDP: Bound to port %hd for group %lu with %lu Mbps\n", port.first, udp_socks.size() - 1, port.second);
+        LogPrintf("UDP: Bound to port %hd for group %zu with %lu Mbps\n", port.first, udp_socks.size() - 1, port.second);
     }
 
     event_base_read = event_base_new();
@@ -780,7 +780,7 @@ static void UpdateUdpMulticastRxBytes(const UDPMulticastInfo& mcast_info, const 
     const double elapsed = to_millis_double(t_now - stats.t_last_print);
     if (elapsed > (1000 * g_mcast_log_interval)) {
         uint64_t new_bytes = stats.rcvd_bytes - stats.last_rcvd_bytes_print;
-        LogPrint(BCLog::UDPMCAST, "UDP multicast group %d: Average bit rate %7.2f Mbit/sec (%s)\n",
+        LogPrint(BCLog::UDPMCAST, "UDP multicast group %zu: Average bit rate %7.2f Mbit/sec (%s)\n",
             mcast_info.group,
             (double)(new_bytes * 8) / (1000 * elapsed),
             mcast_info.groupname);
@@ -1204,7 +1204,7 @@ static void do_send_messages() {
                     if (errno == EWOULDBLOCK) {
                         wouldblock = true;
                     } else {
-                        LogPrintf("UDP: sendto to group %d failed: %s\n",
+                        LogPrintf("UDP: sendto to group %zu failed: %s\n",
                                   group, strerror(errno));
                     }
                     break;
@@ -1751,7 +1751,7 @@ static std::map<size_t, PerGroupMessageQueue> init_tx_queues(const std::vector<s
         auto res = mapQueues.emplace(std::piecewise_construct,
                                      std::forward_as_tuple(group),
                                      std::forward_as_tuple());
-        LogPrintf("UDP: Set bw for group %d: %d Mbps\n", group, group_list[group].second);
+        LogPrintf("UDP: Set bw for group %zu: %d Mbps\n", group, group_list[group].second);
         assert(res.second);
         res.first->second.bw        = group_list[group].second; // in Mbps
         res.first->second.multicast = false;
@@ -1766,7 +1766,7 @@ static std::map<size_t, PerGroupMessageQueue> init_tx_queues(const std::vector<s
      * instances do. */
     for (const auto& info : multicast_list) {
         if (info.tx) {
-            LogPrintf("UDP: Set bw for group %d: %d bps\n", info.group, info.bw);
+            LogPrintf("UDP: Set bw for group %zu: %d bps\n", info.group, info.bw);
             auto res = mapQueues.emplace(std::piecewise_construct,
                                          std::forward_as_tuple(info.group),
                                          std::forward_as_tuple());
@@ -2095,11 +2095,11 @@ static void OpenUDPConnectionTo(const CService& addr, const UDPConnectionInfo& i
     }
 }
 
-void OpenUDPConnectionTo(const CService& addr, uint64_t local_magic, uint64_t remote_magic, bool fUltimatelyTrusted, UDPConnectionType connection_type, uint64_t group) {
+void OpenUDPConnectionTo(const CService& addr, uint64_t local_magic, uint64_t remote_magic, bool fUltimatelyTrusted, UDPConnectionType connection_type, size_t group) {
     OpenUDPConnectionTo(addr, {htole64(local_magic), htole64(remote_magic), group, fUltimatelyTrusted, connection_type, udp_mode_t::unicast});
 }
 
-void OpenPersistentUDPConnectionTo(const CService& addr, uint64_t local_magic, uint64_t remote_magic, bool fUltimatelyTrusted, UDPConnectionType connection_type, uint64_t group, udp_mode_t udp_mode) {
+void OpenPersistentUDPConnectionTo(const CService& addr, uint64_t local_magic, uint64_t remote_magic, bool fUltimatelyTrusted, UDPConnectionType connection_type, size_t group, udp_mode_t udp_mode) {
     std::unique_lock<std::recursive_mutex> lock(cs_mapUDPNodes);
 
     if (mapPersistentNodes.count(addr))
