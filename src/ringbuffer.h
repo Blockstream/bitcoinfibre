@@ -35,7 +35,7 @@ private:
     T* m_obj;
 
 public:
-    ReadProxy(RingBuffer<T>* buf) : m_buf(buf), m_obj(buf->GetNextRead()) {}
+    explicit ReadProxy(RingBuffer<T>* buf) : m_buf(buf), m_obj(buf->GetNextRead()) {}
 
     ReadProxy(ReadProxy const&) = delete;
 
@@ -77,8 +77,9 @@ template <typename T>
 class RingBuffer
 {
 private:
-    uint16_t m_read_ptr = 0;  //!< read from the tail
-    uint16_t m_write_ptr = 0; //!< write to the head
+    size_t m_read_ptr = 0;  //!< read from the tail
+    size_t m_write_ptr = 0; //!< write to the head
+    size_t m_occupancy = 0; //!< current buffer occupancy
     T m_buffer[BUFF_DEPTH];
 
     std::mutex m_mutex;
@@ -94,9 +95,7 @@ private:
      */
     bool HasSpaceForWrite()
     {
-        // as long as the write pointer does not catch the read pointer
-        uint16_t next_write_ptr = (m_write_ptr + 1) % BUFF_DEPTH;
-        return next_write_ptr != m_read_ptr;
+        return m_occupancy < BUFF_DEPTH;
     }
 
 public:
@@ -123,6 +122,7 @@ public:
 
         f(m_buffer[m_write_ptr]);
         m_write_ptr = (m_write_ptr + 1) % BUFF_DEPTH;
+        m_occupancy++;
         return true;
     }
 
@@ -147,7 +147,7 @@ public:
          * means that the next element to be read is yet undefined, so the
          * buffer is empty. */
         std::lock_guard<std::mutex> guard(m_mutex);
-        return m_read_ptr == m_write_ptr;
+        return m_occupancy == 0;
     }
 
     /**
@@ -166,7 +166,11 @@ public:
      */
     T* GetNextRead()
     {
-        assert(!IsEmpty());
+        // The caller should check IsEmpty() before calling this
+        // function. Hence, IsEmpty() must be false here.
+        if (IsEmpty()) {
+            throw std::runtime_error("Unexpected read from empty buffer");
+        }
         m_mutex.lock(); // leave it locked until the read is confirmed/aborted
         return &m_buffer[m_read_ptr];
     }
@@ -191,11 +195,10 @@ public:
      */
     void ConfirmRead(unsigned int n_bytes = 0)
     {
-        assert(m_read_ptr != m_write_ptr); // buffer is not empty
-
         const bool was_full = !HasSpaceForWrite();
 
         m_read_ptr = (m_read_ptr + 1) % BUFF_DEPTH;
+        m_occupancy--;
 
         // Update the read counters
         m_stats.rd_bytes += n_bytes;
