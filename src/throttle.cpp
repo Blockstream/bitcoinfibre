@@ -23,7 +23,7 @@ void Throttle::UpdateQuota()
     const auto t_now = std::chrono::steady_clock::now();
     const auto elapsed = std::chrono::duration_cast<dsecs>(t_now - m_t_last);
     m_quota = std::min(m_quota + (elapsed.count() * m_units_per_sec),
-        m_max_quota);
+                       m_max_quota);
     m_t_last = t_now;
 }
 

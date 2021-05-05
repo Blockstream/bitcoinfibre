@@ -61,8 +61,8 @@ bool generate_encoded_chunks(size_t block_size, TestData& test_data, size_t n_ov
 
     std::pair<std::unique_ptr<FECChunkType[]>, std::vector<uint32_t>>
         block_fec_chunks(std::piecewise_construct,
-            std::forward_as_tuple(new FECChunkType[total_encoded_chunks]),
-            std::forward_as_tuple(total_encoded_chunks));
+                         std::forward_as_tuple(new FECChunkType[total_encoded_chunks]),
+                         std::forward_as_tuple(total_encoded_chunks));
 
     test_data.original_data.resize(block_size);
     fill_with_random_data(test_data.original_data);
@@ -95,7 +95,7 @@ static void check_chunk_equal(const void* p_chunk1, std::vector<unsigned char>& 
 
     // Compare the useful part of chunk1 (excluding zero-padding) against chunk2
     BOOST_CHECK_EQUAL_COLLECTIONS(chunk1.begin(), chunk1.begin() + size,
-        chunk2.begin(), chunk2.end());
+                                  chunk2.begin(), chunk2.end());
 
     // When chunk2's size is less than FEC_CHUNK_SIZE, the chunk under test
     // (chunk1) should be zero-padded. Check:
@@ -103,7 +103,7 @@ static void check_chunk_equal(const void* p_chunk1, std::vector<unsigned char>& 
         const size_t n_padding = FEC_CHUNK_SIZE - size;
         std::vector<unsigned char> padding(n_padding, 0);
         BOOST_CHECK_EQUAL_COLLECTIONS(chunk1.begin() + size, chunk1.end(),
-            padding.begin(), padding.end());
+                                      padding.begin(), padding.end());
     }
 }
 
@@ -135,8 +135,8 @@ BOOST_AUTO_TEST_CASE(fec_test_buildchunk_invalid_idx)
 
     std::pair<std::unique_ptr<FECChunkType[]>, std::vector<uint32_t>>
         block_fec_chunks(std::piecewise_construct,
-            std::forward_as_tuple(new FECChunkType[n_encoded_chunks]),
-            std::forward_as_tuple(n_encoded_chunks));
+                         std::forward_as_tuple(new FECChunkType[n_encoded_chunks]),
+                         std::forward_as_tuple(n_encoded_chunks));
 
     std::vector<unsigned char> original_data(block_size);
     fill_with_random_data(original_data);
@@ -155,8 +155,8 @@ void test_buildchunk_overwrite(size_t n_uncoded_chunks)
 
     std::pair<std::unique_ptr<FECChunkType[]>, std::vector<uint32_t>>
         block_fec_chunks(std::piecewise_construct,
-            std::forward_as_tuple(new FECChunkType[n_uncoded_chunks]),
-            std::forward_as_tuple(n_uncoded_chunks));
+                         std::forward_as_tuple(new FECChunkType[n_uncoded_chunks]),
+                         std::forward_as_tuple(n_uncoded_chunks));
 
     std::vector<unsigned char> original_data(block_size);
     fill_with_random_data(original_data);
@@ -212,8 +212,8 @@ BOOST_AUTO_TEST_CASE(fec_test_buildchunk_repetition_coding)
 
     std::pair<std::unique_ptr<FECChunkType[]>, std::vector<uint32_t>>
         block_fec_chunks(std::piecewise_construct,
-            std::forward_as_tuple(new FECChunkType[n_encoded_chunks]),
-            std::forward_as_tuple(n_encoded_chunks));
+                         std::forward_as_tuple(new FECChunkType[n_encoded_chunks]),
+                         std::forward_as_tuple(n_encoded_chunks));
 
     std::vector<unsigned char> original_data(block_size);
     fill_with_random_data(original_data);
@@ -366,7 +366,7 @@ void providechunk_test(MemoryUsageMode memory_usage_type, size_t n_uncoded_chunk
         std::vector<unsigned char> decoded_data = decoder.GetDecodedData();
         BOOST_CHECK_EQUAL(decoded_data.size(), test_data.original_data.size());
         BOOST_CHECK_EQUAL_COLLECTIONS(decoded_data.begin(), decoded_data.end(),
-            test_data.original_data.begin(), test_data.original_data.end());
+                                      test_data.original_data.begin(), test_data.original_data.end());
     } else {
         BOOST_CHECK_MESSAGE(!decoder.DecodeReady(), check_msg.str());
     }
@@ -429,8 +429,8 @@ void test_providechunk_repetition(MemoryUsageMode memory_usage_mode)
 
     std::pair<std::unique_ptr<FECChunkType[]>, std::vector<uint32_t>>
         block_fec_chunks(std::piecewise_construct,
-            std::forward_as_tuple(new FECChunkType[n_encoded_chunks]),
-            std::forward_as_tuple(n_encoded_chunks));
+                         std::forward_as_tuple(new FECChunkType[n_encoded_chunks]),
+                         std::forward_as_tuple(n_encoded_chunks));
 
     std::vector<unsigned char> original_data(block_size);
     fill_with_random_data(original_data);
@@ -632,7 +632,7 @@ void check_stored_chunk_ids(const FECDecoder& decoder, const std::vector<uint32_
     // do not compare stored_chunk_ids with the whole expected_chunk_ids, as this function
     // can also run for partial blocks in which not all chunk_id slots are filled
     BOOST_CHECK_EQUAL_COLLECTIONS(expected_chunk_ids.begin(), expected_chunk_ids.begin() + stored_chunk_ids.size(),
-        stored_chunk_ids.begin(), stored_chunk_ids.end());
+                                  stored_chunk_ids.begin(), stored_chunk_ids.end());
 }
 
 BOOST_AUTO_TEST_CASE(fec_test_chunk_ids_in_mmap_storage_test)
@@ -756,9 +756,9 @@ void test_decoding_getdataptr(size_t n_uncoded_chunks, MemoryUsageMode memory_us
     // Compare both to the original
     BOOST_CHECK_EQUAL(decoded_data.size(), test_data.original_data.size());
     BOOST_CHECK_EQUAL_COLLECTIONS(decoded_data.begin(), decoded_data.end(),
-        test_data.original_data.begin(), test_data.original_data.end());
+                                  test_data.original_data.begin(), test_data.original_data.end());
     BOOST_CHECK_EQUAL_COLLECTIONS(decoded_data2.begin(), decoded_data2.begin() + data_size,
-        test_data.original_data.begin(), test_data.original_data.end());
+                                  test_data.original_data.begin(), test_data.original_data.end());
 }
 
 BOOST_AUTO_TEST_CASE(fec_test_decoding_getdataptr)
@@ -863,7 +863,7 @@ void test_decode_using_moved_decoder(size_t n_uncoded_chunks, MemoryUsageMode me
         std::vector<unsigned char> decoded_data = decoder.GetDecodedData();
         BOOST_CHECK_EQUAL(decoded_data.size(), test_data.original_data.size());
         BOOST_CHECK_EQUAL_COLLECTIONS(decoded_data.begin(), decoded_data.end(),
-            test_data.original_data.begin(), test_data.original_data.end());
+                                      test_data.original_data.begin(), test_data.original_data.end());
     }
 
     // Move a FECDecoder which already received some chunks
@@ -883,7 +883,7 @@ void test_decode_using_moved_decoder(size_t n_uncoded_chunks, MemoryUsageMode me
         std::vector<unsigned char> decoded_data = decoder2.GetDecodedData();
         BOOST_CHECK_EQUAL(decoded_data.size(), test_data.original_data.size());
         BOOST_CHECK_EQUAL_COLLECTIONS(decoded_data.begin(), decoded_data.end(),
-            test_data.original_data.begin(), test_data.original_data.end());
+                                      test_data.original_data.begin(), test_data.original_data.end());
     }
 }
 
@@ -941,7 +941,7 @@ void recovery_test(size_t n_uncoded_chunks, size_t n_overhead_chunks, size_t abo
         std::vector<unsigned char> decoded_data = second_decoder.GetDecodedData();
         BOOST_CHECK_EQUAL(decoded_data.size(), test_data.original_data.size());
         BOOST_CHECK_EQUAL_COLLECTIONS(decoded_data.begin(), decoded_data.end(),
-            test_data.original_data.begin(), test_data.original_data.end());
+                                      test_data.original_data.begin(), test_data.original_data.end());
     } else {
         BOOST_CHECK(!second_decoder.DecodeReady());
     }
@@ -1021,7 +1021,7 @@ void test_fecdecoder_recovery_after_decoding(size_t n_uncoded_chunks)
         std::vector<unsigned char> decoded_data = decoder.GetDecodedData();
         BOOST_CHECK_EQUAL(decoded_data.size(), test_data.original_data.size());
         BOOST_CHECK_EQUAL_COLLECTIONS(decoded_data.begin(), decoded_data.end(),
-            test_data.original_data.begin(), test_data.original_data.end());
+                                      test_data.original_data.begin(), test_data.original_data.end());
     }
 }
 
@@ -1062,7 +1062,7 @@ void test_fecdecoder_recovery_with_N_decoders(size_t n_uncoded_chunks)
     std::vector<unsigned char> decoded_data = final_decoder.GetDecodedData();
     BOOST_CHECK_EQUAL(decoded_data.size(), test_data.original_data.size());
     BOOST_CHECK_EQUAL_COLLECTIONS(decoded_data.begin(), decoded_data.end(),
-        test_data.original_data.begin(), test_data.original_data.end());
+                                  test_data.original_data.begin(), test_data.original_data.end());
 }
 
 BOOST_AUTO_TEST_CASE(fec_test_fecdecoder_recovery_with_N_decoders)
