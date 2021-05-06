@@ -11,7 +11,6 @@ static const std::array<MemoryUsageMode, 2> memory_usage_modes{MemoryUsageMode::
 
 #define DIV_CEIL(a, b) (((a) + (b)-1) / (b))
 
-constexpr char hex_digits[] = "0123456789ABCDEF";
 constexpr size_t default_encoding_overhead = 5;
 
 struct FecTestingSetup : public BasicTestingSetup {
@@ -40,11 +39,30 @@ struct TestData {
  */
 void fill_with_random_data(std::vector<unsigned char>& vec)
 {
-    auto rand_hex_gen = []() {
+    constexpr char hex_digits[] = "0123456789ABCDEF";
+
+    auto rand_hex_gen = [&]() {
         auto h1 = hex_digits[(rand() % 16)];
         return h1;
     };
     std::generate(vec.begin(), vec.end(), rand_hex_gen);
+}
+
+std::string random_string(size_t len = 16)
+{
+    constexpr char chars[] =
+        "0123456789"
+        "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+        "abcdefghijklmnopqrstuvwxyz";
+
+    std::string s(len, '\0');
+
+    auto rand_char_gen = [&]() {
+        auto h1 = chars[(rand() % 62)];
+        return h1;
+    };
+    std::generate(s.begin(), s.end(), rand_char_gen);
+    return s;
 }
 
 /**
@@ -257,7 +275,7 @@ void test_fecdecoder_filename_pattern(size_t data_size)
 {
     // Object ID provided:
     {
-        std::string obj_id = "1234_body";
+        std::string obj_id = random_string();
         FECDecoder decoder(data_size, MemoryUsageMode::USE_MMAP, obj_id);
         // filename should be set as "<obj_id>_<obj_size>"
         BOOST_CHECK_MESSAGE(decoder.GetFileName().filename().c_str() == obj_id + "_" + std::to_string(data_size), data_size);
@@ -557,7 +575,7 @@ BOOST_AUTO_TEST_CASE(fec_test_map_storage_initialized_correctly)
     size_t n_chunks = 5;
     size_t data_size = FEC_CHUNK_SIZE * n_chunks;
     generate_encoded_chunks(data_size, test_data);
-    std::string obj_id = "1234_body";
+    std::string obj_id = random_string();
     FECDecoder decoder_a(data_size, MemoryUsageMode::USE_MMAP, obj_id);
     MapStorage map_storage_a(decoder_a.GetFileName(), decoder_a.GetChunkCount());
 
@@ -599,7 +617,7 @@ BOOST_AUTO_TEST_CASE(fec_test_map_storage_recoverable)
     size_t n_chunks = 5;
     size_t data_size = FEC_CHUNK_SIZE * n_chunks;
     generate_encoded_chunks(data_size, test_data);
-    std::string obj_id = "1234_body";
+    std::string obj_id = random_string();
     FECDecoder decoder(data_size, MemoryUsageMode::USE_MMAP, obj_id);
     {
         MapStorage map_storage(decoder.GetFileName(), decoder.GetChunkCount(), true);
@@ -790,7 +808,8 @@ BOOST_AUTO_TEST_CASE(fec_test_decoder_move_assignment_operator)
         // - decoder1 with obj_id, decoder2 without it
         // - decoder1 constructed in mmap mode (gets a filename)
         // - decoder2 default-constructed (without a filename)
-        FECDecoder decoder1(5000, MemoryUsageMode::USE_MMAP, "1234_body");
+        std::string obj_id = random_string();
+        FECDecoder decoder1(5000, MemoryUsageMode::USE_MMAP, obj_id);
         auto filename1 = decoder1.GetFileName();
         FECDecoder decoder2;
         decoder2 = std::move(decoder1);
@@ -819,7 +838,8 @@ BOOST_AUTO_TEST_CASE(fec_test_decoder_move_assignment_operator)
         // - decoder1 default-constructed
         // - decoder2 constructed in mmap mode with an obj_id
         FECDecoder decoder1;
-        FECDecoder decoder2(5000, MemoryUsageMode::USE_MMAP, "1234_body");
+        std::string obj_id = random_string();
+        FECDecoder decoder2(5000, MemoryUsageMode::USE_MMAP, obj_id);
         auto filename2 = decoder2.GetFileName();
         decoder2 = std::move(decoder1);
         // In this case, decoder1 does not own a file. Hence, the move
@@ -832,7 +852,7 @@ BOOST_AUTO_TEST_CASE(fec_test_decoder_move_assignment_operator)
         // - decoder2 default-constructed (also in memory mode, the default)
         FECDecoder decoder1(5000, MemoryUsageMode::USE_MEMORY);
         FECDecoder decoder2;
-        decoder2 = std::move(decoder1);
+        BOOST_CHECK_NO_THROW(decoder2 = std::move(decoder1));
         // no checks required, as there is no files. just make sure = operator
         // does not throw.
     }
@@ -854,7 +874,8 @@ void test_decode_using_moved_decoder(size_t n_uncoded_chunks, MemoryUsageMode me
         // default construct in memory mode
         FECDecoder decoder;
         // Move a non default constructed FECDecoder into decoder
-        decoder = FECDecoder(data_size, memory_usage_mode, "1234_header");
+        std::string obj_id = random_string();
+        decoder = FECDecoder(data_size, memory_usage_mode, obj_id);
         for (size_t i = 0; i < n_encoded_chunks; i++) {
             decoder.ProvideChunk(test_data.encoded_chunks[i].data(), test_data.chunk_ids[i]);
         }
@@ -918,7 +939,7 @@ void recovery_test(size_t n_uncoded_chunks, size_t n_overhead_chunks, size_t abo
     size_t data_size = FEC_CHUNK_SIZE * n_uncoded_chunks;
     generate_encoded_chunks(data_size, test_data, n_overhead_chunks);
 
-    std::string obj_id = "1234_body";
+    std::string obj_id = random_string();
 
     FECDecoder first_decoder(data_size, MemoryUsageMode::USE_MMAP, obj_id);
 
@@ -998,7 +1019,7 @@ void test_fecdecoder_recovery_after_decoding(size_t n_uncoded_chunks)
     generate_encoded_chunks(data_size, test_data, n_overhead_chunks);
     size_t n_encoded_chunks = n_uncoded_chunks + n_overhead_chunks;
 
-    std::string obj_id = "1234_body";
+    std::string obj_id = random_string();
 
     // First session
     {
@@ -1047,7 +1068,7 @@ void test_fecdecoder_recovery_with_N_decoders(size_t n_uncoded_chunks)
 
     generate_encoded_chunks(data_size, test_data, n_overhead_chunks);
 
-    std::string obj_id = "1234_body";
+    std::string obj_id = random_string();
 
     std::vector<std::unique_ptr<FECDecoder>> decoders_vec;
     for (size_t i = 0; i < n_encoded_chunks - 1; i++) {
