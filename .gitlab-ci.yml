@@ -126,3 +126,61 @@ test:i686:
     - build:i686
   script:
     - build/src/test/test_bitcoin
+
+deb-packages:
+  stage: test
+  tags:
+    - deb-packer
+  only:
+    - tags
+  dependencies: []
+  timeout: 12h
+  script:
+    - blocksat-build -p bitcoin-satellite --pbuilder --aptly --aptly-test -o build/ $CI_COMMIT_TAG
+  artifacts:
+    paths:
+      - build/
+
+rpm-packages:
+  stage: test
+  tags:
+    - rpm-packer
+  only:
+    - tags
+  dependencies: []
+  timeout: 12h
+  script:
+    - sed -i "/\"epel-7-x86_64\",/d" /src/satellite-pkg/config/build_info.json
+    - blocksat-build -p bitcoin-satellite --mock $CI_COMMIT_TAG
+
+.pkg-upload:
+  stage: deploy
+  dependencies: []
+  when: manual
+  only:
+    variables:
+      - $CI_COMMIT_TAG =~ /^v(\d+\.)(\d+\.)(\d+)-satellite(\d+\.)(\d+\.)(\d+)$/
+
+aptly:
+  extends: .pkg-upload
+  tags:
+    - deb-packer
+  dependencies:
+    - deb-packages
+  script:
+    - /src/satellite-pkg/tools/pbuilder.py upload build/
+
+launchpad:
+  extends: .pkg-upload
+  tags:
+    - deb-packer
+  script:
+    - blocksat-build -p bitcoin-satellite --upload $CI_COMMIT_TAG
+
+copr:
+  extends: .pkg-upload
+  tags:
+    - rpm-packer
+  script:
+    - sed -i "/\"epel-7-x86_64\",/d" /src/satellite-pkg/config/build_info.json
+    - blocksat-build -p bitcoin-satellite --upload $CI_COMMIT_TAG
