@@ -1,9 +1,9 @@
 variables:
-  UBUNTU_BUILDER: $DOCKER_REGISTRY/satellite/bitcoinsatellite/ubuntu-builder:latest
-  FEDORA_BUILDER: $DOCKER_REGISTRY/satellite/bitcoinsatellite/fedora-builder:latest
-  CENTOS_BUILDER: $DOCKER_REGISTRY/satellite/bitcoinsatellite/centos-builder:latest
-  I686_BUILDER: $DOCKER_REGISTRY/satellite/bitcoinsatellite/i686-builder:latest
-  ARM_BUILDER: $DOCKER_REGISTRY/satellite/bitcoinsatellite/arm-builder:latest
+  UBUNTU_BUILDER: $DOCKER_REGISTRY/satellite/bitcoinsatellite/ubuntu-builder:$CI_COMMIT_SHA
+  FEDORA_BUILDER: $DOCKER_REGISTRY/satellite/bitcoinsatellite/fedora-builder:$CI_COMMIT_SHA
+  CENTOS_BUILDER: $DOCKER_REGISTRY/satellite/bitcoinsatellite/centos-builder:$CI_COMMIT_SHA
+  I686_BUILDER: $DOCKER_REGISTRY/satellite/bitcoinsatellite/i686-builder:$CI_COMMIT_SHA
+  ARM_BUILDER: $DOCKER_REGISTRY/satellite/bitcoinsatellite/arm-builder:$CI_COMMIT_SHA
 
 builders:
   image: docker
@@ -12,24 +12,32 @@ builders:
     - k8s-docker
   services:
     - docker:19-dind
-  only:
-    changes:
-       - docker/**/*
-       - depends/**/*
   before_script:
     - echo "$CI_BUILD_TOKEN" | docker login -u gitlab-ci-token --password-stdin $DOCKER_REGISTRY
   parallel:
     matrix:
-      - IMAGE: ["ubuntu-builder", "fedora-builder", "centos-builder", "i686-builder", "arm-builder"]
+      - BUILDER: ["ubuntu-builder", "fedora-builder", "centos-builder", "i686-builder", "arm-builder"]
   variables:
-    TAG: $DOCKER_REGISTRY/satellite/bitcoinsatellite/$IMAGE:latest
+    IMAGE: $DOCKER_REGISTRY/satellite/bitcoinsatellite/$BUILDER
     DOCKER_DRIVER: overlay2
     DOCKER_HOST: tcp://localhost:2375
     DOCKER_TLS_CERTDIR: ""
+  timeout: 2h
   script:
-    - docker pull $TAG || true
-    - docker build --cache-from $TAG -f docker/$IMAGE.docker -t $TAG --build-arg BUILDKIT_INLINE_CACHE=1 .
-    - docker push $TAG
+    - docker pull $IMAGE:$CI_COMMIT_REF_SLUG || docker pull $IMAGE:latest || true
+    - >
+      docker build
+      -f docker/$BUILDER.docker
+      --cache-from $IMAGE:$CI_COMMIT_REF_SLUG
+      --cache-from $IMAGE:latest
+      --build-arg BUILDKIT_INLINE_CACHE=1
+      -t $IMAGE:$CI_COMMIT_SHA
+      -t $IMAGE:$CI_COMMIT_REF_SLUG
+      -t $IMAGE:latest
+      .
+    - docker push $IMAGE:$CI_COMMIT_SHA
+    - docker push $IMAGE:$CI_COMMIT_REF_SLUG
+    - if [ $CI_COMMIT_BRANCH == "master" ]; then docker push $IMAGE:latest; fi
 
 .build:
   stage: build
