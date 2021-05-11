@@ -10,7 +10,7 @@ static const std::array<MemoryUsageMode, 2> memory_usage_modes{MemoryUsageMode::
 
 #define DIV_CEIL(a, b) (((a) + (b)-1) / (b))
 
-constexpr size_t default_encoding_overhead = 5;
+constexpr size_t default_encoding_overhead = 10;
 
 struct FecTestingSetup : public BasicTestingSetup {
     /**
@@ -1013,10 +1013,9 @@ void test_fecdecoder_recovery_after_decoding(size_t n_uncoded_chunks)
     // recoverability of the chunks on the subsequent session.
 
     TestData test_data;
-    size_t n_overhead_chunks = 5;
     size_t data_size = FEC_CHUNK_SIZE * n_uncoded_chunks;
-    generate_encoded_chunks(data_size, test_data, n_overhead_chunks);
-    size_t n_encoded_chunks = n_uncoded_chunks + n_overhead_chunks;
+    generate_encoded_chunks(data_size, test_data, default_encoding_overhead);
+    size_t n_encoded_chunks = n_uncoded_chunks + default_encoding_overhead;
 
     std::string obj_id = random_string();
 
