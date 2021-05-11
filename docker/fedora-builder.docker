@@ -8,6 +8,7 @@ RUN dnf install -y \
 	autoconf \
 	automake \
 	boost-devel \
+	ccache \
 	gcc \
 	gcc-c++ \
 	git \
