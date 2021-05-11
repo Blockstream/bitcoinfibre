@@ -143,6 +143,19 @@ test:i686:
   script:
     - build/src/test/test_bitcoin
 
+# Build Debian packages using pbuilder
+# Make sure to:
+# - Define the PBUILDER_CACHE_DIR env var to control the pbuilder cache
+#   directory used within the deb-packer container. Change it to a directory
+#   within $CI_PROJECT_DIR such that it can ultimately be cached via Gitlab CI.
+# - Cache the apt and ccache directories separately per pbuilder target.
+# - Use separate artifacts archive names for each pbuilder target so that they
+#   don't overwrite each other on the aptly job.
+# - Use option --aptly to enable Blockstream's Aptly repository as an apt
+#   package source on pbuilder builds. This is used to download libdb4.8
+#   dependencies directly from the Aptly repository.
+# - Use option --aptly-test so that this job does not ship the build products to
+#   the Aptly server yet. Wait to upload the packages on the deploy stage.
 deb-packages:
   stage: test
   tags:
@@ -151,11 +164,43 @@ deb-packages:
     - tags
   dependencies: []
   timeout: 12h
-  script:
-    - blocksat-build -p bitcoin-satellite --pbuilder --aptly --aptly-test -o build/ $CI_COMMIT_TAG
-  artifacts:
+  parallel:
+    matrix:
+      - TARGET: [
+        "buster-amd64",
+        "buster-i386",
+        "buster-arm64",
+        "buster-armhf",
+        "stretch-amd64",
+        "stretch-i386",
+        "stretch-arm64",
+        "stretch-armhf",
+        "raspbian-buster-armhf",
+        "raspbian-stretch-armhf"
+        ]
+  variables:
+    PBUILDER_CACHE_DIR: $CI_PROJECT_DIR/cache/pbuilder
+    ARTIFACTS_DIR: $CI_PROJECT_DIR/artifacts/
+  cache:
+    key: "pbuilder-$TARGET"
     paths:
-      - build/
+      - $PBUILDER_CACHE_DIR/aptcache/
+      - $PBUILDER_CACHE_DIR/ccache/
+      - $PBUILDER_CACHE_DIR/$TARGET-base.tgz
+  script:
+    - >
+      blocksat-build
+      -p bitcoin-satellite
+      $CI_COMMIT_TAG
+      --pbuilder
+      --pbuilder-target $TARGET
+      --aptly
+      --aptly-test
+      -o $ARTIFACTS_DIR
+  artifacts:
+    name: "pbuilder-$TARGET"
+    paths:
+      - $ARTIFACTS_DIR
 
 rpm-packages:
   stage: test
@@ -165,9 +210,17 @@ rpm-packages:
     - tags
   dependencies: []
   timeout: 12h
+  parallel:
+    matrix:
+      - TARGET: [
+        "epel-8-x86_64",
+        "fedora-32-x86_64",
+        "fedora-32-i386",
+        "fedora-33-x86_64",
+        "fedora-33-i386"
+        ]
   script:
-    - sed -i "/\"epel-7-x86_64\",/d" /src/satellite-pkg/config/build_info.json
-    - blocksat-build -p bitcoin-satellite --mock $CI_COMMIT_TAG
+    - blocksat-build -p bitcoin-satellite $CI_COMMIT_TAG --mock --mock-target $TARGET
 
 .pkg-upload:
   stage: deploy
@@ -184,7 +237,7 @@ aptly:
   dependencies:
     - deb-packages
   script:
-    - /src/satellite-pkg/tools/pbuilder.py upload build/
+    - /src/blocksat-packages/tools/pbuilder.py upload artifacts/
 
 launchpad:
   extends: .pkg-upload
@@ -198,5 +251,4 @@ copr:
   tags:
     - rpm-packer
   script:
-    - sed -i "/\"epel-7-x86_64\",/d" /src/satellite-pkg/config/build_info.json
     - blocksat-build -p bitcoin-satellite --upload $CI_COMMIT_TAG
