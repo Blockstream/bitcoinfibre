@@ -9,6 +9,7 @@ RUN apt update && DEBIAN_FRONTEND="noninteractive" apt install -y \
 	autotools-dev \
 	bsdmainutils \
 	build-essential \
+	ccache \
 	clang \
 	libboost-filesystem-dev \
 	libboost-system-dev \
