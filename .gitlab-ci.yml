@@ -217,7 +217,9 @@ rpm-packages:
         "fedora-32-x86_64",
         "fedora-32-i386",
         "fedora-33-x86_64",
-        "fedora-33-i386"
+        "fedora-33-i386",
+        "fedora-34-x86_64",
+        "fedora-34-i386"
         ]
   script:
     - blocksat-build -p bitcoin-satellite $CI_COMMIT_TAG --mock --mock-target $TARGET
@@ -237,7 +239,7 @@ aptly:
   dependencies:
     - deb-packages
   script:
-    - /src/blocksat-packages/tools/pbuilder.py upload artifacts/
+    - blocksat-aptly upload artifacts/
 
 launchpad:
   extends: .pkg-upload
@@ -251,4 +253,5 @@ copr:
   tags:
     - rpm-packer
   script:
+    - sed -i "/\"epel-7-x86_64\",/d" /src/blocksat-packages/config/build_info.json
     - blocksat-build -p bitcoin-satellite --upload $CI_COMMIT_TAG
