@@ -790,10 +790,10 @@ static void ProcessBlockThread(ChainstateManager* chainman) {
                         pblockindex = LookupBlockIndex(header.header.GetHash());
                     }
                     block.chain_lookup = true;
-                    if (pblockindex) {
-                        /* We do have the block already. Drop the partial block
-                         * immediately and add it to setBlocksReceived, so that its
-                         * subsequent chunks are ignored.*/
+                    if (pblockindex && (pblockindex->nStatus & BLOCK_HAVE_DATA)) {
+                        /* We do have the full block already. Drop the partial
+                         * block immediately and add it to setBlocksReceived, so
+                         * that its subsequent chunks are ignored. */
                         lock.unlock();
                         std::lock_guard<std::recursive_mutex> udpNodesLock(cs_mapUDPNodes);
                         setBlocksReceived.insert(process_block.first);
