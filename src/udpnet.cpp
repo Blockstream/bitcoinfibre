@@ -7,29 +7,29 @@
 #include <config/bitcoin-config.h>
 #endif
 
+#include <ringbuffer.h>
+#include <throttle.h>
 #include <udpnet.h>
 #include <udprelay.h>
-#include <throttle.h>
-#include <ringbuffer.h>
 
 #include <bloom.h>
 #include <chainparams.h>
-#include <consensus/validation.h>
 #include <compat/endian.h>
+#include <consensus/validation.h>
 #include <crypto/poly1305.h>
 #include <hash.h>
 #include <init.h> // for ShutdownRequested()
-#include <validation.h>
+#include <logging.h>
 #include <netbase.h>
 #include <primitives/block.h>
 #include <primitives/transaction.h>
 #include <txmempool.h>
-#include <logging.h>
 #include <util/strencodings.h>
 #include <util/time.h>
+#include <validation.h>
 
-#include <sys/socket.h>
 #include <sys/ioctl.h>
+#include <sys/socket.h>
 
 #include <event2/event.h>
 
@@ -48,12 +48,12 @@
 #include <thread>
 
 #ifndef WIN32
-#include <sched.h>
 #include <pthread.h>
+#include <sched.h>
 #include <unistd.h>
 #endif
 
-#define to_millis_double(t) (std::chrono::duration_cast<std::chrono::duration<double, std::chrono::milliseconds::period> >(t).count())
+#define to_millis_double(t) (std::chrono::duration_cast<std::chrono::duration<double, std::chrono::milliseconds::period>>(t).count())
 
 template <typename Duration>
 double to_seconds(Duration d)
@@ -67,7 +67,8 @@ double to_seconds(Duration d)
  * Copies at most count-1 from src to dest and places the terminating null
  * character at the last dst position.
  */
-static char *strncpy_wrapper(char *dest, const char *src, std::size_t count) {
+static char* strncpy_wrapper(char* dest, const char* src, std::size_t count)
+{
     strncpy(dest, src, count - 1);
     dest[count - 1] = '\0';
     return dest;
@@ -79,7 +80,7 @@ std::recursive_mutex cs_mapUDPNodes;
 std::map<CService, UDPConnectionState> mapUDPNodes;
 bool maybe_have_write_nodes;
 
-static std::map<int64_t, std::tuple<CService, uint64_t, size_t> > nodesToRepeatDisconnect;
+static std::map<int64_t, std::tuple<CService, uint64_t, size_t>> nodesToRepeatDisconnect;
 static std::map<CService, UDPConnectionInfo> mapPersistentNodes;
 
 static int g_mcast_log_interval = 10;
@@ -95,19 +96,20 @@ static NodeContext* g_node_context; // Initialized by InitializeUDPConnections
  * particular multicast ip:port by joining the multicast group.
  */
 namespace {
-    std::map<std::tuple<CService, int, uint16_t>, UDPMulticastInfo> mapMulticastNodes;
-    const std::string multicast_pass = "multicast";
-    uint64_t const multicast_magic = Hash(multicast_pass).GetUint64(0);
-}
+std::map<std::tuple<CService, int, uint16_t>, UDPMulticastInfo> mapMulticastNodes;
+const std::string multicast_pass = "multicast";
+uint64_t const multicast_magic = Hash(multicast_pass).GetUint64(0);
+} // namespace
 uint64_t const multicast_checksum_magic = htole64(multicast_magic);
 
 //TODO: The checksum stuff is not endian-safe (esp the poly impl):
-static void FillChecksum(uint64_t magic, UDPMessage& msg, const unsigned int length) {
+static void FillChecksum(uint64_t magic, UDPMessage& msg, const unsigned int length)
+{
     assert(length <= sizeof(UDPMessage));
 
     uint8_t key[POLY1305_KEYLEN]; // (32 bytes)
-    memcpy(key,      &magic, sizeof(magic));
-    memcpy(key + 8,  &magic, sizeof(magic));
+    memcpy(key, &magic, sizeof(magic));
+    memcpy(key + 8, &magic, sizeof(magic));
     memcpy(key + 16, &magic, sizeof(magic));
     memcpy(key + 24, &magic, sizeof(magic));
 
@@ -118,21 +120,22 @@ static void FillChecksum(uint64_t magic, UDPMessage& msg, const unsigned int len
 
     for (unsigned int i = 0; i < length - 16; i += 8) {
         for (unsigned int j = 0; j < 8 && i + j < length - 16; j++) {
-            ((unsigned char*)&msg.header.msg_type) [i+j] ^= ((unsigned char*)&msg.header.chk1)[j];
+            ((unsigned char*)&msg.header.msg_type)[i + j] ^= ((unsigned char*)&msg.header.chk1)[j];
         }
     }
 }
-static bool CheckChecksum(uint64_t magic, UDPMessage& msg, const unsigned int length) {
+static bool CheckChecksum(uint64_t magic, UDPMessage& msg, const unsigned int length)
+{
     assert(length <= sizeof(UDPMessage));
     for (unsigned int i = 0; i < length - 16; i += 8) {
         for (unsigned int j = 0; j < 8 && i + j < length - 16; j++) {
-            ((unsigned char*)&msg.header.msg_type) [i+j] ^= ((unsigned char*)&msg.header.chk1)[j];
+            ((unsigned char*)&msg.header.msg_type)[i + j] ^= ((unsigned char*)&msg.header.chk1)[j];
         }
     }
 
     uint8_t key[POLY1305_KEYLEN]; // (32 bytes)
-    memcpy(key,      &magic, sizeof(magic));
-    memcpy(key + 8,  &magic, sizeof(magic));
+    memcpy(key, &magic, sizeof(magic));
+    memcpy(key + 8, &magic, sizeof(magic));
     memcpy(key + 16, &magic, sizeof(magic));
     memcpy(key + 24, &magic, sizeof(magic));
 
@@ -142,13 +145,12 @@ static bool CheckChecksum(uint64_t magic, UDPMessage& msg, const unsigned int le
 }
 
 
-
 /**
  * Init/shutdown logic follows
  */
 
 static struct event_base* event_base_read = nullptr;
-static event *timer_event;
+static event* timer_event;
 static std::vector<event*> read_events;
 static struct timeval timer_interval;
 
@@ -179,7 +181,8 @@ struct PerGroupMessageQueue {
 
     /* Find the next buffer with data available for transmission, while
      * respecting buffer priorities. */
-    inline void NextBuff() {
+    inline void NextBuff()
+    {
         for (size_t i = 0; i < buffs.size(); i++) {
             if (!buffs[i].IsEmpty()) {
                 buff_id = i;
@@ -196,14 +199,14 @@ struct PerGroupMessageQueue {
     std::chrono::steady_clock::time_point next_send;
     PerGroupMessageQueue() : buff_id(-1), bw(0), multicast(false), unlimited(0),
                              ratelimiter(0) {}
-    PerGroupMessageQueue(PerGroupMessageQueue&& q) =delete;
+    PerGroupMessageQueue(PerGroupMessageQueue&& q) = delete;
 };
 static std::map<size_t, PerGroupMessageQueue> mapTxQueues;
 
 static void ThreadRunReadEventLoop() { event_base_dispatch(event_base_read); }
 static void do_send_messages();
 static void send_messages_flush_and_break();
-static std::map<size_t, PerGroupMessageQueue> init_tx_queues(const std::vector<std::pair<unsigned short, uint64_t> >& group_list,
+static std::map<size_t, PerGroupMessageQueue> init_tx_queues(const std::vector<std::pair<unsigned short, uint64_t>>& group_list,
                                                              const std::vector<UDPMulticastInfo>& multicast_list);
 static void ThreadRunWriteEventLoop() { do_send_messages(); }
 
@@ -218,12 +221,13 @@ static bool ParseUDPMulticastInfo(const std::string& s, UDPMulticastInfo& info);
 static bool ParseUDPMulticastTxInfo(const std::string& s, UDPMulticastInfo& info);
 static bool GetUDPMulticastInfo(std::vector<UDPMulticastInfo>& v);
 
-static void MulticastBackfillThread(const CService& mcastNode, const UDPMulticastInfo *info);
+static void MulticastBackfillThread(const CService& mcastNode, const UDPMulticastInfo* info);
 static void LaunchMulticastBackfillThreads();
 static std::vector<std::thread> mcast_tx_threads;
 
 
-static void AddConnectionFromString(const std::string& node, bool fTrust) {
+static void AddConnectionFromString(const std::string& node, bool fTrust)
+{
     size_t host_port_end = node.find(',');
     size_t local_pass_end = node.find(',', host_port_end + 1);
     size_t remote_pass_end = node.find(',', local_pass_end + 1);
@@ -244,7 +248,7 @@ static void AddConnectionFromString(const std::string& node, bool fTrust) {
     uint64_t local_magic = Hash(local_pass).GetUint64(0);
 
     std::string remote_pass;
-    if(remote_pass_end == std::string::npos)
+    if (remote_pass_end == std::string::npos)
         remote_pass = node.substr(local_pass_end + 1);
     else
         remote_pass = node.substr(local_pass_end + 1, remote_pass_end - local_pass_end - 1);
@@ -259,7 +263,8 @@ static void AddConnectionFromString(const std::string& node, bool fTrust) {
     OpenPersistentUDPConnectionTo(addr, local_magic, remote_magic, fTrust, UDP_CONNECTION_TYPE_NORMAL, group, udp_mode_t::unicast);
 }
 
-static void AddConfAddedConnections() {
+static void AddConfAddedConnections()
+{
     if (gArgs.IsArgSet("-addudpnode")) {
         for (const std::string& node : gArgs.GetArgs("-addudpnode")) {
             AddConnectionFromString(node, false);
@@ -272,7 +277,8 @@ static void AddConfAddedConnections() {
     }
 }
 
-static void CloseSocketsAndReadEvents() {
+static void CloseSocketsAndReadEvents()
+{
     for (event* ev : read_events)
         event_free(ev);
     for (int sock : udp_socks)
@@ -282,18 +288,16 @@ static void CloseSocketsAndReadEvents() {
 }
 
 /* Find the IPv4 address corresponding to a given interface name */
-static struct in_addr GetIfIpAddr(const char* const ifname) {
+static struct in_addr GetIfIpAddr(const char* const ifname)
+{
     struct ifaddrs* myaddrs;
     struct in_addr res_sin_addr;
     bool if_ip_found = false;
 
-    if (getifaddrs(&myaddrs) == 0)
-    {
-        for (struct ifaddrs* ifa = myaddrs; ifa != nullptr; ifa = ifa->ifa_next)
-        {
+    if (getifaddrs(&myaddrs) == 0) {
+        for (struct ifaddrs* ifa = myaddrs; ifa != nullptr; ifa = ifa->ifa_next) {
             if (ifa->ifa_addr == nullptr) continue;
-            if (ifa->ifa_addr->sa_family == AF_INET)
-            {
+            if (ifa->ifa_addr->sa_family == AF_INET) {
                 struct sockaddr_in* s4 = (struct sockaddr_in*)(ifa->ifa_addr);
                 char astring[INET_ADDRSTRLEN];
                 inet_ntop(AF_INET, &(s4->sin_addr), astring, INET_ADDRSTRLEN);
@@ -321,8 +325,9 @@ static struct in_addr GetIfIpAddr(const char* const ifname) {
  * Initialize the multicast tx services configured via `udpmulticasttx` and the
  * multicast reception groups configured via `udpmulticast`.
  */
-static bool InitializeUDPMulticast(std::vector<int> &udp_socks,
-                                   std::vector<UDPMulticastInfo> &multicast_list) {
+static bool InitializeUDPMulticast(std::vector<int>& udp_socks,
+                                   std::vector<UDPMulticastInfo>& multicast_list)
+{
     size_t group = udp_socks.size() - 1;
     std::map<std::pair<CService, int>, int> physical_idx_map;
     std::map<std::pair<CService, int>, int> logical_idx_map;
@@ -355,7 +360,7 @@ static bool InitializeUDPMulticast(std::vector<int> &udp_socks,
         memcpy(&wildcard.sin6_addr, &in6addr_any, sizeof(in6addr_any));
         wildcard.sin6_port = htons(multicast_port);
 
-        if (bind(udp_socks.back(), (sockaddr*) &wildcard, sizeof(wildcard))) {
+        if (bind(udp_socks.back(), (sockaddr*)&wildcard, sizeof(wildcard))) {
             LogPrintf("UDP: bind failed: %s\n", strerror(errno));
             return false;
         }
@@ -422,7 +427,7 @@ static bool InitializeUDPMulticast(std::vector<int> &udp_socks,
             /* Multicast Rx mode */
 
             /* Make receive buffer large enough to hold 10000 max-length packets */
-            const int rcvbuf = 10000*PACKET_SIZE;
+            const int rcvbuf = 10000 * PACKET_SIZE;
             if (setsockopt(udp_socks.back(), SOL_SOCKET, SO_RCVBUF, &rcvbuf, sizeof(int)) != 0) {
                 LogPrintf("UDP: setsockopt(SO_RCVBUF) failed: %s\n", strerror(errno));
                 return false;
@@ -442,7 +447,7 @@ static bool InitializeUDPMulticast(std::vector<int> &udp_socks,
                           "Please check and configure the maximum receive buffer size allowed in the OS.\n",
                           rcvbuf, actual_rcvbuf);
 #ifdef __linux__
-                const int tgtbuf = (2*rcvbuf) + 8;
+                const int tgtbuf = (2 * rcvbuf) + 8;
                 LogPrintf("UDP: You can check by running:\n\n> sysctl net.core.rmem_max\n\n"
                           "If the maximum is less than %d, you can increase it by running:\n\n"
                           "> sysctl -w net.core.rmem_max=%d\n\n",
@@ -502,7 +507,7 @@ static bool InitializeUDPMulticast(std::vector<int> &udp_socks,
                 logical_idx_map[addr_ifindex_pair]++;
 
             mcast_info.physical_idx = physical_idx_map[addr_ifindex_pair];
-            mcast_info.logical_idx  = logical_idx_map[addr_ifindex_pair];
+            mcast_info.logical_idx = logical_idx_map[addr_ifindex_pair];
 
             LogPrintf("UDP: multicast tx %lu-%lu:\n"
                       "    - multiaddr: %s\n"
@@ -566,7 +571,8 @@ static bool InitializeUDPMulticast(std::vector<int> &udp_socks,
 }
 
 /* Get information from the UDP multicast Rx instances */
-UniValue UdpMulticastRxInfoToJson() {
+UniValue UdpMulticastRxInfoToJson()
+{
     UniValue ret(UniValue::VOBJ);
     std::unique_lock<std::recursive_mutex> lock(cs_mapUDPNodes);
     const auto t_now = std::chrono::steady_clock::now();
@@ -575,21 +581,21 @@ UniValue UdpMulticastRxInfoToJson() {
             continue;
 
         /* Average bitrate since the last RPC call */
-        UDPMulticastStats& stats  = node.second.stats;
-        const double elapsed      = to_millis_double(t_now - stats.t_last_rpc);
-        stats.t_last_rpc          = t_now;
-        uint64_t new_bytes        = stats.rcvd_bytes - stats.last_rcvd_bytes_rpc;
+        UDPMulticastStats& stats = node.second.stats;
+        const double elapsed = to_millis_double(t_now - stats.t_last_rpc);
+        stats.t_last_rpc = t_now;
+        uint64_t new_bytes = stats.rcvd_bytes - stats.last_rcvd_bytes_rpc;
         stats.last_rcvd_bytes_rpc = stats.rcvd_bytes;
-        const double bitrate_kbps = (double) (new_bytes * 8)/ (elapsed);
+        const double bitrate_kbps = (double)(new_bytes * 8) / (elapsed);
 
         double bitrate;
         std::string unit;
         if (bitrate_kbps > 1e3) {
             bitrate = bitrate_kbps / 1000;
-            unit    = "Mbps";
+            unit = "Mbps";
         } else {
             bitrate = bitrate_kbps;
-            unit    = "kbps";
+            unit = "kbps";
         }
 
         UniValue info(UniValue::VOBJ);
@@ -606,22 +612,23 @@ UniValue UdpMulticastRxInfoToJson() {
     return ret;
 }
 
-bool InitializeUDPConnections(NodeContext* const node_context) {
+bool InitializeUDPConnections(NodeContext* const node_context)
+{
     assert(udp_write_threads.empty() && !udp_read_thread);
     g_node_context = node_context;
 
     if (gArgs.IsArgSet("-udpmulticastloginterval") && (atoi(gArgs.GetArg("-udpmulticastloginterval", "")) > 0))
         g_mcast_log_interval = atoi(gArgs.GetArg("-udpmulticastloginterval", ""));
 
-    const std::vector<std::pair<unsigned short, uint64_t> > group_list(GetUDPInboundPorts());
+    const std::vector<std::pair<unsigned short, uint64_t>> group_list(GetUDPInboundPorts());
     for (std::pair<unsigned short, uint64_t> port : group_list) {
         udp_socks.push_back(socket(AF_INET6, SOCK_DGRAM, 0));
         assert(udp_socks.back());
 
         int opt = 1;
-        assert(setsockopt(udp_socks.back(), SOL_SOCKET, SO_REUSEADDR, &opt,  sizeof(opt)) == 0);
+        assert(setsockopt(udp_socks.back(), SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt)) == 0);
         opt = 0;
-        assert(setsockopt(udp_socks.back(), IPPROTO_IPV6, IPV6_V6ONLY, &opt,  sizeof(opt)) == 0);
+        assert(setsockopt(udp_socks.back(), IPPROTO_IPV6, IPV6_V6ONLY, &opt, sizeof(opt)) == 0);
         fcntl(udp_socks.back(), F_SETFL, fcntl(udp_socks.back(), F_GETFL) | O_NONBLOCK);
 
         struct sockaddr_in6 wildcard;
@@ -630,7 +637,7 @@ bool InitializeUDPConnections(NodeContext* const node_context) {
         memcpy(&wildcard.sin6_addr, &in6addr_any, sizeof(in6addr_any));
         wildcard.sin6_port = htons(port.first);
 
-        if (bind(udp_socks.back(), (sockaddr*) &wildcard, sizeof(wildcard))) {
+        if (bind(udp_socks.back(), (sockaddr*)&wildcard, sizeof(wildcard))) {
             CloseSocketsAndReadEvents();
             return false;
         }
@@ -656,7 +663,7 @@ bool InitializeUDPConnections(NodeContext* const node_context) {
     }
 
     for (int socket : udp_socks) {
-        event *read_event = event_new(event_base_read, socket, EV_READ | EV_PERSIST, read_socket_func, nullptr);
+        event* read_event = event_new(event_base_read, socket, EV_READ | EV_PERSIST, read_socket_func, nullptr);
         if (!read_event) {
             event_base_free(event_base_read);
             CloseSocketsAndReadEvents();
@@ -673,13 +680,13 @@ bool InitializeUDPConnections(NodeContext* const node_context) {
         return false;
     }
     timer_interval.tv_sec = 0;
-    timer_interval.tv_usec = 500*1000;
+    timer_interval.tv_usec = 500 * 1000;
     evtimer_add(timer_event, &timer_interval);
 
     /* Initialize Tx message queues */
     mapTxQueues = init_tx_queues(group_list, multicast_list);
 
-    udp_write_threads.emplace_back(boost::bind(&TraceThread<boost::function<void ()> >, "udpwrite", &ThreadRunWriteEventLoop));
+    udp_write_threads.emplace_back(boost::bind(&TraceThread<boost::function<void()>>, "udpwrite", &ThreadRunWriteEventLoop));
 
     /* Add persistent connections to pre-defined udpnodes or trustedudpnodes */
     AddConfAddedConnections();
@@ -705,7 +712,8 @@ bool InitializeUDPConnections(NodeContext* const node_context) {
     return true;
 }
 
-void StopUDPConnections() {
+void StopUDPConnections()
+{
     if (!udp_read_thread)
         return;
 
@@ -741,16 +749,17 @@ void StopUDPConnections() {
 }
 
 
-
 /**
  * Network handling follows
  */
 
-static std::map<CService, UDPConnectionState>::iterator silent_disconnect(const std::map<CService, UDPConnectionState>::iterator& it) {
+static std::map<CService, UDPConnectionState>::iterator silent_disconnect(const std::map<CService, UDPConnectionState>::iterator& it)
+{
     return mapUDPNodes.erase(it);
 }
 
-static std::map<CService, UDPConnectionState>::iterator send_and_disconnect(const std::map<CService, UDPConnectionState>::iterator& it) {
+static std::map<CService, UDPConnectionState>::iterator send_and_disconnect(const std::map<CService, UDPConnectionState>::iterator& it)
+{
     UDPMessage msg;
     msg.header.msg_type = MSG_TYPE_DISCONNECT;
     SendMessage(msg, sizeof(UDPMessageHeader), false, *it);
@@ -763,7 +772,8 @@ static std::map<CService, UDPConnectionState>::iterator send_and_disconnect(cons
     return silent_disconnect(it);
 }
 
-void DisconnectNode(const std::map<CService, UDPConnectionState>::iterator& it) {
+void DisconnectNode(const std::map<CService, UDPConnectionState>::iterator& it)
+{
     send_and_disconnect(it);
 }
 
@@ -781,15 +791,16 @@ static void UpdateUdpMulticastRxBytes(const UDPMulticastInfo& mcast_info, const 
     if (elapsed > (1000 * g_mcast_log_interval)) {
         uint64_t new_bytes = stats.rcvd_bytes - stats.last_rcvd_bytes_print;
         LogPrint(BCLog::UDPMCAST, "UDP multicast group %zu: Average bit rate %7.2f Mbit/sec (%s)\n",
-            mcast_info.group,
-            (double)(new_bytes * 8) / (1000 * elapsed),
-            mcast_info.groupname);
+                 mcast_info.group,
+                 (double)(new_bytes * 8) / (1000 * elapsed),
+                 mcast_info.groupname);
         stats.t_last_print = t_now;
         stats.last_rcvd_bytes_print = stats.rcvd_bytes;
     }
 }
 
-static void read_socket_func(evutil_socket_t fd, short event, void* arg) {
+static void read_socket_func(evutil_socket_t fd, short event, void* arg)
+{
     const bool fBench = LogAcceptCategory(BCLog::BENCH);
     std::chrono::steady_clock::time_point start(std::chrono::steady_clock::now());
 
@@ -849,8 +860,7 @@ static void read_socket_func(evutil_socket_t fd, short event, void* arg) {
     const uint8_t msg_type_masked = (msg.header.msg_type & UDP_MSG_TYPE_TYPE_MASK);
 
     /* Handle multicast msgs first (no need to check connection state) */
-    if (state.connection.udp_mode == udp_mode_t::multicast)
-    {
+    if (state.connection.udp_mode == udp_mode_t::multicast) {
         if (itm == mapMulticastNodes.end()) {
             LogPrintf("Couldn't find multicast node\n");
             return;
@@ -955,7 +965,8 @@ static void read_socket_func(evutil_socket_t fd, short event, void* arg) {
 }
 
 static void OpenUDPConnectionTo(const CService& addr, const UDPConnectionInfo& info);
-static void timer_func(evutil_socket_t fd, short event, void* arg) {
+static void timer_func(evutil_socket_t fd, short event, void* arg)
+{
     ProcessDownloadTimerEvents();
 
     UDPMessage msg;
@@ -964,8 +975,8 @@ static void timer_func(evutil_socket_t fd, short event, void* arg) {
     std::unique_lock<std::recursive_mutex> lock(cs_mapUDPNodes);
 
     {
-        std::map<int64_t, std::tuple<CService, uint64_t, size_t> >::iterator itend = nodesToRepeatDisconnect.upper_bound(now);
-        for (std::map<int64_t, std::tuple<CService, uint64_t, size_t> >::const_iterator it = nodesToRepeatDisconnect.begin(); it != itend; it++) {
+        std::map<int64_t, std::tuple<CService, uint64_t, size_t>>::iterator itend = nodesToRepeatDisconnect.upper_bound(now);
+        for (std::map<int64_t, std::tuple<CService, uint64_t, size_t>>::const_iterator it = nodesToRepeatDisconnect.begin(); it != itend; it++) {
             msg.header.msg_type = MSG_TYPE_DISCONNECT;
             SendMessage(msg, sizeof(UDPMessageHeader), false, std::get<0>(it->second), std::get<1>(it->second), std::get<2>(it->second));
         }
@@ -973,7 +984,6 @@ static void timer_func(evutil_socket_t fd, short event, void* arg) {
     }
 
     for (std::map<CService, UDPConnectionState>::iterator it = mapUDPNodes.begin(); it != mapUDPNodes.end();) {
-
         if (it->second.connection.connection_type != UDP_CONNECTION_TYPE_NORMAL) {
             it++;
             continue;
@@ -1036,23 +1046,25 @@ static void timer_func(evutil_socket_t fd, short event, void* arg) {
     }
 }
 
-static inline void SendMessage(const UDPMessage& msg, const unsigned int length, PerGroupMessageQueue& queue, RingBuffer<RingBufferElement>& buff, const CService& service, const uint64_t magic) {
+static inline void SendMessage(const UDPMessage& msg, const unsigned int length, PerGroupMessageQueue& queue, RingBuffer<RingBufferElement>& buff, const CService& service, const uint64_t magic)
+{
     std::unique_lock<std::mutex> lock(non_empty_queues_cv_mutex);
     const bool was_empty = buff.IsEmpty();
     lock.unlock();
 
     buff.WriteElement([&](RingBufferElement& elem) {
-            elem.service = service;
-            elem.length  = length;
-            elem.magic   = magic;
-            memcpy(&elem.msg, &msg, length);
-        });
+        elem.service = service;
+        elem.length = length;
+        elem.magic = magic;
+        memcpy(&elem.msg, &msg, length);
+    });
 
     if (was_empty)
         non_empty_queues_cv.notify_all();
 }
 
-void SendMessage(const UDPMessage& msg, const unsigned int length, bool high_prio, const CService& service, const uint64_t magic, size_t group) {
+void SendMessage(const UDPMessage& msg, const unsigned int length, bool high_prio, const CService& service, const uint64_t magic, size_t group)
+{
     assert(length <= sizeof(UDPMessage));
     assert(mapTxQueues.count(group));
     PerGroupMessageQueue& queue = mapTxQueues[group];
@@ -1060,11 +1072,13 @@ void SendMessage(const UDPMessage& msg, const unsigned int length, bool high_pri
     SendMessage(msg, length, queue, buff, service, magic);
 }
 
-void SendMessage(const UDPMessage& msg, const unsigned int length, bool high_prio, const std::pair<const CService, UDPConnectionState>& node) {
+void SendMessage(const UDPMessage& msg, const unsigned int length, bool high_prio, const std::pair<const CService, UDPConnectionState>& node)
+{
     SendMessage(msg, length, high_prio, node.first, node.second.connection.remote_magic, node.second.connection.group);
 }
 
-static inline bool IsAnyQueueReady() {
+static inline bool IsAnyQueueReady()
+{
     bool have_work = false;
     for (auto& q : mapTxQueues) {
         PerGroupMessageQueue& queue = q.second;
@@ -1080,10 +1094,13 @@ static inline bool IsAnyQueueReady() {
 // Maximum number of consecutive transmissions from the same queue
 static int max_consecutive_tx = 10;
 
-static void do_send_messages() {
+static void do_send_messages()
+{
 #ifndef WIN32
     {
-        struct sched_param sched{sched_get_priority_max(SCHED_RR)};
+        struct sched_param sched {
+            sched_get_priority_max(SCHED_RR)
+        };
         int res = pthread_setschedparam(pthread_self(), SCHED_RR, &sched);
         LogPrintf("UDP: %s write thread priority to SCHED_RR%s\n", !res ? "Set" : "Was unable to set", !res ? "" : (res == EPERM ? " (permission denied)" : " (other error)"));
         if (res) {
@@ -1096,19 +1113,19 @@ static void do_send_messages() {
 
     // Keep one poll configuration for each queue */
     std::map<ssize_t, int> map_pollfd;
-    struct pollfd *pfds;
+    struct pollfd* pfds;
     const int nfds = mapTxQueues.size();
-    pfds = (struct pollfd *) calloc(nfds, sizeof(struct pollfd));
+    pfds = (struct pollfd*)calloc(nfds, sizeof(struct pollfd));
 
     /* Initialize state of the Tx queues and the corresponding pollfd structs */
     const std::chrono::steady_clock::time_point t_now(std::chrono::steady_clock::now());
     int i_pollfd = 0;
     for (auto& q : mapTxQueues) {
-        q.second.next_send    = t_now;
-        q.second.buff_id      = -1;
-        pfds[i_pollfd].fd     = udp_socks[q.first];
+        q.second.next_send = t_now;
+        q.second.buff_id = -1;
+        pfds[i_pollfd].fd = udp_socks[q.first];
         pfds[i_pollfd].events = POLLOUT;
-        map_pollfd[q.first]   = i_pollfd;
+        map_pollfd[q.first] = i_pollfd;
         assert(pfds[i_pollfd].revents == 0);
         i_pollfd++;
     }
@@ -1133,12 +1150,12 @@ static void do_send_messages() {
             std::chrono::steady_clock::now() + std::chrono::minutes(60));
 
         /* Iterate over Tx queues and schedule transmissions */
-        bool maybe_all_empty = true; // unless told otherwise
-        bool maybe_all_full  = (mapTxQueues.size() > 0); // likewise
+        bool maybe_all_empty = true;                    // unless told otherwise
+        bool maybe_all_full = (mapTxQueues.size() > 0); // likewise
 
         for (auto& q : mapTxQueues) {
-            PerGroupMessageQueue& queue   = q.second;
-            const size_t group            = q.first;
+            PerGroupMessageQueue& queue = q.second;
+            const size_t group = q.first;
             const std::chrono::steady_clock::time_point t_now(std::chrono::steady_clock::now());
 
             if (queue.next_send > t_now) {
@@ -1147,7 +1164,7 @@ static void do_send_messages() {
             }
 
             /* Search a higher priority non-empty buffer if... */
-            if (queue.buff_id != 0 || // we are not currently in the highest priority buffer
+            if (queue.buff_id != 0 ||                   // we are not currently in the highest priority buffer
                 queue.buffs[queue.buff_id].IsEmpty()) { // ...the current buffer is empty
                 queue.NextBuff();
             }
@@ -1159,12 +1176,12 @@ static void do_send_messages() {
             // Read from the ring buffer and send over the network
             RingBuffer<RingBufferElement>* buff = &queue.buffs[queue.buff_id];
 
-            int consecutive_tx = 0;     // packets tx'ed consecutively from this queue
+            int consecutive_tx = 0; // packets tx'ed consecutively from this queue
             bool wouldblock = false;
             /* Keep going as long as... */
-            while ((queue.buff_id != -1) && // the queue has messages to transmit
+            while ((queue.buff_id != -1) &&                                               // the queue has messages to transmit
                    (queue.unlimited || queue.ratelimiter.HasQuota(sizeof(UDPMessage))) && // the output bitrate is OK
-                   (consecutive_tx < max_consecutive_tx)) { // we are not depriving other queues
+                   (consecutive_tx < max_consecutive_tx)) {                               // we are not depriving other queues
                 // Get the next message for transmission
                 ReadProxy<RingBufferElement> rd_proxy(buff);
                 RingBufferElement* next_tx = rd_proxy.GetObj();
@@ -1183,13 +1200,13 @@ static void do_send_messages() {
                 sockaddr_storage ss = {};
                 socklen_t addrlen;
                 if (next_tx->service.IsIPv6()) {
-                    sockaddr_in6 *remoteaddr = (sockaddr_in6 *) &ss;
+                    sockaddr_in6* remoteaddr = (sockaddr_in6*)&ss;
                     remoteaddr->sin6_family = AF_INET6;
                     assert(next_tx->service.GetIn6Addr(&remoteaddr->sin6_addr));
                     remoteaddr->sin6_port = htons(next_tx->service.GetPort());
                     addrlen = sizeof(sockaddr_in6);
                 } else {
-                    sockaddr_in *remoteaddr = (sockaddr_in *) &ss;
+                    sockaddr_in* remoteaddr = (sockaddr_in*)&ss;
                     remoteaddr->sin_family = AF_INET;
                     assert(next_tx->service.GetInAddr(&remoteaddr->sin_addr));
                     remoteaddr->sin_port = htons(next_tx->service.GetPort());
@@ -1197,7 +1214,7 @@ static void do_send_messages() {
                 }
 
                 // Try to transmit
-                ssize_t res = sendto(udp_socks[group], &next_tx->msg, next_tx->length, 0, (sockaddr *) &ss, addrlen);
+                ssize_t res = sendto(udp_socks[group], &next_tx->msg, next_tx->length, 0, (sockaddr*)&ss, addrlen);
                 if (res != next_tx->length) {
                     /* Likely EAGAIN/EWOULDBLOCK. Don't advance the buffer's
                      * read pointer and try again later */
@@ -1241,7 +1258,7 @@ static void do_send_messages() {
              * NOTE: A non rate-limited queue sleeps on calls to poll() instead
              * of sleeping based on the "queue.next_send" values. */
             const uint32_t wait_ms = (queue.unlimited) ? 0 :
-                queue.ratelimiter.EstimateWait(sizeof(UDPMessage));
+                                                         queue.ratelimiter.EstimateWait(sizeof(UDPMessage));
 
             queue.next_send += std::chrono::milliseconds(wait_ms);
             t_next_tx = std::min(t_next_tx, queue.next_send);
@@ -1281,7 +1298,8 @@ static void do_send_messages() {
     }
 }
 
-UniValue TxQueueInfoToJSON()  {
+UniValue TxQueueInfoToJSON()
+{
     UniValue ret(UniValue::VOBJ);
     for (auto& q : mapTxQueues) {
         UniValue q_info(UniValue::VOBJ);
@@ -1321,7 +1339,8 @@ std::mutex block_window_map_mutex;
 std::mutex txn_window_map_mutex;
 
 static void MulticastBackfillThread(const CService& mcastNode,
-                                    const UDPMulticastInfo *info) {
+                                    const UDPMulticastInfo* info)
+{
     /* Start only after the initial sync */
     while (::ChainstateActive().IsInitialBlockDownload() && !send_messages_break)
         std::this_thread::sleep_for(std::chrono::milliseconds(50));
@@ -1332,7 +1351,7 @@ static void MulticastBackfillThread(const CService& mcastNode,
 
     /* Define the initial block height */
     const int backfill_depth = info->depth;
-    const CBlockIndex *pindex;
+    const CBlockIndex* pindex;
     {
         LOCK(cs_main);
         pindex = ::ChainActive().Tip();
@@ -1365,8 +1384,7 @@ static void MulticastBackfillThread(const CService& mcastNode,
     const auto tx_idx_pair = std::make_pair(info->physical_idx, info->logical_idx);
     std::unique_lock<std::mutex> window_map_lock(block_window_map_mutex);
     const auto res = block_window_map.insert(
-        std::make_pair(tx_idx_pair, std::make_shared<backfill_block_window>())
-        );
+        std::make_pair(tx_idx_pair, std::make_shared<backfill_block_window>()));
     window_map_lock.unlock();
     if (!res.second)
         throw std::runtime_error("Couldn't add new block window");
@@ -1405,14 +1423,14 @@ static void MulticastBackfillThread(const CService& mcastNode,
                 // protected window of blocks
                 lock.lock();
                 UDPFillMessagesFromBlock(block,
-                    block_it->second.msgs,
-                    pindex->nHeight,
-                    info->overhead_rep_blks);
+                                         block_it->second.msgs,
+                                         pindex->nHeight,
+                                         info->overhead_rep_blks);
                 pblock_window->bytes_in_window += block_it->second.msgs.size() * FEC_CHUNK_SIZE;
                 lock.unlock(); // safe to release (no other thread mutates the map)
 
                 LogPrint(BCLog::FEC, "UDP: Multicast Tx %lu-%lu - "
-                         "fill block %s (%20lu) - height %7d - %5d chunks\n",
+                                     "fill block %s (%20lu) - height %7d - %5d chunks\n",
                          info->physical_idx, info->logical_idx,
                          block_hash.ToString(), block_hash.GetUint64(0),
                          pindex->nHeight, block_it->second.msgs.size());
@@ -1443,7 +1461,7 @@ static void MulticastBackfillThread(const CService& mcastNode,
                 break;
 
             assert(b.second.idx < b.second.msgs.size());
-            const UDPMessage& msg      = b.second.msgs[b.second.idx];
+            const UDPMessage& msg = b.second.msgs[b.second.idx];
             const unsigned int msg_len = sizeof(UDPMessageHeader) + MAX_UDP_MESSAGE_LENGTH;
 
             // Update the index of the next message to be transmitted within the
@@ -1469,29 +1487,30 @@ static void MulticastBackfillThread(const CService& mcastNode,
     }
 }
 
-static UniValue TxWindowShortInfoToJSON(std::shared_ptr<backfill_block_window> pblock_window) {
+static UniValue TxWindowShortInfoToJSON(std::shared_ptr<backfill_block_window> pblock_window)
+{
     UniValue ret(UniValue::VOBJ);
     std::unique_lock<std::mutex> lock(pblock_window->mutex);
 
     /* Find the minimum height, the maximum height, and the height corresponding
      * to the largest block */
-    int min_height      = std::numeric_limits<int>::max();
-    int max_height      = 0;
+    int min_height = std::numeric_limits<int>::max();
+    int max_height = 0;
     size_t max_n_chunks = 0;
     int height_largest_block = -1;
     for (const auto& b : pblock_window->map) {
         if (b.first < min_height)
-            min_height   = b.first;
+            min_height = b.first;
 
         if (b.first > max_height)
-            max_height   = b.first;
+            max_height = b.first;
 
         if (b.second.msgs.size() > max_n_chunks) {
-            max_n_chunks         = b.second.msgs.size();
+            max_n_chunks = b.second.msgs.size();
             height_largest_block = b.first;
         }
     }
-    ret.pushKV("size", ((double) pblock_window->bytes_in_window / (1048576)));
+    ret.pushKV("size", ((double)pblock_window->bytes_in_window / (1048576)));
     ret.pushKV("n_blks", (uint64_t)pblock_window->map.size());
     ret.pushKV("min", min_height);
     ret.pushKV("max", max_height);
@@ -1499,7 +1518,8 @@ static UniValue TxWindowShortInfoToJSON(std::shared_ptr<backfill_block_window> p
     return ret;
 }
 
-static UniValue TxWindowFullInfoToJSON(std::shared_ptr<backfill_block_window> pblock_window) {
+static UniValue TxWindowFullInfoToJSON(std::shared_ptr<backfill_block_window> pblock_window)
+{
     UniValue ret(UniValue::VOBJ);
     std::unique_lock<std::mutex> lock(pblock_window->mutex);
     for (const auto& b : pblock_window->map) {
@@ -1511,14 +1531,15 @@ static UniValue TxWindowFullInfoToJSON(std::shared_ptr<backfill_block_window> pb
     return ret;
 }
 
-UniValue TxWindowInfoToJSON(int phy_idx, int log_idx) {
+UniValue TxWindowInfoToJSON(int phy_idx, int log_idx)
+{
     std::unique_lock<std::mutex> lock(block_window_map_mutex);
     if (phy_idx == -1 || log_idx == -1) {
         /* Print summarized information from all block windows */
         UniValue ret(UniValue::VOBJ);
         for (const auto& w : block_window_map) {
             const std::string key = std::to_string(w.first.first) + "-" +
-                std::to_string(w.first.second);
+                                    std::to_string(w.first.second);
             ret.__pushKV(key, TxWindowShortInfoToJSON(w.second));
         }
         return ret;
@@ -1532,7 +1553,8 @@ UniValue TxWindowInfoToJSON(int phy_idx, int log_idx) {
 }
 
 static void MulticastTxnThread(const CService& mcastNode,
-                               const UDPMulticastInfo *info) {
+                               const UDPMulticastInfo* info)
+{
     assert(info->txn_per_sec > 0);
 
     /* Start only after the initial sync */
@@ -1561,7 +1583,7 @@ static void MulticastTxnThread(const CService& mcastNode,
 
     /* Rate-limit the txn transmissions */
     Throttle throttle(info->txn_per_sec);
-    throttle.SetMaxQuota(2*info->txn_per_sec);
+    throttle.SetMaxQuota(2 * info->txn_per_sec);
 
     while (!send_messages_break) {
         /* Txn transmission quota (number of txns to transmit now) */
@@ -1637,12 +1659,13 @@ static void MulticastTxnThread(const CService& mcastNode,
     }
 }
 
-UniValue TxnTxInfoToJSON() {
+UniValue TxnTxInfoToJSON()
+{
     std::unique_lock<std::mutex> lock(txn_window_map_mutex);
     UniValue ret(UniValue::VOBJ);
     for (auto& w : txn_window_map) {
         const std::string key = std::to_string(w.first.first) + "-" +
-            std::to_string(w.first.second);
+                                std::to_string(w.first.second);
         UniValue info(UniValue::VOBJ);
         std::unique_lock<std::mutex> lock(w.second.mutex);
         info.pushKV("tx_count", w.second.tx_count);
@@ -1651,35 +1674,34 @@ UniValue TxnTxInfoToJSON() {
     return ret;
 }
 
-static void LaunchMulticastBackfillThreads() {
+static void LaunchMulticastBackfillThreads()
+{
     for (const auto& node : mapMulticastNodes) {
         auto& info = node.second;
         if (info.tx) {
             // Thread for transmission of repeated (old) FEC-coded blocks
             if (info.send_rep_blks) {
                 mcast_tx_threads.emplace_back([&info, &node] {
-                        char name[50];
-                        sprintf(name, "udpblkbackfill %d-%d", info.physical_idx,
-                                info.logical_idx);
-                        TraceThread(
-                            name,
-                            std::bind(MulticastBackfillThread,
-                                      std::get<0>(node.first), &info)
-                            );
-                    });
+                    char name[50];
+                    sprintf(name, "udpblkbackfill %d-%d", info.physical_idx,
+                            info.logical_idx);
+                    TraceThread(
+                        name,
+                        std::bind(MulticastBackfillThread,
+                                  std::get<0>(node.first), &info));
+                });
             }
             // Thread for transmission of mempool txns
             if (info.txn_per_sec > 0) {
                 mcast_tx_threads.emplace_back([&info, &node] {
-                        char name[50];
-                        sprintf(name, "udptxnbackfill %d-%d", info.physical_idx,
-                                info.logical_idx);
-                        TraceThread(
-                            name,
-                            std::bind(MulticastTxnThread,
-                                      std::get<0>(node.first), &info)
-                            );
-                    });
+                    char name[50];
+                    sprintf(name, "udptxnbackfill %d-%d", info.physical_idx,
+                            info.logical_idx);
+                    TraceThread(
+                        name,
+                        std::bind(MulticastTxnThread,
+                                  std::get<0>(node.first), &info));
+                });
             }
         }
     }
@@ -1717,7 +1739,7 @@ void MulticastTxBlock(const int height)
     assert(ReadBlockFromDisk(block, pindex, Params().GetConsensus()));
 
     LogPrintf("MulticastTxBlock: sending block %s\n",
-        block.GetHash().ToString());
+              block.GetHash().ToString());
 
     for (const auto& node : multicast_nodes()) {
         // Send over the multicasttx instances enabled for block relaying
@@ -1727,7 +1749,7 @@ void MulticastTxBlock(const int height)
         // Each node gets a different set of FEC chunks
         std::vector<UDPMessage> msgs;
         UDPFillMessagesFromBlock(block, msgs, pindex->nHeight,
-            node.second.overhead_rep_blks);
+                                 node.second.overhead_rep_blks);
 
         for (const auto& msg : msgs) {
             SendMessage(
@@ -1741,8 +1763,9 @@ void MulticastTxBlock(const int height)
     }
 }
 
-static std::map<size_t, PerGroupMessageQueue> init_tx_queues(const std::vector<std::pair<unsigned short, uint64_t> >& group_list,
-                                                             const std::vector<UDPMulticastInfo>& multicast_list) {
+static std::map<size_t, PerGroupMessageQueue> init_tx_queues(const std::vector<std::pair<unsigned short, uint64_t>>& group_list,
+                                                             const std::vector<UDPMulticastInfo>& multicast_list)
+{
     std::map<size_t, PerGroupMessageQueue> mapQueues; // map group number to group queue
 
     /* Each unicast UDP group has one queue, defined in order */
@@ -1752,13 +1775,13 @@ static std::map<size_t, PerGroupMessageQueue> init_tx_queues(const std::vector<s
                                      std::forward_as_tuple());
         LogPrintf("UDP: Set bw for group %zu: %d Mbps\n", group, group_list[group].second);
         assert(res.second);
-        res.first->second.bw        = group_list[group].second; // in Mbps
+        res.first->second.bw = group_list[group].second; // in Mbps
         res.first->second.multicast = false;
         res.first->second.unlimited = false; // rate-limit internally
         // Set the throttling rate in bytes per sec
         const double bytes_per_sec = static_cast<double>(group_list[group].second) * 1e6 / 8;
         res.first->second.ratelimiter.SetRate(bytes_per_sec);
-        res.first->second.ratelimiter.SetMaxQuota(2*bytes_per_sec);
+        res.first->second.ratelimiter.SetMaxQuota(2 * bytes_per_sec);
     }
 
     /* Multicast Rx instances don't have any Tx queue. Only multicast Tx
@@ -1770,7 +1793,7 @@ static std::map<size_t, PerGroupMessageQueue> init_tx_queues(const std::vector<s
                                          std::forward_as_tuple(info.group),
                                          std::forward_as_tuple());
             assert(res.second);
-            res.first->second.bw        = info.bw; // in bps
+            res.first->second.bw = info.bw; // in bps
             res.first->second.multicast = true;
 
             /* The multicast group can be rate-limited internally or externally
@@ -1782,7 +1805,7 @@ static std::map<size_t, PerGroupMessageQueue> init_tx_queues(const std::vector<s
                 res.first->second.unlimited = false;
                 const double bytes_per_sec = static_cast<double>(info.bw) / 8;
                 res.first->second.ratelimiter.SetRate(bytes_per_sec);
-                res.first->second.ratelimiter.SetMaxQuota(2*bytes_per_sec);
+                res.first->second.ratelimiter.SetMaxQuota(2 * bytes_per_sec);
             }
         }
     }
@@ -1790,7 +1813,8 @@ static std::map<size_t, PerGroupMessageQueue> init_tx_queues(const std::vector<s
     return mapQueues;
 }
 
-static void send_messages_flush_and_break() {
+static void send_messages_flush_and_break()
+{
     send_messages_break = true;
     non_empty_queues_cv.notify_all();
     for (auto& q : mapTxQueues) {
@@ -1802,8 +1826,8 @@ static void send_messages_flush_and_break() {
 
 /* Parse option read from udpmulticasttx configuration file */
 static bool ParseUDPMulticastTxOpt(UDPMulticastInfo& info,
-    const std::string& opt,
-    const std::string& value)
+                                   const std::string& opt,
+                                   const std::string& value)
 {
     std::string error;
     if (opt == "ifname") {
@@ -1859,7 +1883,7 @@ static bool ParseUDPMulticastTxOpt(UDPMulticastInfo& info,
 
     if (!error.empty()) {
         LogPrintf("Failed to parse option %s on udpmulticasttx config: %s\n",
-            opt, error);
+                  opt, error);
         return false;
     }
     return true;
@@ -1867,7 +1891,7 @@ static bool ParseUDPMulticastTxOpt(UDPMulticastInfo& info,
 
 /* Parse udpmulticasttx configuration file */
 static bool ParseUDPMulticastTxInfo(const std::string& conf_file,
-    UDPMulticastInfo& info)
+                                    UDPMulticastInfo& info)
 {
     info.tx = true;
 
@@ -1875,7 +1899,7 @@ static bool ParseUDPMulticastTxInfo(const std::string& conf_file,
     std::ifstream stream(AbsPathForConfigVal(conf_file).c_str());
     if (!stream.good()) {
         LogPrintf("Failed to open -udpmulticasttx config file: %s\n",
-            AbsPathForConfigVal(conf_file));
+                  AbsPathForConfigVal(conf_file));
         return false;
     }
     std::string str;
@@ -1992,7 +2016,8 @@ static bool GetUDPMulticastInfo(std::vector<UDPMulticastInfo>& v)
     return true;
 }
 
-static void OpenMulticastConnection(const CService& service, bool multicast_tx, size_t group, bool trusted) {
+static void OpenMulticastConnection(const CService& service, bool multicast_tx, size_t group, bool trusted)
+{
     OpenPersistentUDPConnectionTo(service, multicast_magic, multicast_magic, trusted,
                                   multicast_tx ? UDP_CONNECTION_TYPE_OUTBOUND_ONLY : UDP_CONNECTION_TYPE_INBOUND_ONLY,
                                   group, udp_mode_t::multicast);
@@ -2002,11 +2027,11 @@ static void OpenMulticastConnection(const CService& service, bool multicast_tx, 
  * Public API follows
  */
 
-std::vector<std::pair<unsigned short, uint64_t> > GetUDPInboundPorts()
+std::vector<std::pair<unsigned short, uint64_t>> GetUDPInboundPorts()
 {
-    if (!gArgs.IsArgSet("-udpport")) return std::vector<std::pair<unsigned short, uint64_t> >();
+    if (!gArgs.IsArgSet("-udpport")) return std::vector<std::pair<unsigned short, uint64_t>>();
 
-    std::map<size_t, std::pair<unsigned short, uint64_t> > res;
+    std::map<size_t, std::pair<unsigned short, uint64_t>> res;
     for (const std::string& s : gArgs.GetArgs("-udpport")) {
         size_t port_end = s.find(',');
         size_t group_end = s.find(',', port_end + 1);
@@ -2014,19 +2039,19 @@ std::vector<std::pair<unsigned short, uint64_t> > GetUDPInboundPorts()
 
         if (port_end == std::string::npos || (group_end != std::string::npos && bw_end != std::string::npos)) {
             LogPrintf("Failed to parse -udpport option, not starting Bitcoin Satellite\n");
-            return std::vector<std::pair<unsigned short, uint64_t> >();
+            return std::vector<std::pair<unsigned short, uint64_t>>();
         }
 
         int64_t port = atoi64(s.substr(0, port_end));
         if (port != (unsigned short)port || port == 0) {
             LogPrintf("Failed to parse -udpport option, not starting Bitcoin Satellite\n");
-            return std::vector<std::pair<unsigned short, uint64_t> >();
+            return std::vector<std::pair<unsigned short, uint64_t>>();
         }
 
         int64_t group = atoi64(s.substr(port_end + 1, group_end - port_end - 1));
         if (group < 0 || res.count(group)) {
             LogPrintf("Failed to parse -udpport option, not starting Bitcoin Satellite\n");
-            return std::vector<std::pair<unsigned short, uint64_t> >();
+            return std::vector<std::pair<unsigned short, uint64_t>>();
         }
 
         int64_t bw = 1024;
@@ -2034,18 +2059,18 @@ std::vector<std::pair<unsigned short, uint64_t> > GetUDPInboundPorts()
             bw = atoi64(s.substr(group_end + 1));
             if (bw < 0) {
                 LogPrintf("Failed to parse -udpport option, not starting Bitcoin Satellite\n");
-                return std::vector<std::pair<unsigned short, uint64_t> >();
+                return std::vector<std::pair<unsigned short, uint64_t>>();
             }
         }
 
         res[group] = std::make_pair((unsigned short)port, uint64_t(bw));
     }
 
-    std::vector<std::pair<unsigned short, uint64_t> > v;
+    std::vector<std::pair<unsigned short, uint64_t>> v;
     for (size_t i = 0; i < res.size(); i++) {
         if (!res.count(i)) {
             LogPrintf("Failed to parse -udpport option, not starting Bitcoin Satellite\n");
-            return std::vector<std::pair<unsigned short, uint64_t> >();
+            return std::vector<std::pair<unsigned short, uint64_t>>();
         }
         v.push_back(res[i]);
     }
@@ -2053,7 +2078,8 @@ std::vector<std::pair<unsigned short, uint64_t> > GetUDPInboundPorts()
     return v;
 }
 
-void GetUDPConnectionList(std::vector<UDPConnectionStats>& connections_list) {
+void GetUDPConnectionList(std::vector<UDPConnectionStats>& connections_list)
+{
     connections_list.clear();
     std::unique_lock<std::recursive_mutex> lock(cs_mapUDPNodes);
     connections_list.reserve(mapUDPNodes.size());
@@ -2067,7 +2093,8 @@ void GetUDPConnectionList(std::vector<UDPConnectionStats>& connections_list) {
     }
 }
 
-static void OpenUDPConnectionTo(const CService& addr, const UDPConnectionInfo& info) {
+static void OpenUDPConnectionTo(const CService& addr, const UDPConnectionInfo& info)
+{
     std::unique_lock<std::recursive_mutex> lock(cs_mapUDPNodes);
 
     std::pair<std::map<CService, UDPConnectionState>::iterator, bool> res = mapUDPNodes.insert(std::make_pair(addr, UDPConnectionState()));
@@ -2094,11 +2121,13 @@ static void OpenUDPConnectionTo(const CService& addr, const UDPConnectionInfo& i
     }
 }
 
-void OpenUDPConnectionTo(const CService& addr, uint64_t local_magic, uint64_t remote_magic, bool fUltimatelyTrusted, UDPConnectionType connection_type, size_t group) {
+void OpenUDPConnectionTo(const CService& addr, uint64_t local_magic, uint64_t remote_magic, bool fUltimatelyTrusted, UDPConnectionType connection_type, size_t group)
+{
     OpenUDPConnectionTo(addr, {htole64(local_magic), htole64(remote_magic), group, fUltimatelyTrusted, connection_type, udp_mode_t::unicast});
 }
 
-void OpenPersistentUDPConnectionTo(const CService& addr, uint64_t local_magic, uint64_t remote_magic, bool fUltimatelyTrusted, UDPConnectionType connection_type, size_t group, udp_mode_t udp_mode) {
+void OpenPersistentUDPConnectionTo(const CService& addr, uint64_t local_magic, uint64_t remote_magic, bool fUltimatelyTrusted, UDPConnectionType connection_type, size_t group, udp_mode_t udp_mode)
+{
     std::unique_lock<std::recursive_mutex> lock(cs_mapUDPNodes);
 
     if (mapPersistentNodes.count(addr))
@@ -2111,7 +2140,8 @@ void OpenPersistentUDPConnectionTo(const CService& addr, uint64_t local_magic, u
     mapPersistentNodes[addr] = info;
 }
 
-void CloseUDPConnectionTo(const CService& addr) {
+void CloseUDPConnectionTo(const CService& addr)
+{
     std::unique_lock<std::recursive_mutex> lock(cs_mapUDPNodes);
     auto it = mapPersistentNodes.find(addr);
     if (it != mapPersistentNodes.end())
@@ -2129,7 +2159,8 @@ const std::map<std::tuple<CService, int, uint16_t>, UDPMulticastInfo>& multicast
     return mapMulticastNodes;
 }
 
-bool IsMulticastRxNode(const CService& node) {
+bool IsMulticastRxNode(const CService& node)
+{
     std::lock_guard<std::recursive_mutex> udpNodesLock(cs_mapUDPNodes);
     const auto it = mapUDPNodes.find(node);
     if (it == mapUDPNodes.end()) {

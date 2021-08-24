@@ -6,10 +6,10 @@
 #define BITCOIN_FEC_H
 
 #include <assert.h>
+#include <fs.h>
 #include <memory>
 #include <stdint.h>
 #include <vector>
-#include <fs.h>
 
 #define FEC_CHUNK_SIZE 1152
 #define CHUNK_ID_SIZE sizeof(uint32_t)
@@ -17,17 +17,18 @@
 #define FEC_CHUNK_COUNT_MAX ((1 << 24) - 1)
 #define CHUNK_ID_IS_NOT_SET(chunk_id) (chunk_id == FEC_CHUNK_COUNT_MAX + 1)
 
-#include "wirehair/wirehair.h"
-#include "wirehair/cm256.h"
-#include "random.h"
 #include "mmapstorage.h"
 #include "open_hash_set.h"
+#include "random.h"
+#include "wirehair/cm256.h"
+#include "wirehair/wirehair.h"
 
 typedef std::aligned_storage<FEC_CHUNK_SIZE, 16>::type FECChunkType;
 static_assert(FEC_CHUNK_SIZE % 16 == 0, "Padding of FECChunkType may hurt performance, and really shouldn't be required");
 static_assert(sizeof(FECChunkType) == FEC_CHUNK_SIZE, "Padding of FECChunkType may hurt performance, and really shouldn't be required");
 
-class BlockChunkRecvdTracker {
+class BlockChunkRecvdTracker
+{
 private:
     std::vector<bool> data_chunk_recvd_flags; // Used only for data chunks
 
@@ -42,11 +43,12 @@ private:
 public:
     BlockChunkRecvdTracker() {} // dummy - dont use something created like this
     BlockChunkRecvdTracker(size_t data_chunks);
-    BlockChunkRecvdTracker(const BlockChunkRecvdTracker& o) =delete;
-    BlockChunkRecvdTracker(BlockChunkRecvdTracker&& o) =delete;
+    BlockChunkRecvdTracker(const BlockChunkRecvdTracker& o) = delete;
+    BlockChunkRecvdTracker(BlockChunkRecvdTracker&& o) = delete;
     BlockChunkRecvdTracker& operator=(BlockChunkRecvdTracker&& other) noexcept;
 
-    inline bool CheckPresentAndMarkRecvd(uint32_t chunk_id) {
+    inline bool CheckPresentAndMarkRecvd(uint32_t chunk_id)
+    {
         if (chunk_id < data_chunk_recvd_flags.size()) {
             if (data_chunk_recvd_flags[chunk_id])
                 return true;
@@ -61,14 +63,16 @@ public:
         return false;
     }
 
-    inline bool CheckPresent(uint32_t chunk_id) const {
+    inline bool CheckPresent(uint32_t chunk_id) const
+    {
         if (chunk_id < data_chunk_recvd_flags.size()) return data_chunk_recvd_flags[chunk_id];
         return fec_chunks_recvd.find_fast(chunk_id);
     }
 };
 
 class FECDecoder;
-class FECEncoder {
+class FECEncoder
+{
 private:
     WirehairCodec wirehair_encoder = NULL;
     const std::vector<unsigned char>* data;
@@ -96,7 +100,7 @@ public:
      * passed directly into FECDecoder::ProvideChunk or FECDecoder::HasChunk
      * (ie it will be offset by the data chunk count).
      */
-    bool BuildChunk(size_t vector_idx, bool overwrite=false);
+    bool BuildChunk(size_t vector_idx, bool overwrite = false);
     bool PrefillChunks();
 };
 
@@ -120,7 +124,8 @@ public:
     uint32_t GetChunkId(size_t idx) const { return GetChunkMeta(idx); }
 };
 
-class FECDecoder {
+class FECDecoder
+{
     FECChunkType tmp_chunk;
     size_t chunk_count = 0;
     size_t chunks_recvd = 0;
@@ -176,8 +181,8 @@ public:
 
     FECDecoder();
     ~FECDecoder();
-    FECDecoder(const FECDecoder&) =delete;
-    FECDecoder(FECDecoder&& decoder) =delete;
+    FECDecoder(const FECDecoder&) = delete;
+    FECDecoder(FECDecoder&& decoder) = delete;
     FECDecoder& operator=(FECDecoder&& decoder) noexcept;
 
     bool ProvideChunk(const unsigned char* chunk, uint32_t chunk_id, bool recovery_run = false);
@@ -193,7 +198,6 @@ public:
     size_t GetChunksRcvd() const { return chunks_recvd; }
     fs::path GetFileName() const { return filename; }
     void RemoveMmapFile();
-
 };
 
 bool BuildFECChunks(const std::vector<unsigned char>& data, std::pair<std::unique_ptr<FECChunkType[]>, std::vector<uint32_t>>& fec_chunks);

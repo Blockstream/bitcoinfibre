@@ -6,15 +6,15 @@
 #ifndef BITCOIN_UDPNET_H
 #define BITCOIN_UDPNET_H
 
+#include <assert.h>
 #include <atomic>
+#include <chain.h>
+#include <mutex>
 #include <stdint.h>
 #include <vector>
-#include <mutex>
-#include <assert.h>
-#include <chain.h>
 
-#include <udpapi.h>
 #include <netaddress.h>
+#include <udpapi.h>
 
 #include <blockencodings.h>
 #include <fec.h>
@@ -24,7 +24,7 @@
 
 // Local stuff only uses magic, net stuff only uses protocol_version,
 // so both need to be changed any time wire format changes
-static const unsigned char LOCAL_MAGIC_BYTES[] = { 0xab, 0xad, 0xca, 0xfe };
+static const unsigned char LOCAL_MAGIC_BYTES[] = {0xab, 0xad, 0xca, 0xfe};
 static const uint32_t UDP_PROTOCOL_VERSION = (4 << 16) | 4; // Min version 3, current version 3
 
 enum UDPMessageType {
@@ -55,7 +55,7 @@ static_assert(sizeof(UDPMessageHeader) == 17, "__attribute__((packed)) must work
 enum UDPBlockMessageFlags { // Put in the msg_type
     EMPTY_BLOCK = (1 << 5), // mark when block body is empty (only header is sent)
     HAVE_BLOCK = (1 << 6),
-    TIP_BLOCK  = (1 << 7)  // mark that this is a block on the chain's tip (relayed)
+    TIP_BLOCK = (1 << 7) // mark that this is a block on the chain's tip (relayed)
 };
 
 struct __attribute__((packed)) UDPBlockMessage { // (also used for txn)
@@ -87,13 +87,13 @@ static_assert(PACKET_SIZE <= 1280, "All packets must fit in min-MTU for IPv6");
 static_assert(sizeof(UDPMessage) == sizeof(UDPMessageHeader) + MAX_UDP_MESSAGE_LENGTH + 1, "UDPMessage should have 1 padding byte");
 
 enum UDPState {
-    STATE_INIT = 0, // Indicating the node was just added
-    STATE_GOT_SYN = 1, // We received their SYN
-    STATE_GOT_SYN_ACK = 1 << 1, // We've received a KEEPALIVE (which they only send after receiving our SYN)
+    STATE_INIT = 0,                                          // Indicating the node was just added
+    STATE_GOT_SYN = 1,                                       // We received their SYN
+    STATE_GOT_SYN_ACK = 1 << 1,                              // We've received a KEEPALIVE (which they only send after receiving our SYN)
     STATE_INIT_COMPLETE = STATE_GOT_SYN | STATE_GOT_SYN_ACK, // We can now send data to this peer
 };
 
-struct ChunkFileNameParts{
+struct ChunkFileNameParts {
     struct in_addr ipv4Addr;
     unsigned short port;
     size_t length;
@@ -105,14 +105,14 @@ struct PartialBlockData {
     const std::chrono::steady_clock::time_point timeHeaderRecvd;
     const CService peer; // sender peer (either a "trusted peer" or a real peer)
     // NOTE: when peer == TRUSTED_PEER_DUMMY, the actual senders are available in the perNodeChunkCount map
-    std::atomic_bool in_header; // Indicates we are currently downloading header (or block txn)
-    std::atomic_bool blk_initialized; // Indicates Init has been called with a block contents message
-    std::atomic_bool header_initialized; // Indicates Init has been called with a block header message
-    std::atomic_bool is_decodeable; // Indicates body_decoder.DecodeReady() or block.block_data.IsBlockAvailable()
+    std::atomic_bool in_header;            // Indicates we are currently downloading header (or block txn)
+    std::atomic_bool blk_initialized;      // Indicates Init has been called with a block contents message
+    std::atomic_bool header_initialized;   // Indicates Init has been called with a block header message
+    std::atomic_bool is_decodeable;        // Indicates body_decoder.DecodeReady() or block.block_data.IsBlockAvailable()
     std::atomic_bool is_header_processing; // Indicates in_header && !initialized but header is ready
     std::atomic_bool packet_awaiting_lock; // Indicates there is a packet ready to process that needs state_mutex
-    std::atomic_bool awaiting_processing; // Indicates the block has been pushed to the processing queue already
-    std::atomic_bool chain_lookup; // Indicates the header has been processed to check if our chain has the block already
+    std::atomic_bool awaiting_processing;  // Indicates the block has been pushed to the processing queue already
+    std::atomic_bool chain_lookup;         // Indicates the header has been processed to check if our chain has the block already
 
     std::mutex state_mutex;
     // Background thread is preparing to, and is submitting to core
@@ -120,10 +120,10 @@ struct PartialBlockData {
     // perNodeChunkCount should be treated read-only.
     std::atomic_bool currentlyProcessing;
 
-    uint32_t blk_len; // length of chunk-coded block being downloaded
-    uint32_t header_len; // length of CBlockHeaderAndLengthShortTxIDs (aka "block header") being downloaded
+    uint32_t blk_len;          // length of chunk-coded block being downloaded
+    uint32_t header_len;       // length of CBlockHeaderAndLengthShortTxIDs (aka "block header") being downloaded
     FECDecoder header_decoder; // Note that this may have been std::move()d if (currentlyProcessing)
-    FECDecoder body_decoder; // Note that this may have been std::move()d if (currentlyProcessing)
+    FECDecoder body_decoder;   // Note that this may have been std::move()d if (currentlyProcessing)
     PartiallyDownloadedChunkBlock block_data;
     bool tip_blk; // Whether this is a block at the tip of the chain or an old/repeated block
 
@@ -140,14 +140,15 @@ struct PartialBlockData {
     bool Init(const ChunkFileNameParts& cfp);
 
     ReadStatus ProvideHeaderData(const CBlockHeaderAndLengthShortTxIDs& header);
-	PartialBlockData(const CService& node, CTxMemPool* mempool, const UDPMessage& header_msg, const std::chrono::steady_clock::time_point& packet_recv); // Must be a MSG_TYPE_BLOCK_HEADER
-	PartialBlockData(const CService& peer, CTxMemPool* mempool, const ChunkFileNameParts& cfp);
+    PartialBlockData(const CService& node, CTxMemPool* mempool, const UDPMessage& header_msg, const std::chrono::steady_clock::time_point& packet_recv); // Must be a MSG_TYPE_BLOCK_HEADER
+    PartialBlockData(const CService& peer, CTxMemPool* mempool, const ChunkFileNameParts& cfp);
 
     void ReconstructBlockFromDecoder();
     std::string GetSenders();
 };
 
-class ChunksAvailableSet {
+class ChunksAvailableSet
+{
 private:
     bool allSent;
     mutable bool header_tracker_initd;
@@ -155,7 +156,8 @@ private:
     mutable BlockChunkRecvdTracker header_tracker;
     mutable BlockChunkRecvdTracker block_tracker;
 
-    void InitTracker(size_t n_chunks, bool is_block_chunk) const {
+    void InitTracker(size_t n_chunks, bool is_block_chunk) const
+    {
         if (is_block_chunk && !block_tracker_initd) {
             block_tracker = BlockChunkRecvdTracker(n_chunks);
             block_tracker_initd = true;
@@ -168,14 +170,15 @@ private:
     }
 
 public:
-    ChunksAvailableSet(bool hasAllChunks, size_t n_chunks, bool is_block_chunk) :
-        allSent(hasAllChunks), header_tracker_initd(!is_block_chunk),
-        block_tracker_initd(is_block_chunk) {
-            if (allSent) return;
-            InitTracker(n_chunks, is_block_chunk);
+    ChunksAvailableSet(bool hasAllChunks, size_t n_chunks, bool is_block_chunk) : allSent(hasAllChunks), header_tracker_initd(!is_block_chunk),
+                                                                                  block_tracker_initd(is_block_chunk)
+    {
+        if (allSent) return;
+        InitTracker(n_chunks, is_block_chunk);
     }
 
-    bool IsChunkAvailable(uint32_t chunk_id, size_t n_chunks, bool is_block_chunk) const {
+    bool IsChunkAvailable(uint32_t chunk_id, size_t n_chunks, bool is_block_chunk) const
+    {
         if (allSent) return true;
 
         InitTracker(n_chunks, is_block_chunk);
@@ -189,7 +192,8 @@ public:
         }
     }
 
-    void SetChunkAvailable(uint32_t chunk_id, size_t n_chunks, bool is_block_chunk) {
+    void SetChunkAvailable(uint32_t chunk_id, size_t n_chunks, bool is_block_chunk)
+    {
         if (allSent) return;
 
         InitTracker(n_chunks, is_block_chunk);
@@ -245,29 +249,29 @@ struct UDPMulticastInfo {
     std::string groupname = "";           /** optional label for stream */
     bool trusted = false;                 /** whether multicast Tx peer is trusted */
     /* Tx only: */
-    int ttl = 1;                  /** time-to-live desired for multicast
+    int ttl = 1;                                /** time-to-live desired for multicast
                                    * packets */
-    uint64_t bw = 0;              /** target throughput in bps. Set zero to
+    uint64_t bw = 0;                            /** target throughput in bps. Set zero to
                                    * attempt the maximum speed. */
-    int depth = 0;                /** backfill depth - no. of blocks to iterate
+    int depth = 0;                              /** backfill depth - no. of blocks to iterate
                                    * over. Set zero to iterate over the full
                                    * blockchain. */
-    int offset = 0;               /** offset within the backfill as starting
+    int offset = 0;                             /** offset within the backfill as starting
                                    * point */
-    uint32_t interleave_len = 1;  /** determines the depth of the sub-window of
+    uint32_t interleave_len = 1;                /** determines the depth of the sub-window of
                                    *  blocks within the backfill window whose
                                    *  FEC chunks are interleaved (sent in
                                    *  parallel). */
-    uint16_t physical_idx = 0;    /** index of destination IP - net interface
+    uint16_t physical_idx = 0;                  /** index of destination IP - net interface
                                    * pair */
-    uint16_t logical_idx = 0;     /** logical idx for streams sharing physical
+    uint16_t logical_idx = 0;                   /** logical idx for streams sharing physical
                                    * idx */
-    unsigned int txn_per_sec = 0; /** txns to send per second (0 to disable) */
-    char dscp = 0;                /** Differentiated Services Code Point
+    unsigned int txn_per_sec = 0;               /** txns to send per second (0 to disable) */
+    char dscp = 0;                              /** Differentiated Services Code Point
                                    * (DSCP) */
-    bool send_rep_blks = true;    /** Whether this stream should transmit
+    bool send_rep_blks = true;                  /** Whether this stream should transmit
                                    * repeated (i.e., historic) blocks */
-    bool relay_new_blks = true;   /** Whether this stream should relay new
+    bool relay_new_blks = true;                 /** Whether this stream should relay new
                                    * (i.e., recently mined) blocks */
     FecOverhead overhead_rep_blks = {60, 0.05}; /** Overhead applied when
                                                  * FEC-encoding repeated
@@ -291,11 +295,14 @@ struct UDPConnectionState {
     double last_chunk_hit_ratio;
 
     UDPConnectionState() : connection({}), state(0), protocolVersion(0), lastSendTime(0), lastRecvTime(0), lastPingTime(0), last_ping_location(0),
-        tx_in_flight_hash_prefix(0), tx_in_flight_msg_size(0), last_txn_hit_ratio(-1), last_chunk_hit_ratio(-1)
-        { for (size_t i = 0; i < sizeof(last_pings) / sizeof(double); i++) last_pings[i] = -1; }
+                           tx_in_flight_hash_prefix(0), tx_in_flight_msg_size(0), last_txn_hit_ratio(-1), last_chunk_hit_ratio(-1)
+    {
+        for (size_t i = 0; i < sizeof(last_pings) / sizeof(double); i++)
+            last_pings[i] = -1;
+    }
 };
 #define PROTOCOL_VERSION_MIN(ver) (((ver) >> 16) & 0xffff)
-#define PROTOCOL_VERSION_CUR(ver) (((ver) >>  0) & 0xffff)
+#define PROTOCOL_VERSION_CUR(ver) (((ver) >> 0) & 0xffff)
 #define PROTOCOL_VERSION_FLAGS(ver) (((ver) >> 32) & 0xffffffff)
 
 extern std::recursive_mutex cs_mapUDPNodes;
