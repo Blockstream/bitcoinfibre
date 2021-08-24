@@ -3,17 +3,17 @@
 // distributed under the Affero General Public License (AGPL v3)
 
 #include "exchange.h"
+#include <blockencodings.h>      // for MAX_CHUNK_CODED_BLOCK_SIZE_FACTOR
+#include <consensus/consensus.h> // for MAX_BLOCK_SERIALIZED_SIZE
 #include <fec.h>
 #include <logging.h>
-#include <consensus/consensus.h> // for MAX_BLOCK_SERIALIZED_SIZE
-#include <blockencodings.h> // for MAX_CHUNK_CODED_BLOCK_SIZE_FACTOR
 #include <util/system.h>
 
+#include <fs.h>
 #include <stdio.h>
 #include <string.h>
-#include <fs.h>
 
-#define DIV_CEIL(a, b) (((a) + (b) - 1) / (b))
+#define DIV_CEIL(a, b) (((a) + (b)-1) / (b))
 
 #define CHUNK_COUNT_USES_CM256(chunks) ((chunks) >= 2 && (chunks) <= CM256_MAX_CHUNKS)
 #define CHUNK_COUNT_USES_WIREHAIR(chunks) ((chunks) > CM256_MAX_CHUNKS)
@@ -22,7 +22,8 @@
 
 
 static std::atomic<WirehairCodec> cache_states[CACHE_STATES_COUNT];
-static inline WirehairCodec get_wirehair_codec() {
+static inline WirehairCodec get_wirehair_codec()
+{
     for (size_t i = 0; i < CACHE_STATES_COUNT; i++) {
         WirehairCodec state = cache_states[i].exchange(nullptr);
         if (state) {
@@ -31,7 +32,8 @@ static inline WirehairCodec get_wirehair_codec() {
     }
     return nullptr;
 }
-static inline void return_wirehair_codec(WirehairCodec state) {
+static inline void return_wirehair_codec(WirehairCodec state)
+{
     WirehairCodec null_state = nullptr;
     for (size_t i = 0; i < CACHE_STATES_COUNT; i++) {
         if (cache_states[i].compare_exchange_weak(null_state, state)) {
@@ -41,13 +43,13 @@ static inline void return_wirehair_codec(WirehairCodec state) {
     wirehair_free(state);
 }
 
-BlockChunkRecvdTracker::BlockChunkRecvdTracker(size_t chunk_count) :
-        data_chunk_recvd_flags(CHUNK_COUNT_USES_CM256(chunk_count) ? 0xff : chunk_count),
-        fec_chunks_recvd(CHUNK_COUNT_USES_CM256(chunk_count) ? 1 : chunk_count) { }
+BlockChunkRecvdTracker::BlockChunkRecvdTracker(size_t chunk_count) : data_chunk_recvd_flags(CHUNK_COUNT_USES_CM256(chunk_count) ? 0xff : chunk_count),
+                                                                     fec_chunks_recvd(CHUNK_COUNT_USES_CM256(chunk_count) ? 1 : chunk_count) {}
 
-BlockChunkRecvdTracker& BlockChunkRecvdTracker::operator=(BlockChunkRecvdTracker&& other) noexcept {
+BlockChunkRecvdTracker& BlockChunkRecvdTracker::operator=(BlockChunkRecvdTracker&& other) noexcept
+{
     data_chunk_recvd_flags = std::move(other.data_chunk_recvd_flags);
-    fec_chunks_recvd       = std::move(other.fec_chunks_recvd);
+    fec_chunks_recvd = std::move(other.fec_chunks_recvd);
     return *this;
 }
 
@@ -55,11 +57,10 @@ FECDecoder::FECDecoder()
 {
 }
 
-FECDecoder::FECDecoder(size_t const data_size, MemoryUsageMode memory_mode, const std::string& obj_id, const bool keep_mmap_file) :
-        chunk_count(DIV_CEIL(data_size, FEC_CHUNK_SIZE)),
-        obj_size(data_size),
-        chunk_tracker(chunk_count),
-        memory_usage_mode(memory_mode)
+FECDecoder::FECDecoder(size_t const data_size, MemoryUsageMode memory_mode, const std::string& obj_id, const bool keep_mmap_file) : chunk_count(DIV_CEIL(data_size, FEC_CHUNK_SIZE)),
+                                                                                                                                    obj_size(data_size),
+                                                                                                                                    chunk_tracker(chunk_count),
+                                                                                                                                    memory_usage_mode(memory_mode)
 {
     if (chunk_count < 2)
         return;
@@ -93,22 +94,23 @@ fs::path FECDecoder::compute_filename(const std::string& obj_id) const
     }
 }
 
-FECDecoder& FECDecoder::operator=(FECDecoder&& decoder) noexcept {
+FECDecoder& FECDecoder::operator=(FECDecoder&& decoder) noexcept
+{
     if (owns_file && !m_keep_mmap_file)
         RemoveMmapFile();
     if (wirehair_decoder)
         return_wirehair_codec(wirehair_decoder);
 
-    chunk_count       = decoder.chunk_count;
-    chunks_recvd      = decoder.chunks_recvd;
-    obj_size          = decoder.obj_size;
-    decodeComplete    = decoder.decodeComplete;
-    chunk_tracker     = std::move(decoder.chunk_tracker);
+    chunk_count = decoder.chunk_count;
+    chunks_recvd = decoder.chunks_recvd;
+    obj_size = decoder.obj_size;
+    decodeComplete = decoder.decodeComplete;
+    chunk_tracker = std::move(decoder.chunk_tracker);
     memory_usage_mode = decoder.memory_usage_mode;
-    owns_file         = exchange(decoder.owns_file, false);
-    m_keep_mmap_file  = decoder.m_keep_mmap_file;
-    cm256_decoded     = exchange(decoder.cm256_decoded, false);
-    cm256_chunks      = std::move(decoder.cm256_chunks);
+    owns_file = exchange(decoder.owns_file, false);
+    m_keep_mmap_file = decoder.m_keep_mmap_file;
+    cm256_decoded = exchange(decoder.cm256_decoded, false);
+    cm256_chunks = std::move(decoder.cm256_chunks);
     if (owns_file) {
         assert(fs::exists(decoder.filename));
         if (filename.empty()) {
@@ -117,7 +119,7 @@ FECDecoder& FECDecoder::operator=(FECDecoder&& decoder) noexcept {
             fs::rename(decoder.filename, filename);
         }
     }
-    tmp_chunk        = decoder.tmp_chunk;
+    tmp_chunk = decoder.tmp_chunk;
     wirehair_decoder = exchange(decoder.wirehair_decoder, nullptr);
 
     // In mmap mode, cm256_blocks are populated within DecodeCm256Mmap, when the
@@ -237,7 +239,7 @@ bool FECDecoder::ProvideChunkMemory(const unsigned char* chunk, uint32_t chunk_i
         memcpy(&cm256_chunks.back(), chunk, FEC_CHUNK_SIZE);
         cm256_blocks[chunks_recvd].Block = &cm256_chunks.back();
         cm256_blocks[chunks_recvd].Index = (uint8_t)chunk_id;
-        if (chunk_count == chunks_recvd + 1){
+        if (chunk_count == chunks_recvd + 1) {
             decodeComplete = true;
         }
     } else {
@@ -256,14 +258,16 @@ bool FECDecoder::ProvideChunkMemory(const unsigned char* chunk, uint32_t chunk_i
     return true;
 }
 
-bool FECDecoder::HasChunk(uint32_t chunk_id) {
+bool FECDecoder::HasChunk(uint32_t chunk_id)
+{
     if (CHUNK_COUNT_USES_CM256(chunk_count) ? chunk_id > 0xff : chunk_id > FEC_CHUNK_COUNT_MAX)
         return false;
 
     return decodeComplete || chunk_tracker.CheckPresent(chunk_id);
 }
 
-bool FECDecoder::DecodeReady() const {
+bool FECDecoder::DecodeReady() const
+{
     return decodeComplete;
 }
 
@@ -391,7 +395,8 @@ void FECDecoder::RecoverFromDisk()
 }
 
 FECEncoder::FECEncoder(const std::vector<unsigned char>* dataIn, std::pair<std::unique_ptr<FECChunkType[]>, std::vector<uint32_t>>* fec_chunksIn)
-        : data(dataIn), fec_chunks(fec_chunksIn) {
+    : data(dataIn), fec_chunks(fec_chunksIn)
+{
     assert(!fec_chunks->second.empty());
     assert(!data->empty());
 
@@ -401,16 +406,16 @@ FECEncoder::FECEncoder(const std::vector<unsigned char>* dataIn, std::pair<std::
 
     if (CHUNK_COUNT_USES_CM256(chunk_count)) {
         for (uint8_t i = 0; i < chunk_count - 1; i++) {
-            cm256_blocks[i] = cm256_block { const_cast<unsigned char*>(data->data()) + i * FEC_CHUNK_SIZE, i };
+            cm256_blocks[i] = cm256_block{const_cast<unsigned char*>(data->data()) + i * FEC_CHUNK_SIZE, i};
         }
         size_t expected_size = chunk_count * FEC_CHUNK_SIZE;
         if (expected_size == data->size()) {
-            cm256_blocks[chunk_count - 1] = cm256_block { const_cast<unsigned char*>(data->data()) + (chunk_count - 1) * FEC_CHUNK_SIZE, (uint8_t)(chunk_count - 1) };
+            cm256_blocks[chunk_count - 1] = cm256_block{const_cast<unsigned char*>(data->data()) + (chunk_count - 1) * FEC_CHUNK_SIZE, (uint8_t)(chunk_count - 1)};
         } else {
             size_t fill_size = expected_size - data->size();
             memcpy(&tmp_chunk, data->data() + (chunk_count - 1) * FEC_CHUNK_SIZE, FEC_CHUNK_SIZE - fill_size);
             memset(((unsigned char*)&tmp_chunk) + FEC_CHUNK_SIZE - fill_size, 0, fill_size);
-            cm256_blocks[chunk_count - 1] = cm256_block { &tmp_chunk, (uint8_t)(chunk_count - 1) };
+            cm256_blocks[chunk_count - 1] = cm256_block{&tmp_chunk, (uint8_t)(chunk_count - 1)};
         }
     } else {
         wirehair_encoder = wirehair_encoder_create(get_wirehair_codec(), data->data(), data->size(), FEC_CHUNK_SIZE);
@@ -419,7 +424,8 @@ FECEncoder::FECEncoder(const std::vector<unsigned char>* dataIn, std::pair<std::
 }
 
 FECEncoder::FECEncoder(FECDecoder&& decoder, const std::vector<unsigned char>* dataIn, std::pair<std::unique_ptr<FECChunkType[]>, std::vector<uint32_t>>* fec_chunksIn)
-        : data(dataIn), fec_chunks(fec_chunksIn) {
+    : data(dataIn), fec_chunks(fec_chunksIn)
+{
     assert(!fec_chunks->second.empty());
     assert(!data->empty());
 
@@ -429,16 +435,16 @@ FECEncoder::FECEncoder(FECDecoder&& decoder, const std::vector<unsigned char>* d
 
     if (CHUNK_COUNT_USES_CM256(chunk_count)) {
         for (uint8_t i = 0; i < chunk_count - 1; i++) {
-            cm256_blocks[i] = cm256_block { const_cast<unsigned char*>(data->data()) + i * FEC_CHUNK_SIZE, i };
+            cm256_blocks[i] = cm256_block{const_cast<unsigned char*>(data->data()) + i * FEC_CHUNK_SIZE, i};
         }
         size_t expected_size = chunk_count * FEC_CHUNK_SIZE;
         if (expected_size == data->size()) {
-            cm256_blocks[chunk_count - 1] = cm256_block { const_cast<unsigned char*>(data->data()) + (chunk_count - 1) * FEC_CHUNK_SIZE, (uint8_t)(chunk_count - 1) };
+            cm256_blocks[chunk_count - 1] = cm256_block{const_cast<unsigned char*>(data->data()) + (chunk_count - 1) * FEC_CHUNK_SIZE, (uint8_t)(chunk_count - 1)};
         } else {
             size_t fill_size = expected_size - data->size();
             memcpy(&tmp_chunk, data->data() + (chunk_count - 1) * FEC_CHUNK_SIZE, FEC_CHUNK_SIZE - fill_size);
             memset(((unsigned char*)&tmp_chunk) + FEC_CHUNK_SIZE - fill_size, 0, fill_size);
-            cm256_blocks[chunk_count - 1] = cm256_block { &tmp_chunk, (uint8_t)(chunk_count - 1) };
+            cm256_blocks[chunk_count - 1] = cm256_block{&tmp_chunk, (uint8_t)(chunk_count - 1)};
         }
     } else {
         wirehair_encoder = decoder.wirehair_decoder;
@@ -449,7 +455,8 @@ FECEncoder::FECEncoder(FECDecoder&& decoder, const std::vector<unsigned char>* d
     }
 }
 
-FECEncoder::~FECEncoder() {
+FECEncoder::~FECEncoder()
+{
     if (wirehair_encoder)
         return_wirehair_codec(wirehair_encoder);
 }
@@ -481,9 +488,10 @@ FECEncoder::~FECEncoder() {
  * `vector_idx` even when another chunk already exists in this index.
  *
  */
-bool FECEncoder::BuildChunk(size_t vector_idx, bool overwrite) {
+bool FECEncoder::BuildChunk(size_t vector_idx, bool overwrite)
+{
     if (vector_idx >= fec_chunks->second.size())
-         throw std::runtime_error("Invalid vector_idx");
+        throw std::runtime_error("Invalid vector_idx");
 
     if (!overwrite && fec_chunks->second[vector_idx])
         return true;
@@ -511,7 +519,7 @@ bool FECEncoder::BuildChunk(size_t vector_idx, bool overwrite) {
         return true;
 
     if (CHUNK_COUNT_USES_CM256(data_chunks)) {
-        cm256_encoder_params params { (int)data_chunks, uint8_t(256 - data_chunks - 1), FEC_CHUNK_SIZE };
+        cm256_encoder_params params{(int)data_chunks, uint8_t(256 - data_chunks - 1), FEC_CHUNK_SIZE};
         cm256_encode_block(params, cm256_blocks, chunk_id, &fec_chunks->first[vector_idx]);
     } else {
         uint32_t chunk_bytes;
@@ -529,7 +537,8 @@ bool FECEncoder::BuildChunk(size_t vector_idx, bool overwrite) {
     return true;
 }
 
-bool FECEncoder::PrefillChunks() {
+bool FECEncoder::PrefillChunks()
+{
     bool fSuccess = true;
     for (size_t i = 0; i < fec_chunks->second.size() && fSuccess; i++) {
         fSuccess = BuildChunk(i);
@@ -537,7 +546,8 @@ bool FECEncoder::PrefillChunks() {
     return fSuccess;
 }
 
-bool BuildFECChunks(const std::vector<unsigned char>& data, std::pair<std::unique_ptr<FECChunkType[]>, std::vector<uint32_t>>& fec_chunks) {
+bool BuildFECChunks(const std::vector<unsigned char>& data, std::pair<std::unique_ptr<FECChunkType[]>, std::vector<uint32_t>>& fec_chunks)
+{
     FECEncoder enc(&data, &fec_chunks);
     return enc.PrefillChunks();
 }
@@ -545,7 +555,8 @@ bool BuildFECChunks(const std::vector<unsigned char>& data, std::pair<std::uniqu
 class FECInit
 {
 public:
-    FECInit() {
+    FECInit()
+    {
         assert(!wirehair_init());
         assert(!cm256_init());
         for (size_t i = 0; i < CACHE_STATES_COUNT; i++) {
