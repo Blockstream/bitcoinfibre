@@ -9,7 +9,6 @@
 #include <primitives/block.h>
 #include <sync.h>
 #include <uint256.h>
-#include <validation.h>
 
 #include <deque>
 #include <map>
