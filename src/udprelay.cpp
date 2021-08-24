@@ -1676,16 +1676,16 @@ bool HandleBlockTxMessage(UDPMessage& msg, size_t length, const CService& node, 
          * non-tip block header:
          *
          * 1) We need to decode the header in order to find out if we already
-         * have the corresponding block. If we do have the block already, we can
-         * ignore subsequent chunks of the block and, with that, save
-         * significant processing. We can push the header FEC object for
-         * processing just so that the chain is looked up. After that, we can
-         * wait until the body is decodable to process the header again.
+         *    have the corresponding block. If we do have the block already, we
+         *    can ignore subsequent chunks of the block and, with that, save
+         *    significant processing. We can push the header FEC object for
+         *    processing just so that the chain is looked up. After that, we can
+         *    wait until the body is decodable to process the header again.
          *
          * 2) If the backfill block has an empty "body", i.e. contains only the
-         * coinbase txn, which comes in the header. Such empty blocks are sent
-         * through the header only, in which case the header must be processed
-         * as soon as ready.
+         *    coinbase txn, which comes in the header. Such empty blocks are
+         *    sent through the header only, in which case the header must be
+         *    processed as soon as ready.
          *
          * Note also that it's perfectly possible that we start receiving a
          * block from a tip block object, but fail to complete it, and then we
