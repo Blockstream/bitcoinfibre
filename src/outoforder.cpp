@@ -5,11 +5,11 @@
 #include <consensus/validation.h>
 #include <dbwrapper.h>
 #include <logging.h>
+#include <outoforder.h>
 #include <primitives/block.h>
 #include <sync.h>
 #include <uint256.h>
 #include <validation.h>
-#include <outoforder.h>
 
 #include <deque>
 #include <map>
@@ -54,7 +54,7 @@ bool StoreOoOBlock(const CChainParams& chainparams, const std::shared_ptr<const 
 {
     LOCK(cs_ooob);
     LOCK(cs_main);
-    CDBWrapper * const ooob_db = GetOoOBlockDB();
+    CDBWrapper* const ooob_db = GetOoOBlockDB();
     auto key = std::make_pair(DB_SUBSEQUENT_BLOCK, pblock->hashPrevBlock);
     std::map<uint256, FlatFilePos> successors;
 
@@ -67,7 +67,7 @@ bool StoreOoOBlock(const CChainParams& chainparams, const std::shared_ptr<const 
     // Figure out the block's height from BIP34
     const Consensus::Params& consensusParams = chainparams.GetConsensus();
     const int height = (in_height == -1) ? ExtractHeightFromBlock(consensusParams, pblock) : in_height;
-    if (height == -1 || (!force && height < consensusParams.BIP34Height)) return false;  // nonsensical
+    if (height == -1 || (!force && height < consensusParams.BIP34Height)) return false; // nonsensical
 
     // Don't save blocks too far in the future, to prevent a DoS on pruning
     if (!force && (height > int(::ChainActive().Height() + MIN_BLOCKS_TO_KEEP))) return false;
@@ -86,14 +86,14 @@ void ProcessSuccessorOoOBlocks(ChainstateManager& chainman, const CChainParams& 
 {
     std::deque<uint256> queue;
     queue.push_back(prev_block_hash);
-    for ( ; !queue.empty(); queue.pop_front()) {
+    for (; !queue.empty(); queue.pop_front()) {
         uint256 head = queue.front();
         auto key = std::make_pair(DB_SUBSEQUENT_BLOCK, head);
 
         LOCK(cs_ooob);
         std::map<uint256, FlatFilePos> successors;
 
-        CDBWrapper *ooob_db = GetOoOBlockDB();
+        CDBWrapper* ooob_db = GetOoOBlockDB();
         ooob_db->Read(key, successors);
 
         if (successors.empty()) continue;
@@ -118,7 +118,7 @@ void CheckForOoOBlocks(ChainstateManager& chainman, const CChainParams& chainpar
     std::vector<uint256> to_process;
     {
         LOCK(cs_ooob);
-        CDBWrapper * const ooob_db = GetOoOBlockDB();
+        CDBWrapper* const ooob_db = GetOoOBlockDB();
 
         std::unique_ptr<CDBIterator> pcursor(ooob_db->NewIterator());
 

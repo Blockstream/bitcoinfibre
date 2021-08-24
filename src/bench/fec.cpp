@@ -12,16 +12,17 @@
 #include "txmempool.h"
 #include "util/time.h"
 
-#include "version.h"
 #include "streams.h"
+#include "version.h"
 
 #include <random>
 
 std::vector<std::pair<uint256, CTransactionRef>> extra_txn;
 
-#define DIV_CEIL(a, b) (((a) + (b) - 1) / (b))
+#define DIV_CEIL(a, b) (((a) + (b)-1) / (b))
 
-class Receiver {
+class Receiver
+{
 private:
     std::unique_ptr<FECDecoder> decoder;
     PartiallyDownloadedChunkBlock partialBlock;
@@ -31,19 +32,24 @@ private:
     size_t *total_chunks_consumed, *total_chunks_in_mempool, *non_fec_chunks;
 
 public:
-    Receiver(CTxMemPool& poolIn, size_t *total_chunks_consumed_in, size_t *total_chunks_in_mempool_in, size_t *non_fec_chunks_in, bool fIncludeBlock)
+    Receiver(CTxMemPool& poolIn, size_t* total_chunks_consumed_in, size_t* total_chunks_in_mempool_in, size_t* non_fec_chunks_in, bool fIncludeBlock)
         : partialBlock(&poolIn), expecting_full_block(fIncludeBlock), total_chunks_consumed(total_chunks_consumed_in),
-        total_chunks_in_mempool(total_chunks_in_mempool_in), non_fec_chunks(non_fec_chunks_in) {}
+          total_chunks_in_mempool(total_chunks_in_mempool_in), non_fec_chunks(non_fec_chunks_in) {}
 
-    ~Receiver() { if (expecting_full_block) assert(header_done && block_done); }
+    ~Receiver()
+    {
+        if (expecting_full_block) assert(header_done && block_done);
+    }
 
-    void InitHeader(size_t header_size) {
+    void InitHeader(size_t header_size)
+    {
         header_chunk_count = DIV_CEIL(header_size, FEC_CHUNK_SIZE);
         decoder.reset(new FECDecoder(header_size));
         (*non_fec_chunks) += header_chunk_count;
     }
 
-    void RecvHeaderChunk(const unsigned char* chunk, size_t idx) {
+    void RecvHeaderChunk(const unsigned char* chunk, size_t idx)
+    {
         if (header_done)
             return;
 
@@ -65,7 +71,8 @@ public:
         (*total_chunks_consumed)++;
     }
 
-    void InitBlock(size_t block_size_in) {
+    void InitBlock(size_t block_size_in)
+    {
         assert(header_done);
 
         block_size = block_size_in;
@@ -90,7 +97,8 @@ public:
         }
     }
 
-    bool RecvBlockChunk(const unsigned char* chunk, size_t idx) {
+    bool RecvBlockChunk(const unsigned char* chunk, size_t idx)
+    {
         if (block_done)
             return true;
 
@@ -125,7 +133,8 @@ public:
     }
 };
 
-void Send(CBlock& block, Receiver& recv, bool fIncludeBlock) {
+void Send(CBlock& block, Receiver& recv, bool fIncludeBlock)
+{
     CBlockHeaderAndLengthShortTxIDs headerAndIDs(block, codec_version_t::default_version, true);
     ChunkCodedBlock fecBlock(block, headerAndIDs);
 
@@ -134,7 +143,7 @@ void Send(CBlock& block, Receiver& recv, bool fIncludeBlock) {
     stream << headerAndIDs;
 
     size_t header_size = header_data.size();
-    size_t header_fec_chunk_count = 2*(DIV_CEIL(header_size, FEC_CHUNK_SIZE) + 10);
+    size_t header_fec_chunk_count = 2 * (DIV_CEIL(header_size, FEC_CHUNK_SIZE) + 10);
     std::pair<std::unique_ptr<FECChunkType[]>, std::vector<uint32_t>> header_fec_chunks(std::piecewise_construct, std::forward_as_tuple(new FECChunkType[header_fec_chunk_count]), std::forward_as_tuple(header_fec_chunk_count));
     FECEncoder header_encoder(&header_data, &header_fec_chunks);
 
@@ -143,7 +152,7 @@ void Send(CBlock& block, Receiver& recv, bool fIncludeBlock) {
     std::mt19937 g(0xdeadbeef);
 
     for (size_t i = 0; i < DIV_CEIL(header_size, FEC_CHUNK_SIZE); i++) {
-        std::vector<unsigned char>::iterator endit = header_data.begin() + std::min(header_size, (i+1) * FEC_CHUNK_SIZE);
+        std::vector<unsigned char>::iterator endit = header_data.begin() + std::min(header_size, (i + 1) * FEC_CHUNK_SIZE);
         std::vector<unsigned char> chunk(header_data.begin() + i * FEC_CHUNK_SIZE, endit);
         chunk.resize(FEC_CHUNK_SIZE);
         if (g() & 3)
@@ -160,7 +169,7 @@ void Send(CBlock& block, Receiver& recv, bool fIncludeBlock) {
         return;
 
     size_t block_size = fecBlock.GetCodedBlock().size();
-    size_t block_fec_chunk_count = 2*(DIV_CEIL(block_size, FEC_CHUNK_SIZE) + 10);
+    size_t block_fec_chunk_count = 2 * (DIV_CEIL(block_size, FEC_CHUNK_SIZE) + 10);
     std::pair<std::unique_ptr<FECChunkType[]>, std::vector<uint32_t>> block_fec_chunks(std::piecewise_construct, std::forward_as_tuple(new FECChunkType[block_fec_chunk_count]), std::forward_as_tuple(block_fec_chunk_count));
     FECEncoder block_encoder(&fecBlock.GetCodedBlock(), &block_fec_chunks);
 
@@ -180,7 +189,8 @@ void Send(CBlock& block, Receiver& recv, bool fIncludeBlock) {
 }
 
 // noinline here for easier profiling
-void __attribute__((noinline)) DoRealFECedBlockRoundTripTest(benchmark::Bench& bench, CTxMemPool& pool, CBlock& block, bool fIncludeBlock) {
+void __attribute__((noinline)) DoRealFECedBlockRoundTripTest(benchmark::Bench& bench, CTxMemPool& pool, CBlock& block, bool fIncludeBlock)
+{
     size_t total_chunks_consumed, total_chunks_in_mempool, non_fec_chunks;
     bench.run([&] {
         total_chunks_consumed = 0;
@@ -191,7 +201,7 @@ void __attribute__((noinline)) DoRealFECedBlockRoundTripTest(benchmark::Bench& b
     });
 }
 
-static void RealFECedBlockRoundTripTest(benchmark::Bench& bench, int ntxn, bool fIncludeBlock=true)
+static void RealFECedBlockRoundTripTest(benchmark::Bench& bench, int ntxn, bool fIncludeBlock = true)
 {
     CBlock block;
 
@@ -245,7 +255,8 @@ BENCHMARK(FECBlockRTTTest1555);
 
 BENCHMARK(FECHeaderRTTTest1550);
 
-static void FECEncodeBenchmark(benchmark::Bench& bench, bool fAll) {
+static void FECEncodeBenchmark(benchmark::Bench& bench, bool fAll)
+{
     const auto& data = benchmark::data::block413567;
     bench.run([&] {
         size_t fec_chunk_count = DIV_CEIL(data.size(), FEC_CHUNK_SIZE);
@@ -261,7 +272,8 @@ static void FECEncodeBenchmark(benchmark::Bench& bench, bool fAll) {
 static void FECEncodeOneBenchmark(benchmark::Bench& bench) { FECEncodeBenchmark(bench, false); }
 static void FECEncodeAllBenchmark(benchmark::Bench& bench) { FECEncodeBenchmark(bench, true); }
 
-static void FECDecodeBenchmark(benchmark::Bench& bench, unsigned mask, const MemoryUsageMode memory_usage_mode) {
+static void FECDecodeBenchmark(benchmark::Bench& bench, unsigned mask, const MemoryUsageMode memory_usage_mode)
+{
     const auto& data = benchmark::data::block413567;
     size_t fec_chunk_count = DIV_CEIL(data.size(), FEC_CHUNK_SIZE);
     std::pair<std::unique_ptr<FECChunkType[]>, std::vector<uint32_t>> fec(std::piecewise_construct, std::forward_as_tuple(new FECChunkType[fec_chunk_count]), std::forward_as_tuple(fec_chunk_count));
