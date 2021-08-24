@@ -57,7 +57,7 @@ public:
         // Convention: data chunks are stored first, while the metadata is
         // stored by the end of the mmapped file.
         m_data_storage = static_cast<char*>(::mmap(nullptr, m_file_size,
-            PROT_READ | PROT_WRITE, MAP_SHARED, chunk_file, 0));
+                                                   PROT_READ | PROT_WRITE, MAP_SHARED, chunk_file, 0));
         if (m_data_storage == MAP_FAILED) {
             ::close(chunk_file);
             throw std::runtime_error("mmap failed " + m_file_path.string() + " " + ::strerror(errno));

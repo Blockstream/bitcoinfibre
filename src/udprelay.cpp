@@ -6,22 +6,22 @@
 #include <udprelay.h>
 
 #include <chainparams.h>
-#include <consensus/consensus.h> // for MAX_BLOCK_SERIALIZED_SIZE
+#include <consensus/consensus.h>  // for MAX_BLOCK_SERIALIZED_SIZE
 #include <consensus/validation.h> // for BlockValidationState/TxValidationState
 #include <logging.h>
-#include <streams.h>
-#include <validation.h>
-#include <outoforder.h>
-#include <version.h>
 #include <net.h>
 #include <net_processing.h>
+#include <outoforder.h>
+#include <streams.h>
+#include <validation.h>
+#include <version.h>
 
-#include <queue>
-#include <condition_variable>
-#include <thread>
 #include <boost/algorithm/string.hpp>
-#include <boost/range/iterator_range.hpp>
 #include <boost/optional.hpp>
+#include <boost/range/iterator_range.hpp>
+#include <condition_variable>
+#include <queue>
+#include <thread>
 
 #if BOOST_VERSION < 105600
 #include <boost/utility/in_place_factory.hpp> // for boost::in_place
@@ -29,14 +29,14 @@
 
 #include <boost/thread.hpp>
 
-#define to_millis_double(t) (std::chrono::duration_cast<std::chrono::duration<double, std::chrono::milliseconds::period> >(t).count())
-#define DIV_CEIL(a, b) (((a) + (b) - 1) / (b))
+#define to_millis_double(t) (std::chrono::duration_cast<std::chrono::duration<double, std::chrono::milliseconds::period>>(t).count())
+#define DIV_CEIL(a, b) (((a) + (b)-1) / (b))
 
 static in_addr TRUSTED_PEER_DUMMY_IPADDR;
 auto res = inet_pton(AF_INET, "0.0.0.0", &TRUSTED_PEER_DUMMY_IPADDR);
 static unsigned short TRUSTED_PEER_DUMMY_PORT = 0;
 static CService TRUSTED_PEER_DUMMY(TRUSTED_PEER_DUMMY_IPADDR, TRUSTED_PEER_DUMMY_PORT);
-static std::map<std::pair<uint64_t, CService>, std::shared_ptr<PartialBlockData> > mapPartialBlocks;
+static std::map<std::pair<uint64_t, CService>, std::shared_ptr<PartialBlockData>> mapPartialBlocks;
 static std::unordered_set<uint64_t> setBlocksRelayed;
 // In cases where we receive a block without its previous block, or a block
 // which is already (to us) an orphan, we will not get a UDPRelayBlock
@@ -45,7 +45,8 @@ static std::unordered_set<uint64_t> setBlocksRelayed;
 // set here.
 static std::set<std::pair<uint64_t, CService>> setBlocksReceived;
 
-static std::map<std::pair<uint64_t, CService>, std::shared_ptr<PartialBlockData> >::iterator RemovePartialBlock(std::map<std::pair<uint64_t, CService>, std::shared_ptr<PartialBlockData> >::iterator it) {
+static std::map<std::pair<uint64_t, CService>, std::shared_ptr<PartialBlockData>>::iterator RemovePartialBlock(std::map<std::pair<uint64_t, CService>, std::shared_ptr<PartialBlockData>>::iterator it)
+{
     uint64_t const hash_prefix = it->first.first;
     std::lock_guard<std::mutex> lock(it->second->state_mutex);
     // Note that we do not modify perNodeChunkCount, as it might be "read-only" due to currentlyProcessing
@@ -73,30 +74,35 @@ static std::map<std::pair<uint64_t, CService>, std::shared_ptr<PartialBlockData>
     return mapPartialBlocks.erase(it);
 }
 
-static void RemovePartialBlock(const std::pair<uint64_t, CService>& key) {
+static void RemovePartialBlock(const std::pair<uint64_t, CService>& key)
+{
     auto it = mapPartialBlocks.find(key);
     if (it != mapPartialBlocks.end())
         RemovePartialBlock(it);
 }
 
-static void RemovePartialBlocks(uint64_t const hash_prefix) {
-    std::map<std::pair<uint64_t, CService>, std::shared_ptr<PartialBlockData> >::iterator it = mapPartialBlocks.lower_bound(std::make_pair(hash_prefix, TRUSTED_PEER_DUMMY));
+static void RemovePartialBlocks(uint64_t const hash_prefix)
+{
+    std::map<std::pair<uint64_t, CService>, std::shared_ptr<PartialBlockData>>::iterator it = mapPartialBlocks.lower_bound(std::make_pair(hash_prefix, TRUSTED_PEER_DUMMY));
     while (it != mapPartialBlocks.end() && it->first.first == hash_prefix)
         it = RemovePartialBlock(it);
 }
 
-std::shared_ptr<PartialBlockData> GetPartialBlockData(const std::pair<uint64_t, CService>& key){
+std::shared_ptr<PartialBlockData> GetPartialBlockData(const std::pair<uint64_t, CService>& key)
+{
     auto it = mapPartialBlocks.find(key);
     if (it != mapPartialBlocks.end())
         return it->second;
     return nullptr;
 }
 
-void ResetPartialBlocks(){
+void ResetPartialBlocks()
+{
     mapPartialBlocks.clear();
 }
 
-static inline void SendMessageToNode(const UDPMessage& msg, unsigned int length, bool high_prio, uint64_t hash_prefix, std::map<CService, UDPConnectionState>::iterator it) {
+static inline void SendMessageToNode(const UDPMessage& msg, unsigned int length, bool high_prio, uint64_t hash_prefix, std::map<CService, UDPConnectionState>::iterator it)
+{
     if ((it->second.state & STATE_INIT_COMPLETE) != STATE_INIT_COMPLETE)
         return;
 
@@ -121,13 +127,15 @@ static inline void SendMessageToNode(const UDPMessage& msg, unsigned int length,
         chunks_avail_it->second.SetChunkAvailable(chunk_id, n_chunks, is_blk_content_chunk);
 }
 
-static void SendMessageToAllNodes(const UDPMessage& msg, unsigned int length, bool high_prio, uint64_t hash_prefix) {
+static void SendMessageToAllNodes(const UDPMessage& msg, unsigned int length, bool high_prio, uint64_t hash_prefix)
+{
     for (std::map<CService, UDPConnectionState>::iterator it = mapUDPNodes.begin(); it != mapUDPNodes.end(); it++)
         if (it->second.connection.connection_type != UDP_CONNECTION_TYPE_INBOUND_ONLY)
             SendMessageToNode(msg, length, high_prio, hash_prefix, it);
 }
 
-static size_t CopyMessageData(UDPMessage& msg, const std::vector<unsigned char>& data, size_t msg_chunks, uint16_t chunk_id) {
+static size_t CopyMessageData(UDPMessage& msg, const std::vector<unsigned char>& data, size_t msg_chunks, uint16_t chunk_id)
+{
     msg.msg.block.chunk_id = htole16(chunk_id);
 
     size_t msg_size = (chunk_id == msg_chunks - 1) ? (data.size() % FEC_CHUNK_SIZE) : sizeof(msg.msg.block.data);
@@ -141,7 +149,8 @@ static size_t CopyMessageData(UDPMessage& msg, const std::vector<unsigned char>&
 /**
  * Send uncoded (non FEC-coded) data chunks to all peers
  */
-static void RelayUncodedChunks(UDPMessage& msg, const std::vector<unsigned char>& data, const size_t high_prio_chunks_per_peer, const uint64_t hash_prefix, const size_t chunk_limit) {
+static void RelayUncodedChunks(UDPMessage& msg, const std::vector<unsigned char>& data, const size_t high_prio_chunks_per_peer, const uint64_t hash_prefix, const size_t chunk_limit)
+{
     const size_t msg_chunks = DIV_CEIL(data.size(), FEC_CHUNK_SIZE);
 
     bool high_prio = high_prio_chunks_per_peer;
@@ -173,27 +182,25 @@ struct DataFECer {
     size_t fec_chunks;
     std::pair<std::unique_ptr<FECChunkType[]>, std::vector<uint32_t>> fec_data;
     FECEncoder enc;
-    DataFECer(const std::vector<unsigned char>& data, size_t fec_chunks_in) :
-        fec_chunks(fec_chunks_in),
-        fec_data(std::piecewise_construct, std::forward_as_tuple(new FECChunkType[fec_chunks]), std::forward_as_tuple(fec_chunks)),
-        enc(&data, &fec_data) {}
+    DataFECer(const std::vector<unsigned char>& data, size_t fec_chunks_in) : fec_chunks(fec_chunks_in),
+                                                                              fec_data(std::piecewise_construct, std::forward_as_tuple(new FECChunkType[fec_chunks]), std::forward_as_tuple(fec_chunks)),
+                                                                              enc(&data, &fec_data) {}
 
-    DataFECer(FECDecoder&& decoder, const std::vector<unsigned char>& data, size_t fec_chunks_in) :
-        fec_chunks(fec_chunks_in),
-        fec_data(std::piecewise_construct, std::forward_as_tuple(new FECChunkType[fec_chunks]), std::forward_as_tuple(fec_chunks)),
-        enc(std::move(decoder), &data, &fec_data) {}
+    DataFECer(FECDecoder&& decoder, const std::vector<unsigned char>& data, size_t fec_chunks_in) : fec_chunks(fec_chunks_in),
+                                                                                                    fec_data(std::piecewise_construct, std::forward_as_tuple(new FECChunkType[fec_chunks]), std::forward_as_tuple(fec_chunks)),
+                                                                                                    enc(std::move(decoder), &data, &fec_data) {}
 
 #if BOOST_VERSION < 105600
     // This is only necessary in order to construct this via a boost::in_place,
     // which is pre-c++11 and can only take arguments by value
-    DataFECer(FECDecoder* decoder, const std::vector<unsigned char>& data, size_t fec_chunks_in) :
-        fec_chunks(fec_chunks_in),
-        fec_data(std::piecewise_construct, std::forward_as_tuple(new FECChunkType[fec_chunks]), std::forward_as_tuple(fec_chunks)),
-        enc(std::move(*decoder), &data, &fec_data) {}
+    DataFECer(FECDecoder* decoder, const std::vector<unsigned char>& data, size_t fec_chunks_in) : fec_chunks(fec_chunks_in),
+                                                                                                   fec_data(std::piecewise_construct, std::forward_as_tuple(new FECChunkType[fec_chunks]), std::forward_as_tuple(fec_chunks)),
+                                                                                                   enc(std::move(*decoder), &data, &fec_data) {}
 #endif
 };
 
-static void CopyFECData(UDPMessage& msg, DataFECer& fec, size_t array_idx, bool overwrite_chunk = false) {
+static void CopyFECData(UDPMessage& msg, DataFECer& fec, size_t array_idx, bool overwrite_chunk = false)
+{
     bool const ret = fec.enc.BuildChunk(array_idx, overwrite_chunk);
     // TODO: Handle errors?
     assert(ret);
@@ -209,7 +216,8 @@ static void CopyFECData(UDPMessage& msg, DataFECer& fec, size_t array_idx, bool 
  * outbound service. This is useful for receive peers that are receiving from
  * (combining) more than one service.
  */
-static void RelayFECedChunks(UDPMessage& msg, DataFECer& fec, const size_t high_prio_chunks_per_peer, const uint64_t hash_prefix) {
+static void RelayFECedChunks(UDPMessage& msg, DataFECer& fec, const size_t high_prio_chunks_per_peer, const uint64_t hash_prefix)
+{
     assert(fec.fec_chunks > 9);
 
     bool high_prio = high_prio_chunks_per_peer;
@@ -238,15 +246,17 @@ static void RelayFECedChunks(UDPMessage& msg, DataFECer& fec, const size_t high_
     }
 }
 
-static inline void FillCommonMessageHeader(UDPMessage& msg, const uint64_t hash_prefix, uint8_t type, const size_t obj_size) {
-    msg.header.chk1            = 0;
-    msg.header.chk2            = 0;
-    msg.header.msg_type        = type;
-    msg.msg.block.hash_prefix  = htole64(hash_prefix);
-    msg.msg.block.obj_length   = htole32(obj_size);
+static inline void FillCommonMessageHeader(UDPMessage& msg, const uint64_t hash_prefix, uint8_t type, const size_t obj_size)
+{
+    msg.header.chk1 = 0;
+    msg.header.chk2 = 0;
+    msg.header.msg_type = type;
+    msg.msg.block.hash_prefix = htole64(hash_prefix);
+    msg.msg.block.obj_length = htole32(obj_size);
 }
 
-static inline void FillBlockMessageHeader(UDPMessage& msg, const uint64_t hash_prefix, UDPMessageType type, const size_t obj_size, uint8_t flags = HAVE_BLOCK) {
+static inline void FillBlockMessageHeader(UDPMessage& msg, const uint64_t hash_prefix, UDPMessageType type, const size_t obj_size, uint8_t flags = HAVE_BLOCK)
+{
     // First fill in common message elements
     FillCommonMessageHeader(msg, hash_prefix, type | flags, obj_size);
 }
@@ -258,7 +268,8 @@ static inline void FillBlockMessageHeader(UDPMessage& msg, const uint64_t hash_p
  * both. So it has to be called twice. After completion, all chunks (of the
  * header or block) will be queued up for transmission.
  */
-static void RelayChunks(const uint256& blockhash, UDPMessageType type, const std::vector<unsigned char>& data, DataFECer& fec) {
+static void RelayChunks(const uint256& blockhash, UDPMessageType type, const std::vector<unsigned char>& data, DataFECer& fec)
+{
     UDPMessage msg;
     uint64_t hash_prefix = blockhash.GetUint64(0);
     FillBlockMessageHeader(msg, hash_prefix, type, data.size(), (HAVE_BLOCK | TIP_BLOCK));
@@ -315,7 +326,8 @@ static void RelayChunks(const uint256& blockhash, UDPMessageType type, const std
     }
 }
 
-static void SendLimitedDataChunks(const uint256& blockhash, UDPMessageType type, const std::vector<unsigned char>& data) {
+static void SendLimitedDataChunks(const uint256& blockhash, UDPMessageType type, const std::vector<unsigned char>& data)
+{
     UDPMessage msg;
     uint64_t hash_prefix = blockhash.GetUint64(0);
     FillBlockMessageHeader(msg, hash_prefix, type, data.size(), (HAVE_BLOCK | TIP_BLOCK));
@@ -325,7 +337,8 @@ static void SendLimitedDataChunks(const uint256& blockhash, UDPMessageType type,
 
 static std::unique_ptr<std::thread> process_block_thread;
 
-void UDPRelayBlock(const CBlock& block, int nHeight) {
+void UDPRelayBlock(const CBlock& block, int nHeight)
+{
     std::chrono::steady_clock::time_point start;
     const bool fBench = LogAcceptCategory(BCLog::BENCH);
     if (fBench)
@@ -336,7 +349,7 @@ void UDPRelayBlock(const CBlock& block, int nHeight) {
     std::unique_lock<std::recursive_mutex> lock(cs_mapUDPNodes, std::defer_lock);
 
     if (maybe_have_write_nodes) { // Scope for partial_block_lock and partial_block_ptr
-        const std::vector<unsigned char> *chunk_coded_block = NULL;
+        const std::vector<unsigned char>* chunk_coded_block = NULL;
         bool skipEncode = false;
         std::unique_lock<std::mutex> partial_block_lock;
         std::shared_ptr<PartialBlockData> partial_block_ptr;
@@ -524,7 +537,8 @@ void UDPRelayBlock(const CBlock& block, int nHeight) {
  * the FEC chunk size. Otherwise, the txn is sent over a shorter datagram. This
  * function includes the size of each msg into the vector of msgs.
  */
-void UDPFillMessagesFromTx(const CTransaction& tx, std::vector<std::pair<UDPMessage, size_t>>& msgs) {
+void UDPFillMessagesFromTx(const CTransaction& tx, std::vector<std::pair<UDPMessage, size_t>>& msgs)
+{
     const uint256 hash(tx.GetWitnessHash());
     const uint64_t hash_prefix = hash.GetUint64(0);
 
@@ -606,8 +620,8 @@ void UDPFillMessagesFromTx(const CTransaction& tx, std::vector<std::pair<UDPMess
  * header chunks are sent and, lastly, the overhead block chunks.
  *
  */
-void UDPFillMessagesFromBlock(const CBlock& block, std::vector<UDPMessage>& msgs,
-                              const int height, const FecOverhead& overhead) {
+void UDPFillMessagesFromBlock(const CBlock& block, std::vector<UDPMessage>& msgs, const int height, const FecOverhead& overhead)
+{
     const uint256 hashBlock(block.GetHash());
     const uint64_t hash_prefix = hashBlock.GetUint64(0);
 
@@ -623,7 +637,7 @@ void UDPFillMessagesFromBlock(const CBlock& block, std::vector<UDPMessage>& msgs
      * be able to store the block in case it is received out-of-order. */
 
     const bool empty_block = (headerAndIDs.ShortTxIdCount() == 0);
-    const uint8_t flags    = empty_block ? (HAVE_BLOCK | EMPTY_BLOCK) : HAVE_BLOCK;
+    const uint8_t flags = empty_block ? (HAVE_BLOCK | EMPTY_BLOCK) : HAVE_BLOCK;
 
     std::vector<unsigned char> header_data;
     header_data.reserve(2500 + 8 * block.vtx.size()); // Rather conservatively high estimate
@@ -705,10 +719,11 @@ void UDPFillMessagesFromBlock(const CBlock& block, std::vector<UDPMessage>& msgs
 static std::mutex block_process_mutex;
 static std::condition_variable block_process_cv;
 static std::atomic_bool block_process_shutdown(false);
-static std::queue<std::pair<std::pair<uint64_t, CService>, std::shared_ptr<PartialBlockData> > > block_process_queue;
+static std::queue<std::pair<std::pair<uint64_t, CService>, std::shared_ptr<PartialBlockData>>> block_process_queue;
 static size_t queue_size_warn = 10; // Print queue size when it exceeds this
 
-static void DoBackgroundBlockProcessing(const std::pair<std::pair<uint64_t, CService>, std::shared_ptr<PartialBlockData> >& block_data) {
+static void DoBackgroundBlockProcessing(const std::pair<std::pair<uint64_t, CService>, std::shared_ptr<PartialBlockData>>& block_data)
+{
     // If we just blindly call ProcessNewBlock here, we have a cs_main/cs_mapUDPNodes inversion
     // (actually because fucking P2P code calls everything with cs_main already locked).
     // Instead we pass the processing back to ProcessNewBlockThread without cs_mapUDPNodes
@@ -722,7 +737,8 @@ static void DoBackgroundBlockProcessing(const std::pair<std::pair<uint64_t, CSer
     block_process_cv.notify_all();
 }
 
-static void ProcessBlockThread(ChainstateManager* chainman) {
+static void ProcessBlockThread(ChainstateManager* chainman)
+{
     const bool fBench = LogAcceptCategory(BCLog::BENCH);
 
     while (true) {
@@ -850,8 +866,8 @@ static void ProcessBlockThread(ChainstateManager* chainman) {
 
                 if (block.tip_blk) {
                     size_t mempool_txns = block.block_data.GetMempoolCount();
-                    size_t n_blk_txns   = header.BlockShortTxCount();
-                    block.txn_hit_ratio = (double) mempool_txns / n_blk_txns;
+                    size_t n_blk_txns = header.BlockShortTxCount();
+                    block.txn_hit_ratio = (double)mempool_txns / n_blk_txns;
                     LogPrint(BCLog::FEC, "UDP: Block %s - Txns available: %ld/%ld  Txn hit ratio: %f\n",
                              blockHash.ToString(), mempool_txns, n_blk_txns, block.txn_hit_ratio);
                     // When all txns are available in the mempool, the FEC-coded
@@ -926,7 +942,7 @@ static void ProcessBlockThread(ChainstateManager* chainman) {
                     const CBlock& decoded_block = *pdecoded_block;
                     if (fBench) {
                         uint32_t total_chunks_recvd = 0, total_chunks_used = 0;
-                        std::map<CService, std::pair<uint32_t, uint32_t> >& chunksProvidedByNode = block.perNodeChunkCount;
+                        std::map<CService, std::pair<uint32_t, uint32_t>>& chunksProvidedByNode = block.perNodeChunkCount;
                         for (const auto& provider : chunksProvidedByNode) {
                             total_chunks_recvd += provider.second.second;
                             total_chunks_used += provider.second.first;
@@ -959,7 +975,7 @@ static void ProcessBlockThread(ChainstateManager* chainman) {
                             have_prev = chainman->BlockIndex().count(pdecoded_block->hashPrevBlock);
                             BlockValidationState state;
                             outoforder_and_valid = !have_prev &&
-                                CheckBlock(*pdecoded_block, state, Params().GetConsensus());
+                                                   CheckBlock(*pdecoded_block, state, Params().GetConsensus());
                         }
 
                         LogPrintf("UDP: Failed to decode block %s\n", decoded_block.GetHash().ToString());
@@ -1045,7 +1061,7 @@ static void ProcessBlockThread(ChainstateManager* chainman) {
                     }
                 }
 
-                double chunk_hit_ratio = (double) mempool_provided_chunks / total_chunk_count;
+                double chunk_hit_ratio = (double)mempool_provided_chunks / total_chunk_count;
 
                 if (lock)
                     block.chunk_hit_ratio = chunk_hit_ratio;
@@ -1065,7 +1081,8 @@ void BlockRecvInit(ChainstateManager* chainman)
     process_block_thread.reset(new std::thread(&TraceThread<std::function<void()>>, "udpprocess", std::function<void()>(std::bind(&ProcessBlockThread, chainman))));
 }
 
-void BlockRecvShutdown() {
+void BlockRecvShutdown()
+{
     if (process_block_thread) {
         block_process_shutdown = true;
         block_process_cv.notify_all();
@@ -1166,13 +1183,15 @@ void LoadPartialBlocks(CTxMemPool* mempool)
 
 // TODO: Use the one from net_processing (with appropriate lock-free-ness)
 static std::vector<std::pair<uint256, CTransactionRef>> udpnet_dummy_extra_txn;
-ReadStatus PartialBlockData::ProvideHeaderData(const CBlockHeaderAndLengthShortTxIDs& header) {
+ReadStatus PartialBlockData::ProvideHeaderData(const CBlockHeaderAndLengthShortTxIDs& header)
+{
     assert(in_header);
     in_header = false;
     return block_data.InitData(header, udpnet_dummy_extra_txn);
 }
 
-static std::string GetChunkFilePrefix(const CService& peer, uint64_t hash_prefix){
+static std::string GetChunkFilePrefix(const CService& peer, uint64_t hash_prefix)
+{
     return peer.ToString() + "_" + std::to_string(hash_prefix);
 }
 
@@ -1230,13 +1249,12 @@ bool PartialBlockData::Init(const UDPMessage& msg)
     return true;
 }
 
-PartialBlockData::PartialBlockData(const CService& peer, CTxMemPool* mempool, const UDPMessage& msg, const std::chrono::steady_clock::time_point& packet_recv) :
-        timeHeaderRecvd(packet_recv), peer(peer),
-        in_header(true), blk_initialized(false), header_initialized(false),
-        is_decodeable(false), is_header_processing(false),
-        packet_awaiting_lock(false), awaiting_processing(false),
-        chain_lookup(false), currentlyProcessing(false), blk_len(0),
-        header_len(0), block_data(mempool)
+PartialBlockData::PartialBlockData(const CService& peer, CTxMemPool* mempool, const UDPMessage& msg, const std::chrono::steady_clock::time_point& packet_recv) : timeHeaderRecvd(packet_recv), peer(peer),
+                                                                                                                                                                 in_header(true), blk_initialized(false), header_initialized(false),
+                                                                                                                                                                 is_decodeable(false), is_header_processing(false),
+                                                                                                                                                                 packet_awaiting_lock(false), awaiting_processing(false),
+                                                                                                                                                                 chain_lookup(false), currentlyProcessing(false), blk_len(0),
+                                                                                                                                                                 header_len(0), block_data(mempool)
 {
     bool const ret = Init(msg);
     assert(ret);
@@ -1277,19 +1295,19 @@ bool PartialBlockData::Init(const ChunkFileNameParts& cfp)
     return true;
 }
 
-PartialBlockData::PartialBlockData(const CService& peer, CTxMemPool* mempool, const ChunkFileNameParts& cfp) :
-        timeHeaderRecvd(std::chrono::steady_clock::now()), peer(peer),
-        in_header(true), blk_initialized(false), header_initialized(false),
-        is_decodeable(false), is_header_processing(false),
-        packet_awaiting_lock(false), awaiting_processing(false),
-        chain_lookup(false), currentlyProcessing(false), blk_len(0),
-        header_len(0), block_data(mempool), tip_blk(false)
+PartialBlockData::PartialBlockData(const CService& peer, CTxMemPool* mempool, const ChunkFileNameParts& cfp) : timeHeaderRecvd(std::chrono::steady_clock::now()), peer(peer),
+                                                                                                               in_header(true), blk_initialized(false), header_initialized(false),
+                                                                                                               is_decodeable(false), is_header_processing(false),
+                                                                                                               packet_awaiting_lock(false), awaiting_processing(false),
+                                                                                                               chain_lookup(false), currentlyProcessing(false), blk_len(0),
+                                                                                                               header_len(0), block_data(mempool), tip_blk(false)
 {
     bool const ret = Init(cfp);
     assert(ret);
 }
 
-void PartialBlockData::ReconstructBlockFromDecoder() {
+void PartialBlockData::ReconstructBlockFromDecoder()
+{
     assert(body_decoder.DecodeReady());
 
     for (uint32_t i = 0; i < DIV_CEIL(blk_len, sizeof(UDPBlockMessage::data)); i++) {
@@ -1332,13 +1350,15 @@ std::string PartialBlockData::GetSenders()
     return senders;
 }
 
-static void BlockMsgHToLE(UDPMessage& msg) {
+static void BlockMsgHToLE(UDPMessage& msg)
+{
     msg.msg.block.hash_prefix = htole64(msg.msg.block.hash_prefix);
-    msg.msg.block.obj_length  = htole32(msg.msg.block.obj_length);
-    msg.msg.block.chunk_id    = htole32(msg.msg.block.chunk_id);
+    msg.msg.block.obj_length = htole32(msg.msg.block.obj_length);
+    msg.msg.block.chunk_id = htole32(msg.msg.block.chunk_id);
 }
 
-static bool HandleTx(UDPMessage& msg, size_t length, const CService& node, UDPConnectionState& state, const NodeContext* const node_context) {
+static bool HandleTx(UDPMessage& msg, size_t length, const CService& node, UDPConnectionState& state, const NodeContext* const node_context)
+{
     if (msg.msg.block.obj_length > 400000) {
         LogPrintf("UDP: Got massive tx obj_length of %u\n", msg.msg.block.obj_length);
         return false;
@@ -1346,7 +1366,7 @@ static bool HandleTx(UDPMessage& msg, size_t length, const CService& node, UDPCo
 
     if (state.tx_in_flight_hash_prefix != msg.msg.block.hash_prefix) {
         state.tx_in_flight_hash_prefix = msg.msg.block.hash_prefix;
-        state.tx_in_flight_msg_size    = msg.msg.block.obj_length;
+        state.tx_in_flight_msg_size = msg.msg.block.obj_length;
         state.tx_in_flight.reset(new FECDecoder(msg.msg.block.obj_length, MemoryUsageMode::USE_MEMORY));
         // NOTE: always place txn chunks directly in memory instead of disk. The
         // FEC decoding is expected to be quick in this case.
@@ -1391,7 +1411,8 @@ static bool HandleTx(UDPMessage& msg, size_t length, const CService& node, UDPCo
     return true;
 }
 
-bool HandleBlockTxMessage(UDPMessage& msg, size_t length, const CService& node, UDPConnectionState& state, const std::chrono::steady_clock::time_point& packet_process_start, const int sockfd, const NodeContext* const node_context) {
+bool HandleBlockTxMessage(UDPMessage& msg, size_t length, const CService& node, UDPConnectionState& state, const std::chrono::steady_clock::time_point& packet_process_start, const int sockfd, const NodeContext* const node_context)
+{
     //TODO: There are way too many damn tree lookups here...either cut them down or increase parallelism
     const bool fBench = LogAcceptCategory(BCLog::BENCH);
     std::chrono::steady_clock::time_point start;
@@ -1406,19 +1427,19 @@ bool HandleBlockTxMessage(UDPMessage& msg, size_t length, const CService& node, 
     }
 
     msg.msg.block.hash_prefix = le64toh(msg.msg.block.hash_prefix);
-    msg.msg.block.obj_length  = le32toh(msg.msg.block.obj_length);
-    msg.msg.block.chunk_id    = le32toh(msg.msg.block.chunk_id);
+    msg.msg.block.obj_length = le32toh(msg.msg.block.obj_length);
+    msg.msg.block.chunk_id = le32toh(msg.msg.block.chunk_id);
 
     if ((msg.header.msg_type & UDP_MSG_TYPE_TYPE_MASK) == MSG_TYPE_TX_CONTENTS)
         return HandleTx(msg, length, node, state, node_context);
 
-    const bool is_blk_header_chunk  = (msg.header.msg_type & UDP_MSG_TYPE_TYPE_MASK) == MSG_TYPE_BLOCK_HEADER;
+    const bool is_blk_header_chunk = (msg.header.msg_type & UDP_MSG_TYPE_TYPE_MASK) == MSG_TYPE_BLOCK_HEADER;
     const bool is_blk_content_chunk = (msg.header.msg_type & UDP_MSG_TYPE_TYPE_MASK) == MSG_TYPE_BLOCK_CONTENTS;
-    const bool they_have_block      = msg.header.msg_type & HAVE_BLOCK;
-    const bool empty_block          = msg.header.msg_type & EMPTY_BLOCK; // a block that comes entirely through the header
+    const bool they_have_block = msg.header.msg_type & HAVE_BLOCK;
+    const bool empty_block = msg.header.msg_type & EMPTY_BLOCK; // a block that comes entirely through the header
 
     const uint64_t hash_prefix = msg.msg.block.hash_prefix; // Need a reference in a few places, but its packed, so we can't have one directly
-    CService peer              = state.connection.fTrusted ? TRUSTED_PEER_DUMMY : node;
+    CService peer = state.connection.fTrusted ? TRUSTED_PEER_DUMMY : node;
     const std::pair<uint64_t, CService> hash_peer_pair = std::make_pair(hash_prefix, peer);
 
     if (msg.msg.block.obj_length > MAX_BLOCK_SERIALIZED_SIZE * MAX_CHUNK_CODED_BLOCK_SIZE_FACTOR) {
@@ -1439,7 +1460,7 @@ bool HandleBlockTxMessage(UDPMessage& msg, size_t length, const CService& node, 
             if (state.chunks_avail.size() > 1 && !state.connection.fTrusted) {
                 // Non-trusted nodes can only be forwarding up to 2 blocks at a time
                 assert(state.chunks_avail.size() == 2);
-                auto first_partial_block_it  = mapPartialBlocks.find(std::make_pair(state.chunks_avail. begin()->first, node));
+                auto first_partial_block_it = mapPartialBlocks.find(std::make_pair(state.chunks_avail.begin()->first, node));
                 assert(first_partial_block_it != mapPartialBlocks.end());
                 auto second_partial_block_it = mapPartialBlocks.find(std::make_pair(state.chunks_avail.rbegin()->first, node));
                 assert(second_partial_block_it != mapPartialBlocks.end());
@@ -1469,8 +1490,8 @@ bool HandleBlockTxMessage(UDPMessage& msg, size_t length, const CService& node, 
          */
         chunks_avail_it = state.chunks_avail.emplace(std::piecewise_construct,
                                                      std::forward_as_tuple(hash_prefix),
-                                                     std::forward_as_tuple(they_have_block, n_chunks, is_blk_header_chunk)
-            ).first;
+                                                     std::forward_as_tuple(they_have_block, n_chunks, is_blk_header_chunk))
+                              .first;
     }
 
     if (they_have_block)
@@ -1498,8 +1519,8 @@ bool HandleBlockTxMessage(UDPMessage& msg, size_t length, const CService& node, 
     std::unique_lock<std::mutex> block_lock(block.state_mutex, std::try_to_lock);
 
     if ((is_blk_content_chunk && (block.is_decodeable || block.currentlyProcessing)) || // condition 1
-        (is_blk_header_chunk && block.is_header_processing) || // condition 2
-        (is_blk_header_chunk && !block.in_header)) { // condition 3
+        (is_blk_header_chunk && block.is_header_processing) ||                          // condition 2
+        (is_blk_header_chunk && !block.in_header)) {                                    // condition 3
         /*
          * It seems this chunk isn't necessary, so it will be dropped. Yet, the
          * fact that we are here indicates that the block has not been processed
@@ -1545,8 +1566,8 @@ bool HandleBlockTxMessage(UDPMessage& msg, size_t length, const CService& node, 
     // unnecessary, return now that we already registered the chunk on
     // perNodeChunkCount.
     if ((is_blk_content_chunk && (block.is_decodeable || block.currentlyProcessing)) || // condition 1
-        (is_blk_header_chunk && block.is_header_processing) || // condition 2
-        (is_blk_header_chunk && !block.in_header)) { // condition 3
+        (is_blk_header_chunk && block.is_header_processing) ||                          // condition 2
+        (is_blk_header_chunk && !block.in_header)) {                                    // condition 3
         return true;
     }
 
@@ -1687,7 +1708,7 @@ bool HandleBlockTxMessage(UDPMessage& msg, size_t length, const CService& node, 
             (block.tip_blk ||
              (block.is_header_processing && (!block.chain_lookup || empty_block || block.is_decodeable)) ||
              (block.is_decodeable && !block.in_header)) // if for some reason we've processed the header of the non-tip block already
-            ) {
+        ) {
             block.awaiting_processing = true;
             DoBackgroundBlockProcessing(*it);
         }
@@ -1705,7 +1726,8 @@ bool HandleBlockTxMessage(UDPMessage& msg, size_t length, const CService& node, 
     return true;
 }
 
-void ProcessDownloadTimerEvents() {
+void ProcessDownloadTimerEvents()
+{
     std::unique_lock<std::recursive_mutex> lock(cs_mapUDPNodes);
     for (auto it = mapPartialBlocks.begin(); it != mapPartialBlocks.end();) {
         if (std::chrono::steady_clock::now() - it->second->timeHeaderRecvd > std::chrono::hours(36))
@@ -1734,42 +1756,46 @@ struct ChunkStats {
     BlkChunkStats max_blk;
 };
 
-BlkChunkStats GetBlkChunkStats(const PartialBlockData& b) {
+BlkChunkStats GetBlkChunkStats(const PartialBlockData& b)
+{
     BlkChunkStats s;
-    s.height          = b.height;
-    s.header_rcvd     = b.header_decoder.GetChunksRcvd();
-    s.body_rcvd       = b.body_decoder.GetChunksRcvd();
+    s.height = b.height;
+    s.header_rcvd = b.header_decoder.GetChunksRcvd();
+    s.body_rcvd = b.body_decoder.GetChunksRcvd();
     const bool h_init = b.header_initialized;
     const bool b_init = b.blk_initialized;
     s.header_expected = (h_init) ? b.header_decoder.GetChunkCount() : 0;
-    s.body_expected   = (b_init) ? b.body_decoder.GetChunkCount() : 0;
-    s.progress        = (h_init && b_init) ?
-        100.0 * ((double) (s.header_rcvd + s.body_rcvd)) /
-        (s.header_expected + s.body_expected) : 0.0;
+    s.body_expected = (b_init) ? b.body_decoder.GetChunkCount() : 0;
+    s.progress = (h_init && b_init) ?
+                     100.0 * ((double)(s.header_rcvd + s.body_rcvd)) /
+                         (s.header_expected + s.body_expected) :
+                     0.0;
     return s;
 }
 
 /* Convert block stats to JSON */
-UniValue BlkChunkStatsToJSON(const BlkChunkStats& s) {
-        std::ostringstream h_stream;
-        std::ostringstream b_stream;
-        std::ostringstream p_stream;
-        h_stream << s.header_rcvd << " / " << s.header_expected;
-        b_stream << s.body_rcvd << " / " << s.body_expected;
-        p_stream << std::setprecision(4) << s.progress << "%";
+UniValue BlkChunkStatsToJSON(const BlkChunkStats& s)
+{
+    std::ostringstream h_stream;
+    std::ostringstream b_stream;
+    std::ostringstream p_stream;
+    h_stream << s.header_rcvd << " / " << s.header_expected;
+    b_stream << s.body_rcvd << " / " << s.body_expected;
+    p_stream << std::setprecision(4) << s.progress << "%";
 
-        UniValue info(UniValue::VOBJ);
-        if (s.height != -1)
-            info.pushKV("height", s.height);
-        info.pushKV("header_chunks", h_stream.str());
-        info.pushKV("body_chunks", b_stream.str());
-        info.pushKV("progress", p_stream.str());
-        return info;
+    UniValue info(UniValue::VOBJ);
+    if (s.height != -1)
+        info.pushKV("height", s.height);
+    info.pushKV("header_chunks", h_stream.str());
+    info.pushKV("body_chunks", b_stream.str());
+    info.pushKV("progress", p_stream.str());
+    return info;
 }
 
 /* Given a block height of interest, search if there is a partial block with
  * that height currently in memory and return the stats of that block in JSON */
-UniValue BlkChunkStatsToJSON(const int target_height) {
+UniValue BlkChunkStatsToJSON(const int target_height)
+{
     std::unique_lock<std::recursive_mutex> lock(cs_mapUDPNodes);
     for (const auto& b : mapPartialBlocks) {
         std::unique_lock<std::mutex> block_lock(b.second->state_mutex);
@@ -1783,7 +1809,8 @@ UniValue BlkChunkStatsToJSON(const int target_height) {
 }
 
 /* Return JSON with chunk stats of the current partial blocks with min and max height */
-UniValue MaxMinBlkChunkStatsToJSON() {
+UniValue MaxMinBlkChunkStatsToJSON()
+{
     std::unique_lock<std::recursive_mutex> lock(cs_mapUDPNodes);
     ChunkStats s;
 
@@ -1800,12 +1827,12 @@ UniValue MaxMinBlkChunkStatsToJSON() {
 
         if (blk_s.height < s.min_height) {
             s.min_height = blk_s.height;
-            s.min_blk    = blk_s;
+            s.min_blk = blk_s;
         }
 
         if (blk_s.height > s.max_height) {
             s.max_height = blk_s.height;
-            s.max_blk    = blk_s;
+            s.max_blk = blk_s;
         }
     }
 
@@ -1823,7 +1850,8 @@ UniValue MaxMinBlkChunkStatsToJSON() {
 }
 
 /* Return JSON with chunk stats of all current partial blocks */
-UniValue AllBlkChunkStatsToJSON() {
+UniValue AllBlkChunkStatsToJSON()
+{
     std::unique_lock<std::recursive_mutex> lock(cs_mapUDPNodes);
     UniValue o(UniValue::VOBJ);
     for (const auto& b : mapPartialBlocks) {
@@ -1844,7 +1872,8 @@ UniValue AllBlkChunkStatsToJSON() {
  * The ratio refers to the number FEC chunks or txns already available for
  * incoming compact blocks in relation to the total number of chunks or txns in
  * the block. */
-UniValue FecHitRatioToJson() {
+UniValue FecHitRatioToJson()
+{
     UniValue ret(UniValue::VOBJ);
     std::unique_lock<std::recursive_mutex> lock(cs_mapUDPNodes);
     for (auto it = mapUDPNodes.begin(); it != mapUDPNodes.end(); it++) {
