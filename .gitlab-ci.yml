@@ -167,6 +167,8 @@ deb-packages:
   parallel:
     matrix:
       - TARGET: [
+        "bullseye-amd64",
+        "bullseye-i386",
         "buster-amd64",
         "buster-i386",
         "buster-arm64",
@@ -214,8 +216,6 @@ rpm-packages:
     matrix:
       - TARGET: [
         "epel-8-x86_64",
-        "fedora-32-x86_64",
-        "fedora-32-i386",
         "fedora-33-x86_64",
         "fedora-33-i386",
         "fedora-34-x86_64",
