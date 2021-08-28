@@ -36,6 +36,7 @@ static in_addr TRUSTED_PEER_DUMMY_IPADDR;
 auto res = inet_pton(AF_INET, "0.0.0.0", &TRUSTED_PEER_DUMMY_IPADDR);
 static unsigned short TRUSTED_PEER_DUMMY_PORT = 0;
 static CService TRUSTED_PEER_DUMMY(TRUSTED_PEER_DUMMY_IPADDR, TRUSTED_PEER_DUMMY_PORT);
+static bool sync_with_trusted_peer = false;
 static std::map<std::pair<uint64_t, CService>, std::shared_ptr<PartialBlockData>> mapPartialBlocks;
 static std::unordered_set<uint64_t> setBlocksRelayed;
 // In cases where we receive a block without its previous block, or a block
@@ -983,8 +984,15 @@ static void ProcessBlockThread(ChainstateManager* chainman)
                         /* Only save out-of-order blocks that are minimally
                          * valid */
                         bool ooob_saved = false;
-                        if (outoforder_and_valid)
+                        if (outoforder_and_valid) {
                             ooob_saved = StoreOoOBlock(Params(), pdecoded_block, force_requested, block.height);
+
+                            // If the OOOB was actually a tip block coming from
+                            // a trusted peer, we are no longer in sync
+                            if (ooob_saved && node == TRUSTED_PEER_DUMMY && block.tip_blk) {
+                                sync_with_trusted_peer = false;
+                            }
+                        }
 
                         std::lock_guard<std::recursive_mutex> udpNodesLock(cs_mapUDPNodes);
 
@@ -1002,6 +1010,18 @@ static void ProcessBlockThread(ChainstateManager* chainman)
                         if (fNewBlock) {
                             LogPrintf("UDP: Block %s had serialized size %lu\n", decoded_block.GetHash().ToString(), GetSerializeSize(decoded_block, PROTOCOL_VERSION));
                         }
+                    }
+
+                    // Assume we are in sync when, upon reception of a tip block
+                    // from a trusted peer, the received block actually becomes
+                    // the tip of the active chain.
+                    uint256 tip_hash;
+                    {
+                        LOCK(cs_main);
+                        tip_hash = chainman->ActiveChain().Tip()->GetBlockHash();
+                    }
+                    if (node == TRUSTED_PEER_DUMMY && block.tip_blk) {
+                        sync_with_trusted_peer = tip_hash == decoded_block.GetHash();
                     }
 
                     std::lock_guard<std::recursive_mutex> udpNodesLock(cs_mapUDPNodes);
@@ -1729,8 +1749,12 @@ bool HandleBlockTxMessage(UDPMessage& msg, size_t length, const CService& node, 
 void ProcessDownloadTimerEvents()
 {
     std::unique_lock<std::recursive_mutex> lock(cs_mapUDPNodes);
+    std::chrono::steady_clock::time_point t_now(std::chrono::steady_clock::now());
     for (auto it = mapPartialBlocks.begin(); it != mapPartialBlocks.end();) {
-        if (std::chrono::steady_clock::now() - it->second->timeHeaderRecvd > std::chrono::hours(36))
+        // Time out partial blocks after 36h. However, if the block is coming
+        // from a trusted peer, and we are not yet in sync with this peer, don't
+        // time out the block at all.
+        if (((it->second->peer != TRUSTED_PEER_DUMMY) || sync_with_trusted_peer) && (t_now - it->second->timeHeaderRecvd > std::chrono::hours(36)))
             it = RemovePartialBlock(it);
         else
             it++;
