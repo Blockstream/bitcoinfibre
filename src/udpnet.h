@@ -102,7 +102,8 @@ struct ChunkFileNameParts {
 };
 
 struct PartialBlockData {
-    const std::chrono::steady_clock::time_point timeHeaderRecvd;
+    const std::chrono::steady_clock::time_point t_created;
+    std::chrono::steady_clock::time_point t_last_rx;
     const CService peer; // sender peer (either a "trusted peer" or a real peer)
     // NOTE: when peer == TRUSTED_PEER_DUMMY, the actual senders are available in the perNodeChunkCount map
     std::atomic_bool in_header;            // Indicates we are currently downloading header (or block txn)
@@ -140,7 +141,7 @@ struct PartialBlockData {
     bool Init(const ChunkFileNameParts& cfp);
 
     ReadStatus ProvideHeaderData(const CBlockHeaderAndLengthShortTxIDs& header);
-    PartialBlockData(const CService& node, CTxMemPool* mempool, const UDPMessage& header_msg, const std::chrono::steady_clock::time_point& packet_recv); // Must be a MSG_TYPE_BLOCK_HEADER
+    PartialBlockData(const CService& node, CTxMemPool* mempool, const UDPMessage& msg, const std::chrono::steady_clock::time_point& packet_recv);
     PartialBlockData(const CService& peer, CTxMemPool* mempool, const ChunkFileNameParts& cfp);
 
     void ReconstructBlockFromDecoder();
