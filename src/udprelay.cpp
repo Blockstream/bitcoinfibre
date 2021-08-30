@@ -952,7 +952,7 @@ static void ProcessBlockThread(ChainstateManager* chainman)
                          * accurate. It reflects the count up to when the block
                          * is decoded. However, further chunks may still be
                          * received after the block is decoded. */
-                        LogPrintf("UDP: Block %s reconstructed with %u chunks in %lf ms (%u recvd from %u peers)\n", decoded_block.GetHash().ToString(), total_chunks_used, to_millis_double(std::chrono::steady_clock::now() - block.timeHeaderRecvd), total_chunks_recvd, chunksProvidedByNode.size());
+                        LogPrintf("UDP: Block %s reconstructed with %u chunks in %lf ms (%u recvd from %u peers)\n", decoded_block.GetHash().ToString(), total_chunks_used, to_millis_double(std::chrono::steady_clock::now() - block.t_created), total_chunks_recvd, chunksProvidedByNode.size());
                         for (const auto& provider : chunksProvidedByNode)
                             LogPrintf("UDP:    %u/%u used from %s\n", provider.second.first, provider.second.second, provider.first.ToString());
                     }
@@ -1269,7 +1269,7 @@ bool PartialBlockData::Init(const UDPMessage& msg)
     return true;
 }
 
-PartialBlockData::PartialBlockData(const CService& peer, CTxMemPool* mempool, const UDPMessage& msg, const std::chrono::steady_clock::time_point& packet_recv) : timeHeaderRecvd(packet_recv), peer(peer),
+PartialBlockData::PartialBlockData(const CService& peer, CTxMemPool* mempool, const UDPMessage& msg, const std::chrono::steady_clock::time_point& packet_recv) : t_created(packet_recv), t_last_rx(packet_recv), peer(peer),
                                                                                                                                                                  in_header(true), blk_initialized(false), header_initialized(false),
                                                                                                                                                                  is_decodeable(false), is_header_processing(false),
                                                                                                                                                                  packet_awaiting_lock(false), awaiting_processing(false),
@@ -1315,7 +1315,7 @@ bool PartialBlockData::Init(const ChunkFileNameParts& cfp)
     return true;
 }
 
-PartialBlockData::PartialBlockData(const CService& peer, CTxMemPool* mempool, const ChunkFileNameParts& cfp) : timeHeaderRecvd(std::chrono::steady_clock::now()), peer(peer),
+PartialBlockData::PartialBlockData(const CService& peer, CTxMemPool* mempool, const ChunkFileNameParts& cfp) : t_created(std::chrono::steady_clock::now()), t_last_rx(t_created), peer(peer),
                                                                                                                in_header(true), blk_initialized(false), header_initialized(false),
                                                                                                                is_decodeable(false), is_header_processing(false),
                                                                                                                packet_awaiting_lock(false), awaiting_processing(false),
@@ -1484,7 +1484,7 @@ bool HandleBlockTxMessage(UDPMessage& msg, size_t length, const CService& node, 
                 assert(first_partial_block_it != mapPartialBlocks.end());
                 auto second_partial_block_it = mapPartialBlocks.find(std::make_pair(state.chunks_avail.rbegin()->first, node));
                 assert(second_partial_block_it != mapPartialBlocks.end());
-                if (first_partial_block_it->second->timeHeaderRecvd < second_partial_block_it->second->timeHeaderRecvd) {
+                if (first_partial_block_it->second->t_created < second_partial_block_it->second->t_created) {
                     state.chunks_avail.erase(first_partial_block_it->first.first);
                     mapPartialBlocks.erase(first_partial_block_it);
                 } else {
@@ -1663,6 +1663,10 @@ bool HandleBlockTxMessage(UDPMessage& msg, size_t length, const CService& node, 
     // Keep track of chunks that are actually used for decoding
     perNodeChunkCountIt->second.first++;
 
+    // Track the timestamp of the last FEC chunk actually used for decoding
+    // (used to detect and time out inactive partial blocks)
+    block.t_last_rx = packet_process_start;
+
     if (state.connection.fTrusted) {
         BlockMsgHToLE(msg);
         msg.header.msg_type &= ~HAVE_BLOCK;
@@ -1754,10 +1758,12 @@ void ProcessDownloadTimerEvents()
         // Time out partial blocks after 36h. However, if the block is coming
         // from a trusted peer, and we are not yet in sync with this peer, don't
         // time out the block at all.
-        if (((it->second->peer != TRUSTED_PEER_DUMMY) || sync_with_trusted_peer) && (t_now - it->second->timeHeaderRecvd > std::chrono::hours(36)))
+        if (((it->second->peer != TRUSTED_PEER_DUMMY) || sync_with_trusted_peer) && (t_now - it->second->t_last_rx > std::chrono::hours(6))) {
+            LogPrint(BCLog::FEC, "Timing out partial block %lu\n", it->first.first);
             it = RemovePartialBlock(it);
-        else
+        } else {
             it++;
+        }
     }
     //TODO: Prune setBlocksRelayed and setBlocksReceived to keep lookups fast?
 }
