@@ -257,7 +257,7 @@ struct CTxCompressor
             }
         }
         else {
-            throw std::runtime_error("Unsupported codec version");
+            throw std::invalid_argument("Unsupported codec version " + std::to_string(codec_version));
         }
     }
 
@@ -288,7 +288,7 @@ struct CTxCompressor
             }
         }
         else {
-            throw std::runtime_error("Unsupported codec version");
+            throw std::invalid_argument("Unsupported codec version " + std::to_string(codec_version));
         }
     }
 private:
