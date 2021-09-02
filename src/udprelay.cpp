@@ -934,8 +934,11 @@ static void ProcessBlockThread(ChainstateManager* chainman)
                             if (it != mapUDPNodes.end())
                                 DisconnectNode(it);
                         }
+                        // Make sure this invalid block is not downloaded again in the future
+                        setBlocksReceived.insert(process_block.first);
+                    } else if (status == READ_STATUS_UNSUPPORTED) {
+                        LogPrintf("UDP: Dropping block %s received with unsupported txn codec version.\n", block.block_data.GetBlockHash().ToString());
                     }
-                    setBlocksReceived.insert(process_block.first);
                     RemovePartialBlock(process_block.first);
                     break;
                 } else {
