@@ -9,26 +9,27 @@ BOOST_AUTO_TEST_SUITE(udprelay_tests)
 BOOST_AUTO_TEST_CASE(test_ischunkfilerecoverable)
 {
     ChunkFileNameParts cfp;
-    BOOST_CHECK(!IsChunkFileRecoverable(":8080_1234_body_2000", cfp));              // missing ip
-    BOOST_CHECK(!IsChunkFileRecoverable("256.16.235.1:8080_1234_body_2000", cfp));  // invalid ip
+    BOOST_CHECK(!IsChunkFileRecoverable("_8080_1234_body_2000", cfp));              // missing ip
+    BOOST_CHECK(!IsChunkFileRecoverable("256.16.235.1_8080_1234_body_2000", cfp));  // invalid ip
     BOOST_CHECK(!IsChunkFileRecoverable("172.16.235.1_1234_body_2000", cfp));       // missing port
-    BOOST_CHECK(!IsChunkFileRecoverable("172.16.235.1:8080_body_2000", cfp));       // missing hash_prefix
-    BOOST_CHECK(!IsChunkFileRecoverable("172.16.235.1:8080_1234_2000", cfp));       // missing type
-    BOOST_CHECK(!IsChunkFileRecoverable("172.16.235.1:8080_1234_body_", cfp));      // missing length
-    BOOST_CHECK(!IsChunkFileRecoverable("172.16.235.1:8080-1234_body_2000", cfp));  // invalid delimiter
-    BOOST_CHECK(!IsChunkFileRecoverable("172.16.235.1:8080_abc_body_2000", cfp));   // invalid hash_prefix
-    BOOST_CHECK(!IsChunkFileRecoverable("172.16.235.1:8080_1234_test_2000", cfp));  // invalid type
-    BOOST_CHECK(!IsChunkFileRecoverable("172.16.235.1:8080_1234_body_g2000", cfp)); // invalid length
-    BOOST_CHECK(IsChunkFileRecoverable("172.16.235.1:8080_1234_body_2000", cfp));   // valid case
+    BOOST_CHECK(!IsChunkFileRecoverable("172.16.235.1_8080_body_2000", cfp));       // missing hash_prefix
+    BOOST_CHECK(!IsChunkFileRecoverable("172.16.235.1_8080_1234_2000", cfp));       // missing type
+    BOOST_CHECK(!IsChunkFileRecoverable("172.16.235.1_8080_1234_body_", cfp));      // missing length
+    BOOST_CHECK(!IsChunkFileRecoverable("172.16.235.1_8080-1234_body_2000", cfp));  // invalid delimiter
+    BOOST_CHECK(!IsChunkFileRecoverable("172.16.235.1_8080_abc_body_2000", cfp));   // invalid hash_prefix
+    BOOST_CHECK(!IsChunkFileRecoverable("172.16.235.1_8080_1234_test_2000", cfp));  // invalid type
+    BOOST_CHECK(!IsChunkFileRecoverable("172.16.235.1_8080_1234_body_g2000", cfp)); // invalid length
+    BOOST_CHECK(!IsChunkFileRecoverable("172.16.235:1_8080_1234_body_2000", cfp));  // previous valid format (no longer supported)
+    BOOST_CHECK(IsChunkFileRecoverable("172.16.235.1_8080_1234_body_2000", cfp));   // valid case
     BOOST_CHECK(cfp.ipv4Addr.s_addr == 32182444 && cfp.port == 8080 && cfp.hash_prefix == 1234 && cfp.is_header == false && cfp.length == 2000);
-    BOOST_CHECK(IsChunkFileRecoverable("172.16.235.1:9560_12345678_header_2097152", cfp)); // valid case
+    BOOST_CHECK(IsChunkFileRecoverable("172.16.235.1_9560_12345678_header_2097152", cfp)); // valid case
     BOOST_CHECK(cfp.ipv4Addr.s_addr == 32182444 && cfp.port == 9560 && cfp.hash_prefix == 12345678 && cfp.is_header == true && cfp.length == 2097152);
-    BOOST_CHECK(IsChunkFileRecoverable("0.0.0.0:0_12345678_header_10000", cfp)); // valid case (trusted peer)
+    BOOST_CHECK(IsChunkFileRecoverable("0.0.0.0_0_12345678_header_10000", cfp)); // valid case (trusted peer)
 }
 
 BOOST_FIXTURE_TEST_CASE(test_recovery_invalid_files_get_removed, BasicTestingSetup)
 {
-    std::string obj_id1 = "172.16.235.1:8080_1234_body";
+    std::string obj_id1 = "172.16.235.1_8080_1234_body";
 
     FECDecoder decoder1(FEC_CHUNK_SIZE * 2, MemoryUsageMode::USE_MMAP, obj_id1);
     FECDecoder decoder2(FEC_CHUNK_SIZE * 2, MemoryUsageMode::USE_MMAP);
@@ -41,8 +42,8 @@ BOOST_FIXTURE_TEST_CASE(test_recovery_invalid_files_get_removed, BasicTestingSet
     // Given that decoder1 is the only decoder applying the chunk file naming
     // convention expected by the udprelay logic (more specifically by
     // IsChunkFileRecoverable()), the expectation is that decoder1's FEC data is
-    // succesfully reloaded after calling "LoadPartialBlocks", in which case its
-    // chunk file remains. In contrast, the chunk files from decoder2 and
+    // successfully reloaded after calling "LoadPartialBlocks", in which case
+    // its chunk file remains. In contrast, the chunk files from decoder2 and
     // decoder3 shall be considered non-recoverable and removed by
     // LoadPartialBlocks().
     BOOST_CHECK(fs::exists(decoder1.GetFileName()));
@@ -68,7 +69,7 @@ BOOST_FIXTURE_TEST_CASE(test_recovery_handles_body_and_header, BasicTestingSetup
     // the other for body data. Persist the chunk files in disk.
     size_t n_body_chunks = 5;
     size_t n_header_chunks = 2;
-    std::string chunk_file_prefix = peer.ToString() + "_" + std::to_string(hash_prefix);
+    std::string chunk_file_prefix = peer.ToStringIP() + "_" + peer.ToStringPort() + "_" + std::to_string(hash_prefix);
     std::string obj_id1 = chunk_file_prefix + "_body";
     std::string obj_id2 = chunk_file_prefix + "_header";
     {
@@ -128,7 +129,7 @@ BOOST_FIXTURE_TEST_CASE(test_recovery_of_decodable_state, BasicTestingSetup)
     std::vector<unsigned char> dummy_chunk(FEC_CHUNK_SIZE);
     size_t n_body_chunks = 5;
     size_t n_header_chunks = 2;
-    std::string chunk_file_prefix = peer.ToString() + "_" + std::to_string(hash_prefix);
+    std::string chunk_file_prefix = peer.ToStringIP() + "_" + peer.ToStringPort() + "_" + std::to_string(hash_prefix);
     std::string obj_id1 = chunk_file_prefix + "_body";
     std::string obj_id2 = chunk_file_prefix + "_header";
     {
@@ -176,7 +177,7 @@ BOOST_FIXTURE_TEST_CASE(test_recovery_multiple_blocks, BasicTestingSetup)
     {
         const bool keep_mmap_file = true;
         for (size_t i = 0; i < n_decoders; i++) {
-            std::string obj_id = "172.16.235.1:8080_" + std::to_string(hash_prefixes[i]) + "_body";
+            std::string obj_id = "172.16.235.1_8080_" + std::to_string(hash_prefixes[i]) + "_body";
             decoders_vec.emplace_back(std::move(MakeUnique<FECDecoder>(FEC_CHUNK_SIZE * n_body_chunks, MemoryUsageMode::USE_MMAP, obj_id, keep_mmap_file)));
         }
     }
@@ -204,7 +205,7 @@ BOOST_FIXTURE_TEST_CASE(test_recovery_multiple_blocks, BasicTestingSetup)
         BOOST_CHECK(!partial_block->header_initialized);
         BOOST_CHECK(partial_block->header_len == 0);
         BOOST_CHECK(partial_block->blk_len == FEC_CHUNK_SIZE * n_body_chunks);
-        std::string obj_id = peer.ToString() + "_" + std::to_string(hash_prefixes[i]) + "_body";
+        std::string obj_id = peer.ToStringIP() + "_" + peer.ToStringPort() + "_" + std::to_string(hash_prefixes[i]) + "_body";
         BOOST_CHECK(partial_block->body_decoder.GetFileName().filename().c_str() == obj_id + "_" + std::to_string(FEC_CHUNK_SIZE * n_body_chunks));
         BOOST_CHECK(partial_block->body_decoder.GetChunkCount() == n_body_chunks);
     }
