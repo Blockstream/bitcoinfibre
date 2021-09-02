@@ -605,6 +605,8 @@ ReadStatus PartiallyDownloadedChunkBlock::FinalizeBlock() {
             stream >> CTxCompressor(block.vtx[it->second], codec_version);
         } catch (const std::ios_base::failure& e) {
             return READ_STATUS_FAILED; // Could be a shorttxid collision
+        } catch (const std::invalid_argument& e) {
+            return READ_STATUS_UNSUPPORTED; // Unsupported codec version
         }
     }
 
