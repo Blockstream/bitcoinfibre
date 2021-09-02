@@ -1115,45 +1115,40 @@ void BlockRecvShutdown()
  * Detect whether a FEC chunk file contains recoverable partial block data
  *
  * Assume the file is recoverable if it is named according to the following
- * format: "<ipaddr:port>_<hashprefix>_<blockpart>_<size>", where:
+ * format: "<ipaddr>_<port>_<hashprefix>_<blockpart>_<size>", where:
  *
- * - <ipaddr:port> : is the IP address and port of the sender peer (the trusted
- *                   dummy peer is set to "[::]:0").
- * - <hashprefix>  : is the block hash prefix.
- * - <blockpart>   : indicates which part of the block the chunk file holds
- *                   (header or body).
- * - "size"        : is the object size in bytes.
+ * - <ipaddr>      : IP address of the sender (trusted dummy peer is "0.0.0.0").
+ * - <port>        : port of the sender peer (trusted dummy peer uses port "0").
+ * - <hashprefix>  : block hash prefix.
+ * - <blockpart>   : part of the block the chunk file holds (header or body).
+ * - "size"        : object size in bytes.
  */
 bool IsChunkFileRecoverable(const std::string& filename, ChunkFileNameParts& cfp)
 {
     std::vector<std::string> parts;
     boost::split(parts, filename, boost::is_any_of("_"));
-    if (parts.size() != 4) {
-        return false;
-    }
-    std::vector<std::string> ip_port;
-    boost::split(ip_port, parts[0], boost::is_any_of(":"));
-    if (ip_port.size() != 2) {
+    if (parts.size() != 5) {
         return false;
     }
 
-    auto res = inet_pton(AF_INET, ip_port[0].c_str(), &(cfp.ipv4Addr));
+    auto res = inet_pton(AF_INET, parts[0].c_str(), &(cfp.ipv4Addr));
     if (res <= 0) {
         return false;
     }
-    cfp.port = static_cast<unsigned short>(strtoul(ip_port[1].c_str(), nullptr, 10));
 
-    cfp.hash_prefix = strtoull(parts[1].c_str(), nullptr, 10);
+    cfp.port = static_cast<unsigned short>(strtoul(parts[1].c_str(), nullptr, 10));
+
+    cfp.hash_prefix = strtoull(parts[2].c_str(), nullptr, 10);
     if (cfp.hash_prefix == 0) {
         return false;
     }
 
-    if (parts[2] != "header" && parts[2] != "body") {
+    if (parts[3] != "header" && parts[3] != "body") {
         return false;
     }
-    cfp.is_header = (parts[2] == "header");
+    cfp.is_header = (parts[3] == "header");
 
-    cfp.length = strtoul(parts[3].c_str(), nullptr, 10);
+    cfp.length = strtoul(parts[4].c_str(), nullptr, 10);
     if (cfp.length == 0) {
         return false;
     }
@@ -1212,7 +1207,7 @@ ReadStatus PartialBlockData::ProvideHeaderData(const CBlockHeaderAndLengthShortT
 
 static std::string GetChunkFilePrefix(const CService& peer, uint64_t hash_prefix)
 {
-    return peer.ToString() + "_" + std::to_string(hash_prefix);
+    return peer.ToStringIP() + "_" + peer.ToStringPort() + "_" + std::to_string(hash_prefix);
 }
 
 bool PartialBlockData::Init(const UDPMessage& msg)
