@@ -83,6 +83,7 @@ typedef enum ReadStatus_t
     READ_STATUS_FAILED, // Failed to process object
     READ_STATUS_CHECKBLOCK_FAILED, // Used only by FillBlock to indicate a
                                    // failure in CheckBlock.
+    READ_STATUS_UNSUPPORTED, // Used when the txn codec version is not supported
 } ReadStatus;
 
 class CBlockHeaderAndShortTxIDs {
