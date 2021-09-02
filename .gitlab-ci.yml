@@ -143,6 +143,13 @@ test:i686:
   script:
     - build/src/test/test_bitcoin
 
+.pkg-build:
+  stage: build
+  timeout: 12h
+  only:
+    variables:
+      - $CI_COMMIT_TAG =~ /^v(\d+\.)(\d+\.)(\d+)-satellite(\d+\.)(\d+\.)(\d+)$/
+
 # Build Debian packages using pbuilder
 # Make sure to:
 # - Define the PBUILDER_CACHE_DIR env var to control the pbuilder cache
@@ -157,13 +164,9 @@ test:i686:
 # - Use option --aptly-test so that this job does not ship the build products to
 #   the Aptly server yet. Wait to upload the packages on the deploy stage.
 deb-packages:
-  stage: test
+  extends: .pkg-build
   tags:
     - deb-packer
-  only:
-    - tags
-  dependencies: []
-  timeout: 12h
   parallel:
     matrix:
       - TARGET: [
@@ -205,13 +208,9 @@ deb-packages:
       - $ARTIFACTS_DIR
 
 rpm-packages:
-  stage: test
+  extends: .pkg-build
   tags:
     - rpm-packer
-  only:
-    - tags
-  dependencies: []
-  timeout: 12h
   parallel:
     matrix:
       - TARGET: [
@@ -223,6 +222,44 @@ rpm-packages:
         ]
   script:
     - blocksat-build -p bitcoin-satellite $CI_COMMIT_TAG --mock --mock-target $TARGET
+
+# Manually build native (amd64) Ubuntu packages when desired for testing
+# purposes on release candidates. Append a "-rc" suffix to the usual tag name in
+# order to trigger this job.
+ubuntu-packages:
+  stage: test
+  tags:
+    - deb-packer
+  image: $DOCKER_REGISTRY/satellite/blocksat-packages/ubuntu-packer
+  dependencies: []
+  only:
+    variables:
+      - $CI_COMMIT_TAG =~ /^v(\d+\.)(\d+\.)(\d+)-satellite(\d+\.)(\d+\.)(\d+)-rc$/
+  timeout: 12h
+  parallel:
+    matrix:
+      - TARGET: ["focal-amd64", "bionic-amd64"]
+  variables:
+    PBUILDER_CACHE_DIR: $CI_PROJECT_DIR/cache/pbuilder
+    ARTIFACTS_DIR: $CI_PROJECT_DIR/artifacts/
+  cache:
+    key: "pbuilder-ubuntu-$TARGET"
+    paths:
+      - $PBUILDER_CACHE_DIR/aptcache/
+      - $PBUILDER_CACHE_DIR/ccache/
+      - $PBUILDER_CACHE_DIR/$TARGET-base.tgz
+  script:
+    - >
+      blocksat-build
+      -p bitcoin-satellite
+      $CI_COMMIT_TAG
+      --pbuilder
+      --pbuilder-target $TARGET
+      -o $ARTIFACTS_DIR
+  artifacts:
+    name: "pbuilder-ubuntu-$TARGET"
+    paths:
+      - $ARTIFACTS_DIR
 
 .pkg-upload:
   stage: deploy
