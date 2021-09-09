@@ -607,6 +607,8 @@ ReadStatus PartiallyDownloadedChunkBlock::FinalizeBlock() {
             return READ_STATUS_FAILED; // Could be a shorttxid collision
         } catch (const std::invalid_argument& e) {
             return READ_STATUS_UNSUPPORTED; // Unsupported codec version
+        } catch (const std::runtime_error& e) {
+            return READ_STATUS_FAILED; // Could be corrupt data failing on decompression
         }
     }
 
