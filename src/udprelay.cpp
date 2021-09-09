@@ -938,6 +938,8 @@ static void ProcessBlockThread(ChainstateManager* chainman)
                         setBlocksReceived.insert(process_block.first);
                     } else if (status == READ_STATUS_UNSUPPORTED) {
                         LogPrintf("UDP: Dropping block %s received with unsupported txn codec version.\n", block.block_data.GetBlockHash().ToString());
+                    } else {
+                        LogPrintf("UDP: Failed to process block %s. Dropping.\n", block.block_data.GetBlockHash().ToString());
                     }
                     RemovePartialBlock(process_block.first);
                     break;
