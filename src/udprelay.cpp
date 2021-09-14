@@ -1001,7 +1001,7 @@ static void ProcessBlockThread(ChainstateManager* chainman)
 
                         std::lock_guard<std::recursive_mutex> udpNodesLock(cs_mapUDPNodes);
 
-                        if (have_prev || ooob_saved) {
+                        if (ooob_saved) {
                             setBlocksReceived.insert(process_block.first);
                         } else {
                             // Allow re-downloading again later, useful for local backfill downloads
