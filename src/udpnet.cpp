@@ -213,6 +213,7 @@ static void ThreadRunWriteEventLoop() { do_send_messages(); }
 static void read_socket_func(evutil_socket_t fd, short event, void* arg);
 static void timer_func(evutil_socket_t fd, short event, void* arg);
 
+static std::unique_ptr<std::thread> partial_block_load_thread;
 static std::unique_ptr<std::thread> udp_read_thread;
 static std::vector<std::thread> udp_write_threads;
 
@@ -704,8 +705,9 @@ bool InitializeUDPConnections(NodeContext* const node_context)
 
     BlockRecvInit(node_context->chainman);
 
-    /* Load partial blocks acquired in previous sessions */
-    LoadPartialBlocks(node_context->mempool.get());
+    partial_block_load_thread.reset(new std::thread(&TraceThread<std::function<void()>>,
+                                                    "udploadpartialblks",
+                                                    std::bind(LoadPartialBlocks, node_context->mempool.get())));
 
     udp_read_thread.reset(new std::thread(&TraceThread<void (*)()>, "udpread", &ThreadRunReadEventLoop));
 
@@ -716,6 +718,10 @@ void StopUDPConnections()
 {
     if (!udp_read_thread)
         return;
+
+    StopLoadPartialBlocks();
+    partial_block_load_thread->join();
+    partial_block_load_thread.reset();
 
     event_base_loopbreak(event_base_read);
     udp_read_thread->join();
