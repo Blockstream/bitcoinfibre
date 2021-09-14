@@ -201,7 +201,8 @@ static const CRPCConvertParam vRPCConvertParams[] =
     { "stop", 0, "wait" },
     { "getblocksize", 0, "height"},
     { "getblockanalysis", 0, "height"},
-    { "testcompression", 0, "height"},
+    { "testcompression", 0, "start_height"},
+    { "testcompression", 1, "end_height"},
 };
 // clang-format on
 

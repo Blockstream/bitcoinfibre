@@ -1229,22 +1229,30 @@ UniValue getblockanalysis(const JSONRPCRequest& request)
 
 UniValue testcompression(const JSONRPCRequest& request)
 {
-    if (request.fHelp || request.params.size() > 1)
-        throw std::runtime_error(
-            "testcompression \"height\"\n"
-            "\nArguments:\n"
-            "1. \"height\"     (numeric, optional) The height to start scanning from.\n"
-            "Result:"
-            "Test round-trip compression of all transactions in all blocks starting from 'height' to the head.\n"
-            "Accepts a height as an argument, and chooses all blocks otherwise."
-        );
+    RPCHelpMan{"testcompression",
+               "Test round-trip compression of all transactions in all blocks within the selected range.\n"
+               "\nAccepts start and end block heights as arguments to define the range of blocks to test.\n"
+               "If the start height is not defined, start from height 0. If the end height is undefined,\n"
+               "end at the current tip of the chain. If both are undefined, test the entire blockchain.\n",
+               {
+                   {"start_height", RPCArg::Type::NUM, RPCArg::Optional::OMITTED, "Starting height of the block range to be tested."},
+                   {"end_height", RPCArg::Type::NUM, RPCArg::Optional::OMITTED, "Ending height of the block range to be tested."},
+               },
+               RPCResults{},
+               RPCExamples{
+                   HelpExampleCli("testcompression", "600000 600005") +
+                   HelpExampleRpc("testcompression", "600000, 600005")}}
+        .Check(request);
 
     LOCK(cs_main);
 
-    int const tipheight = ::ChainActive().Height();
+    int tipheight = ::ChainActive().Height();
     int baseheight = 0;
     if (!request.params[0].isNull())
         baseheight = request.params[0].get_int();
+
+    if (!request.params[1].isNull())
+        tipheight = request.params[1].get_int();
 
     if (baseheight > tipheight)
         throw JSONRPCError(RPC_MISC_ERROR, "Block not yet seen by node.");
@@ -1270,8 +1278,8 @@ UniValue testcompression(const JSONRPCRequest& request)
                 || ctx.vout != identity.vout
                 || ctx.nLockTime != identity.nLockTime)
             {
-                fprintf(stderr, "failure to compress/decompress transaction %d in block %d\n"
-                    , int(i), index);
+                fprintf(stderr, "failure to compress/decompress transaction %d (%s) in block %d\n"
+                    , int(i), ctx.GetHash().ToString().c_str(), index);
                 throw std::runtime_error("round-trip failed");
             }
         }
