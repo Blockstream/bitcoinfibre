@@ -15,7 +15,7 @@
 
 class CBlock;
 
-std::vector<std::pair<unsigned short, uint64_t> > GetUDPInboundPorts(); // port, outbound bandwidth for group
+std::vector<std::pair<unsigned short, uint64_t>> GetUDPInboundPorts(); // port, outbound bandwidth for group
 bool InitializeUDPConnections(NodeContext* const node);
 void StopUDPConnections();
 
@@ -25,7 +25,8 @@ enum UDPConnectionType {
     UDP_CONNECTION_TYPE_INBOUND_ONLY,
 };
 
-enum class udp_mode_t : std::uint8_t { multicast, unicast };
+enum class udp_mode_t : std::uint8_t { multicast,
+                                       unicast };
 
 // fUltimatelyTrusted means you trust them (ie whitelist) and ALL OF THEIR SUBSEQUENT WHITELISTED PEERS
 void OpenUDPConnectionTo(const CService& remote_addr, uint64_t local_magic, uint64_t remote_magic, bool fUltimatelyTrusted, UDPConnectionType connection_type = UDP_CONNECTION_TYPE_NORMAL, size_t group = 0);
