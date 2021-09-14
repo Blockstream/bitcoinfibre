@@ -8,6 +8,7 @@
 #ifndef BITCOIN_UDPAPI_H
 #define BITCOIN_UDPAPI_H
 
+#include <compressor.h>
 #include <netaddress.h>
 #include <node/context.h>
 #include <univalue.h>
@@ -52,6 +53,6 @@ UniValue UdpMulticastRxInfoToJson();
 UniValue TxWindowInfoToJSON(int phy_idx, int log_idx);
 UniValue TxnTxInfoToJSON();
 UniValue TxQueueInfoToJSON();
-void MulticastTxBlock(const int height);
+void MulticastTxBlock(const int height, codec_version_t codec_version = codec_version_t::default_version);
 
 #endif

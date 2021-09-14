@@ -616,18 +616,18 @@ void UDPFillMessagesFromTx(const CTransaction& tx, std::vector<std::pair<UDPMess
  * The ensuing function fills all FEC chunks of both header and block data. The
  * order on which chunks are filled is noteworthy. It is optimized for minimum
  * latency in the absence of data loss. First the minimum amount of chunks of
- * header and block data are sent. Receivers that succesfully decode all of
+ * header and block data are sent. Receivers that successfully decode all of
  * these can then complete the decoding right away. After them, the overhead
  * header chunks are sent and, lastly, the overhead block chunks.
  *
  */
-void UDPFillMessagesFromBlock(const CBlock& block, std::vector<UDPMessage>& msgs, const int height, const FecOverhead& overhead)
+void UDPFillMessagesFromBlock(const CBlock& block, std::vector<UDPMessage>& msgs, const int height, const FecOverhead& overhead, codec_version_t codec_version)
 {
     const uint256 hashBlock(block.GetHash());
     const uint64_t hash_prefix = hashBlock.GetUint64(0);
 
     /* Block header */
-    CBlockHeaderAndLengthShortTxIDs headerAndIDs(block, codec_version_t::default_version, true);
+    CBlockHeaderAndLengthShortTxIDs headerAndIDs(block, codec_version, true);
     headerAndIDs.setBlockHeight(height);
     /* NOTE: it is not mandatory to include the block height along
      * CBlockHeaderAndLengthShortTxIDs. However, it is useful to include it here
