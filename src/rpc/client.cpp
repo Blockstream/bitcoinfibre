@@ -30,6 +30,7 @@ static const CRPCConvertParam vRPCConvertParams[] =
     { "gettxwindowinfo", 0, "physical_idx" },
     { "gettxwindowinfo", 1, "logical_idx" },
     { "txblock", 0, "height" },
+    { "txblock", 1, "codec" },
     { "addudpnode", 3, "ultimately_trusted" },
     { "addudpnode", 5, "group" },
     { "setmocktime", 0, "timestamp" },

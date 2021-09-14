@@ -1726,7 +1726,7 @@ static void LaunchMulticastBackfillThreads()
  * multiple streams going to the same interface, send only though the
  * udpmulticasttx instances with relay_new_blks=true.
  */
-void MulticastTxBlock(const int height)
+void MulticastTxBlock(const int height, codec_version_t codec_version)
 {
     const CBlockIndex* pindex;
     {
@@ -1738,18 +1738,18 @@ void MulticastTxBlock(const int height)
     CBlock block;
     assert(ReadBlockFromDisk(block, pindex, Params().GetConsensus()));
 
-    LogPrintf("MulticastTxBlock: sending block %s\n",
-              block.GetHash().ToString());
-
     for (const auto& node : multicast_nodes()) {
         // Send over the multicasttx instances enabled for block relaying
         if (!node.second.tx || !node.second.relay_new_blks)
             continue;
 
+        LogPrintf("MulticastTxBlock: sending block %s over Tx %lu-%lu\n",
+                  block.GetHash().ToString(), node.second.physical_idx, node.second.logical_idx);
+
         // Each node gets a different set of FEC chunks
         std::vector<UDPMessage> msgs;
         UDPFillMessagesFromBlock(block, msgs, pindex->nHeight,
-                                 node.second.overhead_rep_blks);
+                                 node.second.overhead_rep_blks, codec_version);
 
         for (const auto& msg : msgs) {
             SendMessage(
