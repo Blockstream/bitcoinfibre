@@ -1189,6 +1189,8 @@ void LoadPartialBlocks(CTxMemPool* mempool)
             std::shared_ptr<PartialBlockData> block;
             {
                 std::lock_guard<std::recursive_mutex> partial_block_map_lock(cs_mapUDPNodes);
+                if (setBlocksReceived.count(hash_peer_pair))
+                    continue;
                 block = GetPartialBlockData(hash_peer_pair);
                 if (!block) {
                     auto res = mapPartialBlocks.insert(std::make_pair(hash_peer_pair, std::make_shared<PartialBlockData>(peer, mempool, cfp)));
@@ -1205,6 +1207,23 @@ void LoadPartialBlocks(CTxMemPool* mempool)
             if (!block->Init(cfp)) {
                 LogPrintf("UDP: Got block contents that couldn't match header for block id %lu\n", cfp.hash_prefix);
                 fs::remove(chunk_file_path);
+                continue;
+            }
+
+            // Let the block processing thread process this block if the header
+            // is already decodable and the chain look-up procedure is pending.
+            // The look-up will be useful to obtain the block height and check
+            // whether the height exists in the chain already. Furthermore,
+            // schedule the background processing if both the header and body
+            // are decodable, in which case the full processing will take place.
+            // Note all disk-recovered blocks are non-tip blocks, so the header
+            // can only be fully processed when the body is decodable too.
+            assert(!block->tip_blk);
+            if ((block->is_header_processing && (!block->chain_lookup || block->is_decodeable)) ||
+                (block->is_decodeable && !block->in_header)) // if for some reason we've processed the header of the non-tip block already
+            {
+                block->awaiting_processing = true;
+                DoBackgroundBlockProcessing(std::make_pair(hash_peer_pair, block));
             }
         }
     }
