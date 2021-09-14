@@ -407,17 +407,27 @@ UniValue getfechitratio(const JSONRPCRequest& request)
 UniValue txblock(const JSONRPCRequest& request)
 {
     RPCHelpMan{"txblock",
-               "Transmit a chosen block over all active UDP multicast Tx streams.\n"
-               "\nSends a different set of FEC chunks over each Tx stream.\n",
+               "Transmit a chosen block over all UDP multicast Tx interfaces with block relaying enabled.\n"
+               "\nSends a different set of FEC chunks over each of those interfaces.\n",
                {
                    {"height", RPCArg::Type::NUM, RPCArg::Optional::NO, "Block height."},
+                   {"codec", RPCArg::Type::NUM, RPCArg::Optional::OMITTED, "Txn compression codec."},
                },
                RPCResults{},
                RPCExamples{
                    HelpExampleCli("txblock", "600000") + HelpExampleRpc("txblock", "600000")}}
         .Check(request);
 
-    MulticastTxBlock(request.params[0].get_int());
+    codec_version_t codec = codec_version_t::default_version;
+    if (!request.params[1].isNull()) {
+        int codec_arg = request.params[1].get_int();
+        if (codec_arg < codec_version_t::none || codec_arg > codec_version_t::v1) {
+            throw JSONRPCError(RPC_INVALID_PARAMS, "Invalid txn compression codec version");
+        }
+        codec = static_cast<codec_version_t>(codec_arg);
+    }
+
+    MulticastTxBlock(request.params[0].get_int(), codec);
 
     return NullUniValue;
 }
@@ -434,7 +444,7 @@ static const CRPCCommand commands[] =
         {"udpnetwork", "gettxntxinfo", &gettxntxinfo, {}},
         {"udpnetwork", "gettxqueueinfo", &gettxqueueinfo, {}},
         {"udpnetwork", "getfechitratio", &getfechitratio, {}},
-        {"udpnetwork", "txblock", &txblock, {"height"}}};
+        {"udpnetwork", "txblock", &txblock, {"height", "codec"}}};
 
 void RegisterUDPNetRPCCommands(CRPCTable& t)
 {
