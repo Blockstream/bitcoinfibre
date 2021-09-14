@@ -16,6 +16,7 @@ void BlockRecvInit(ChainstateManager* chainman);
 void BlockRecvShutdown();
 
 void LoadPartialBlocks(CTxMemPool* mempool);
+void StopLoadPartialBlocks();
 
 bool IsChunkFileRecoverable(const std::string& filename, ChunkFileNameParts& cfp);
 
