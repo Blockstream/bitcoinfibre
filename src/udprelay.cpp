@@ -751,7 +751,8 @@ static void ProcessBlockThread(ChainstateManager* chainman)
             return;
 
         auto process_block = block_process_queue.front();
-        CService& node = process_block.first.second;
+        auto hash_peer_pair = process_block.first;
+        CService& node = hash_peer_pair.second;
         PartialBlockData& block = *process_block.second;
         block_process_queue.pop();
         process_lock.unlock();
@@ -812,8 +813,8 @@ static void ProcessBlockThread(ChainstateManager* chainman)
                          * that its subsequent chunks are ignored. */
                         lock.unlock();
                         std::lock_guard<std::recursive_mutex> udpNodesLock(cs_mapUDPNodes);
-                        setBlocksReceived.insert(process_block.first);
-                        RemovePartialBlock(process_block.first);
+                        setBlocksReceived.insert(hash_peer_pair);
+                        RemovePartialBlock(hash_peer_pair);
                         break;
                     }
                 }
@@ -935,13 +936,13 @@ static void ProcessBlockThread(ChainstateManager* chainman)
                                 DisconnectNode(it);
                         }
                         // Make sure this invalid block is not downloaded again in the future
-                        setBlocksReceived.insert(process_block.first);
+                        setBlocksReceived.insert(hash_peer_pair);
                     } else if (status == READ_STATUS_UNSUPPORTED) {
                         LogPrintf("UDP: Dropping block %s received with unsupported txn codec version.\n", block.block_data.GetBlockHash().ToString());
                     } else {
                         LogPrintf("UDP: Failed to process block %s. Dropping.\n", block.block_data.GetBlockHash().ToString());
                     }
-                    RemovePartialBlock(process_block.first);
+                    RemovePartialBlock(hash_peer_pair);
                     break;
                 } else {
                     std::shared_ptr<const CBlock> pdecoded_block = block.block_data.GetBlock();
@@ -1002,12 +1003,12 @@ static void ProcessBlockThread(ChainstateManager* chainman)
                         std::lock_guard<std::recursive_mutex> udpNodesLock(cs_mapUDPNodes);
 
                         if (ooob_saved) {
-                            setBlocksReceived.insert(process_block.first);
+                            setBlocksReceived.insert(hash_peer_pair);
                         } else {
                             // Allow re-downloading again later, useful for local backfill downloads
-                            setBlocksReceived.erase(process_block.first);
+                            setBlocksReceived.erase(hash_peer_pair);
                         }
-                        RemovePartialBlock(process_block.first);
+                        RemovePartialBlock(hash_peer_pair);
                         break; // Probably a tx collision generating merkle-tree errors
                     }
                     if (fBench) {
@@ -1030,8 +1031,8 @@ static void ProcessBlockThread(ChainstateManager* chainman)
                     }
 
                     std::lock_guard<std::recursive_mutex> udpNodesLock(cs_mapUDPNodes);
-                    setBlocksReceived.insert(process_block.first);
-                    RemovePartialBlocks(process_block.first.first); // Ensure we remove even if we didnt UDPRelayBlock()
+                    setBlocksReceived.insert(hash_peer_pair);
+                    RemovePartialBlocks(hash_peer_pair.first); // Ensure we remove even if we didnt UDPRelayBlock()
                 }
             } else if (!block.in_header && block.blk_initialized) {
                 uint32_t mempool_provided_chunks = 0;
@@ -1061,8 +1062,8 @@ static void ProcessBlockThread(ChainstateManager* chainman)
                             }
                         } else
                             LogPrintf("UDP: Unable to process mempool for block %s, dropping block\n", blockHash.ToString());
-                        setBlocksReceived.insert(process_block.first);
-                        RemovePartialBlock(process_block.first);
+                        setBlocksReceived.insert(hash_peer_pair);
+                        RemovePartialBlock(hash_peer_pair);
                         break;
                     } else {
                         while (firstChunkProcessed < total_chunk_count && block.block_data.IsChunkAvailable(firstChunkProcessed)) {
