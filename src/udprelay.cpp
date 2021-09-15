@@ -767,7 +767,17 @@ static void ProcessBlockThread(ChainstateManager* chainman)
                 if (fBench)
                     decode_start = std::chrono::steady_clock::now();
 
-                std::vector<unsigned char> header_data = block.header_decoder.GetDecodedData();
+                std::vector<unsigned char> header_data;
+                try {
+                    header_data = block.header_decoder.GetDecodedData();
+                } catch (const std::runtime_error& e) {
+                    lock.unlock();
+                    std::stringstream stream;
+                    stream << std::hex << hash_peer_pair.first;
+                    std::string hex_hash_prefix(stream.str());
+                    LogPrintf("UDP: Failed to decode block %lu from %s: %s\n", hex_hash_prefix, node.ToString(), e.what());
+                    break;
+                }
 
                 std::chrono::steady_clock::time_point data_copied;
                 if (fBench)
