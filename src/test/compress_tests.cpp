@@ -475,17 +475,13 @@ BOOST_AUTO_TEST_CASE(compress_transaction_roundtrip)
 
     char const* filename = "test-tx/tx-00000";
     FILE* f = fopen(filename, "rb");
-    if (f == nullptr) {
-        std::cout << "failed to open file: " << filename << "\n";
-        return;
-    }
+    BOOST_CHECK(f != nullptr);
+
     auto const len = fread(data.data(), 1, data.size(), f);
-    if (len <= 0) {
-        fclose(f);
-        std::cout << "failed to read file: " << filename << "\n";
-        return;
-    }
+    BOOST_CHECK(len > 0);
+
     data.resize(len);
+
     CDataStream str(data.begin(), data.end(), SER_NETWORK, PROTOCOL_VERSION);
 
     try {
@@ -495,13 +491,11 @@ BOOST_AUTO_TEST_CASE(compress_transaction_roundtrip)
         printf("=== original:\n%s\n\n", CTransaction(tx).ToString().c_str());
 
         bool const ret = round_trip_compress_transaction(tx);
-        if (!ret) {
-            std::cout << "\nround-trip transaction: " << filename << '\n';
-            return;
-        }
+        BOOST_CHECK(ret == true);
     } catch (std::exception const& e) {
         std::cout << "\nround-trip transaction: " << filename << '\n';
         std::cerr << "failed with exception: " << e.what() << '\n';
+        BOOST_CHECK(false);
         return;
     }
     fclose(f);
