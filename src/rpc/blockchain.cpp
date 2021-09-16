@@ -1258,12 +1258,24 @@ UniValue testcompression(const JSONRPCRequest& request)
         throw JSONRPCError(RPC_MISC_ERROR, "Block not yet seen by node.");
 
     int txcount = 0;
+    int height_span = (tipheight - baseheight);
+    int ten_percent_span = height_span / 10;
+    int next_progress_print = baseheight + ten_percent_span;
+
     for (int index = baseheight; index <= tipheight; ++index) {
         CBlock block;
         if (!ReadBlockFromDisk(block, ::ChainActive()[index], Params().GetConsensus()))
             throw JSONRPCError(RPC_MISC_ERROR, "Block not found on disk.");
 
-        fprintf(stderr, "block: %d\n", index);
+        if (!IsRPCRunning())
+            break;
+
+        if (index >= next_progress_print) {
+            LogPrintf("testcompression: progress = %.2f %%\n",
+                100.0 * ((double)(index - baseheight)) / height_span);
+            next_progress_print += ten_percent_span;
+        }
+
         CDataStream stream(SER_NETWORK, PROTOCOL_VERSION);
         for (size_t i = 1; i < block.vtx.size(); ++i) try
         {
@@ -1278,8 +1290,8 @@ UniValue testcompression(const JSONRPCRequest& request)
                 || ctx.vout != identity.vout
                 || ctx.nLockTime != identity.nLockTime)
             {
-                fprintf(stderr, "failure to compress/decompress transaction %d (%s) in block %d\n"
-                    , int(i), ctx.GetHash().ToString().c_str(), index);
+                LogPrintf("testcompression: failure to compress/decompress transaction %d (%s) in block %d\n",
+                    int(i), ctx.GetHash().ToString().c_str(), index);
                 throw std::runtime_error("round-trip failed");
             }
         }
