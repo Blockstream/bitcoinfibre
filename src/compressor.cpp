@@ -1132,7 +1132,7 @@ bool IsToWitnessUnknown(CScript const& scriptPubKey, valtype& smallscript)
     if (scriptPubKey.size() < 4 || scriptPubKey.size() > 42) {
         return false;
     }
-    if (scriptPubKey[0] < OP_1 || scriptPubKey[0] > OP_16) {
+    if (scriptPubKey[0] < OP_1 || scriptPubKey[0] > OP_15) {
         return false;
     }
     if ((size_t)(scriptPubKey[1] + 2) == scriptPubKey.size()) {
