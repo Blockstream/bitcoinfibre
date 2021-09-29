@@ -21,6 +21,7 @@
 #include <init.h> // for ShutdownRequested()
 #include <logging.h>
 #include <netbase.h>
+#include <node/blockstorage.h>
 #include <primitives/block.h>
 #include <primitives/transaction.h>
 #include <txmempool.h>
