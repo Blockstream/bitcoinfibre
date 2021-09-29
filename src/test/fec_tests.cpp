@@ -3,7 +3,6 @@
 #include <memory>
 #include <sys/mman.h>
 #include <test/util/setup_common.h>
-#include <util/memory.h>
 #include <util/system.h>
 
 static const std::array<MemoryUsageMode, 2> memory_usage_modes{MemoryUsageMode::USE_MMAP, MemoryUsageMode::USE_MEMORY};
@@ -538,9 +537,9 @@ BOOST_AUTO_TEST_CASE(fec_test_decoding_multiple_blocks_in_parallel)
 
         // randomly instantiate some decoders in mmap mode and some in memory mode
         if (rand() % 2) {
-            decoders_vec.emplace_back(std::move(MakeUnique<FECDecoder>(data_size, MemoryUsageMode::USE_MMAP)));
+            decoders_vec.emplace_back(std::move(std::make_unique<FECDecoder>(data_size, MemoryUsageMode::USE_MMAP)));
         } else {
-            decoders_vec.emplace_back(std::move(MakeUnique<FECDecoder>(data_size, MemoryUsageMode::USE_MEMORY)));
+            decoders_vec.emplace_back(std::move(std::make_unique<FECDecoder>(data_size, MemoryUsageMode::USE_MEMORY)));
         }
     }
 
@@ -1070,7 +1069,7 @@ void test_fecdecoder_recovery_with_N_decoders(size_t n_uncoded_chunks)
 
     std::vector<std::unique_ptr<FECDecoder>> decoders_vec;
     for (size_t i = 0; i < n_encoded_chunks - 1; i++) {
-        decoders_vec.emplace_back(std::move(MakeUnique<FECDecoder>(data_size, MemoryUsageMode::USE_MMAP, obj_id)));
+        decoders_vec.emplace_back(std::move(std::make_unique<FECDecoder>(data_size, MemoryUsageMode::USE_MMAP, obj_id)));
         decoders_vec.back()->ProvideChunk(test_data.encoded_chunks[i].data(), test_data.chunk_ids[i]);
     }
 
