@@ -13,6 +13,7 @@
 #include <net_processing.h>
 #include <outoforder.h>
 #include <streams.h>
+#include <util/thread.h>
 #include <validation.h>
 #include <version.h>
 
@@ -1114,7 +1115,7 @@ static void ProcessBlockThread(ChainstateManager* chainman)
 
 void BlockRecvInit(ChainstateManager* chainman)
 {
-    process_block_thread.reset(new std::thread(&TraceThread<std::function<void()>>, "udpprocess", std::function<void()>(std::bind(&ProcessBlockThread, chainman))));
+    process_block_thread.reset(new std::thread(&util::TraceThread, "udpprocess", std::function<void()>(std::bind(&ProcessBlockThread, chainman))));
 }
 
 void BlockRecvShutdown()
