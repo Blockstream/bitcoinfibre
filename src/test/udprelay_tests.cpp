@@ -178,7 +178,7 @@ BOOST_FIXTURE_TEST_CASE(test_recovery_multiple_blocks, BasicTestingSetup)
         const bool keep_mmap_file = true;
         for (size_t i = 0; i < n_decoders; i++) {
             std::string obj_id = "172.16.235.1_8080_" + std::to_string(hash_prefixes[i]) + "_body";
-            decoders_vec.emplace_back(std::move(MakeUnique<FECDecoder>(FEC_CHUNK_SIZE * n_body_chunks, MemoryUsageMode::USE_MMAP, obj_id, keep_mmap_file)));
+            decoders_vec.emplace_back(std::move(std::make_unique<FECDecoder>(FEC_CHUNK_SIZE * n_body_chunks, MemoryUsageMode::USE_MMAP, obj_id, keep_mmap_file)));
         }
     }
 
