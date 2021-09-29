@@ -5,6 +5,7 @@
 #include <consensus/validation.h>
 #include <dbwrapper.h>
 #include <logging.h>
+#include <node/blockstorage.h>
 #include <outoforder.h>
 #include <primitives/block.h>
 #include <sync.h>
