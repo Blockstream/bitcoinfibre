@@ -239,7 +239,7 @@ struct FecOverhead {
 struct UDPMulticastInfo {
     char ifname[IFNAMSIZ] = {0};          /** network interface name */
     char mcast_ip[INET_ADDRSTRLEN] = {0}; /** multicast IPv4 address */
-    unsigned short port = 0;              /** UDP port */
+    uint16_t port = 0;                    /** UDP port */
     size_t group = 0;                     /** UDP group */
     bool tx = false;                      /** multicast Tx or Rx? */
     int fd;                               /** socket file descriptor */
