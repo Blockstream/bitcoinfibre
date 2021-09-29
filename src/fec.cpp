@@ -87,10 +87,10 @@ fs::path FECDecoder::compute_filename(const std::string& obj_id) const
 {
     // Try to make a unique name out of the available information
     if (obj_id.empty()) {
-        return GetDataDir() / "partial_blocks" / std::to_string(std::uintptr_t(this));
+        return gArgs.GetDataDirNet() / "partial_blocks" / std::to_string(std::uintptr_t(this));
     } else {
         // filename pattern = <obj_id>_<obj_size>
-        return GetDataDir() / "partial_blocks" / (obj_id + "_" + std::to_string(obj_size));
+        return gArgs.GetDataDirNet() / "partial_blocks" / (obj_id + "_" + std::to_string(obj_size));
     }
 }
 
