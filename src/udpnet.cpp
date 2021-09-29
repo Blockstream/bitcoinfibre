@@ -26,6 +26,7 @@
 #include <primitives/transaction.h>
 #include <txmempool.h>
 #include <util/strencodings.h>
+#include <util/thread.h>
 #include <util/time.h>
 #include <validation.h>
 
@@ -688,7 +689,7 @@ bool InitializeUDPConnections(NodeContext* const node_context)
     /* Initialize Tx message queues */
     mapTxQueues = init_tx_queues(group_list, multicast_list);
 
-    udp_write_threads.emplace_back(boost::bind(&TraceThread<boost::function<void()>>, "udpwrite", &ThreadRunWriteEventLoop));
+    udp_write_threads.emplace_back(&util::TraceThread, "udpwrite", &ThreadRunWriteEventLoop);
 
     /* Add persistent connections to pre-defined udpnodes or trustedudpnodes */
     AddConfAddedConnections();
@@ -706,11 +707,11 @@ bool InitializeUDPConnections(NodeContext* const node_context)
 
     BlockRecvInit(node_context->chainman);
 
-    partial_block_load_thread.reset(new std::thread(&TraceThread<std::function<void()>>,
+    partial_block_load_thread.reset(new std::thread(&util::TraceThread,
                                                     "udploadpartialblks",
                                                     std::bind(LoadPartialBlocks, node_context->mempool.get())));
 
-    udp_read_thread.reset(new std::thread(&TraceThread<void (*)()>, "udpread", &ThreadRunReadEventLoop));
+    udp_read_thread.reset(new std::thread(&util::TraceThread, "udpread", &ThreadRunReadEventLoop));
 
     return true;
 }
@@ -1681,6 +1682,8 @@ UniValue TxnTxInfoToJSON()
     return ret;
 }
 
+std::vector<std::string> mcast_tx_thread_names;
+
 static void LaunchMulticastBackfillThreads()
 {
     for (const auto& node : mapMulticastNodes) {
@@ -1688,28 +1691,24 @@ static void LaunchMulticastBackfillThreads()
         if (info.tx) {
             // Thread for transmission of repeated (old) FEC-coded blocks
             if (info.send_rep_blks) {
-                mcast_tx_threads.emplace_back([&info, &node] {
-                    char name[50];
-                    sprintf(name, "udpblkbackfill %d-%d", info.physical_idx,
-                            info.logical_idx);
-                    TraceThread(
-                        name,
-                        std::bind(MulticastBackfillThread,
-                                  std::get<0>(node.first), &info));
-                });
+                std::stringstream ss;
+                ss << "udpblkbackfill-" << info.physical_idx << "-" << info.logical_idx;
+                mcast_tx_thread_names.emplace_back(ss.str());
+                mcast_tx_threads.emplace_back(&util::TraceThread,
+                                              mcast_tx_thread_names.back().c_str(),
+                                              std::bind(MulticastBackfillThread,
+                                                        std::get<0>(node.first), &info));
             }
-            // Thread for transmission of mempool txns
-            if (info.txn_per_sec > 0) {
-                mcast_tx_threads.emplace_back([&info, &node] {
-                    char name[50];
-                    sprintf(name, "udptxnbackfill %d-%d", info.physical_idx,
-                            info.logical_idx);
-                    TraceThread(
-                        name,
-                        std::bind(MulticastTxnThread,
-                                  std::get<0>(node.first), &info));
-                });
-            }
+        }
+        // Thread for transmission of mempool txns
+        if (info.txn_per_sec > 0) {
+            std::stringstream ss;
+            ss << "udptxnbackfill-" << info.physical_idx << "-" << info.logical_idx;
+            mcast_tx_thread_names.emplace_back(ss.str());
+            mcast_tx_threads.emplace_back(&util::TraceThread,
+                                          mcast_tx_thread_names.back().c_str(),
+                                          std::bind(MulticastTxnThread,
+                                                    std::get<0>(node.first), &info));
         }
     }
 }
