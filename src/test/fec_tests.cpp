@@ -22,7 +22,7 @@ struct FecTestingSetup : public BasicTestingSetup {
      */
     ~FecTestingSetup()
     {
-        fs::path partial_blocks = GetDataDir() / "partial_blocks";
+        fs::path partial_blocks = gArgs.GetDataDirNet() / "partial_blocks";
         fs::remove_all(partial_blocks.parent_path());
     }
 };

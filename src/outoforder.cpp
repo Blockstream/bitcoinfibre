@@ -45,7 +45,7 @@ static RecursiveMutex cs_ooob;
 
 static CDBWrapper* GetOoOBlockDB() EXCLUSIVE_LOCKS_REQUIRED(cs_ooob)
 {
-    static CDBWrapper ooob_db(GetDataDir() / "future_blocks", /*cache size=*/1024);
+    static CDBWrapper ooob_db(gArgs.GetDataDirNet() / "future_blocks", /*cache size=*/1024);
     return &ooob_db;
 }
 

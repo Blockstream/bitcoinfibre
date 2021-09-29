@@ -18,7 +18,7 @@ struct MmapStorageTestingSetup : public BasicTestingSetup {
      */
     ~MmapStorageTestingSetup()
     {
-        fs::path partial_blocks = GetDataDir() / "temp_files";
+        fs::path partial_blocks = gArgs.GetDataDirNet() / "temp_files";
         fs::remove_all(partial_blocks.parent_path());
     }
 };
@@ -43,7 +43,7 @@ static std::vector<unsigned char> generate_random_string(size_t len)
 static fs::path get_random_temp_file()
 {
     auto temp_name = generate_random_string(10);
-    return GetDataDir() / "temp_files" / reinterpret_cast<char*>(temp_name.data());
+    return gArgs.GetDataDirNet() / "temp_files" / reinterpret_cast<char*>(temp_name.data());
 }
 
 static void check_chunk_equal(const void* p_chunk1, std::vector<unsigned char>& chunk2, size_t chunk_data_size)
