@@ -1839,10 +1839,10 @@ static bool ParseUDPMulticastTxOpt(UDPMulticastInfo& info,
     if (opt == "ifname") {
         strncpy_wrapper(info.ifname, value.c_str(), IFNAMSIZ);
     } else if (opt == "dest_addr") {
-        int port;
+        uint16_t port;
         std::string ip;
         SplitHostPort(value, port, ip);
-        if (port != (unsigned short)port || port == 0) {
+        if (port == 0) {
             error = "invalid port";
         } else {
             strncpy_wrapper(info.mcast_ip, ip.c_str(), INET_ADDRSTRLEN);
@@ -1959,11 +1959,11 @@ static bool ParseUDPMulticastInfo(const std::string& s, UDPMulticastInfo& info)
         return false;
     }
 
-    int port;
+    uint16_t port;
     std::string ip;
     const std::string mcast_ip_port = s.substr(if_end + 1, mcastaddr_end - if_end - 1);
     SplitHostPort(mcast_ip_port, port, ip);
-    if (port != (unsigned short)port || port == 0) {
+    if (port == 0) {
         LogPrintf("Failed to parse -udpmulticast option, invalid port\n");
         return false;
     }
