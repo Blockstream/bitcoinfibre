@@ -16,9 +16,9 @@
 
 using namespace std;
 
-UniValue getudppeerinfo(const JSONRPCRequest& request)
+RPCHelpMan getudppeerinfo()
 {
-    RPCHelpMan{"getudppeerinfo",
+    return RPCHelpMan{"getudppeerinfo",
                "\nReturns data about each connected UDP unicast peer as a json array of objects.\n",
                {},
                RPCResult{
@@ -39,9 +39,9 @@ UniValue getudppeerinfo(const JSONRPCRequest& request)
                             {RPCResult::Type::NUM, "avg_recent_rtt", "The average RTT among recent pings (in ms)"},
                         }},
                    }},
-               RPCExamples{HelpExampleCli("getudppeerinfo", "") + HelpExampleRpc("getudppeerinfo", "")}}
-        .Check(request);
-
+               RPCExamples{HelpExampleCli("getudppeerinfo", "") + HelpExampleRpc("getudppeerinfo", "")},
+               [&](const RPCHelpMan& self, const JSONRPCRequest& request) -> UniValue
+{
     vector<UDPConnectionStats> vstats;
     GetUDPConnectionList(vstats);
 
@@ -70,17 +70,13 @@ UniValue getudppeerinfo(const JSONRPCRequest& request)
     }
 
     return ret;
+},
+    };
 }
 
-UniValue addudpnode(const JSONRPCRequest& request)
+RPCHelpMan addudpnode()
 {
-    string strCommand;
-    if (request.params.size() >= 5)
-        strCommand = request.params[4].get_str();
-    if (request.fHelp || request.params.size() > 7 || request.params.size() < 5 ||
-        (strCommand != "onetry" && strCommand != "add"))
-        throw runtime_error(
-            RPCHelpMan{"addudpnode",
+    return RPCHelpMan{"addudpnode",
                        "\nAttempts add a node to the UDP addnode list.\n"
                        "Or try a connection to a UDP node once.\n",
                        {
@@ -89,16 +85,23 @@ UniValue addudpnode(const JSONRPCRequest& request)
                            {"remote_magic", RPCArg::Type::STR, RPCArg::Optional::NO, "The node's magic secret value (should be a secure, random string)"},
                            {"ultimately_trusted", RPCArg::Type::BOOL, RPCArg::Optional::NO, "Whether to trust this peer, and all of its trusted UDP peers, recursively"},
                            {"command", RPCArg::Type::STR, RPCArg::Optional::NO, "'add' to add a persistent connection or 'onetry' to try a connection to the node once"},
-                           {"group", RPCArg::Type::NUM, "0", "'add' to add a persistent connection or 'onetry' to try a connection to the node once"},
+                           {"group", RPCArg::Type::NUM, RPCArg::Default{0}, "'add' to add a persistent connection or 'onetry' to try a connection to the node once"},
                            {"type", RPCArg::Type::STR, RPCArg::Optional::OMITTED_NAMED_ARG, "May be one of 'bidirectional', 'inbound_only' or 'I_certify_remote_is_listening_and_not_a_DoS_target_outbound_only'."},
                        },
                        RPCResults{},
                        RPCExamples{
                            HelpExampleCli("addudpnode", "\"192.168.0.6:8333\" \"PA$$WORD\" \"THEIR_PA$$\" false \"onetry\"") +
-                           HelpExampleRpc("addudpnode", "\"192.168.0.6:8333\" \"PA$$WORD\" \"THEIR_PA$$\" false \"onetry\"")}}
-                .ToString());
-
+                           HelpExampleRpc("addudpnode", "\"192.168.0.6:8333\" \"PA$$WORD\" \"THEIR_PA$$\" false \"onetry\"")},
+                        [&](const RPCHelpMan& self, const JSONRPCRequest& request) -> UniValue
+{
     string strNode = request.params[0].get_str();
+
+    string strCommand;
+    if (request.params.size() >= 5)
+        strCommand = request.params[4].get_str();
+
+    if (strCommand != "onetry" && strCommand != "add")
+        throw JSONRPCError(RPC_INVALID_PARAMS, "Parameter 'command' must be 'onetry' or 'add'");
 
     CService addr;
     if (!Lookup(strNode.c_str(), addr, -1, true) || !addr.IsValid())
@@ -133,11 +136,13 @@ UniValue addudpnode(const JSONRPCRequest& request)
         OpenPersistentUDPConnectionTo(addr, local_magic, remote_magic, fTrust, connection_type, group, udp_mode_t::unicast);
 
     return NullUniValue;
+},
+    };
 }
 
-UniValue disconnectudpnode(const JSONRPCRequest& request)
+RPCHelpMan disconnectudpnode()
 {
-    RPCHelpMan{"disconnectudpnode",
+    return RPCHelpMan{"disconnectudpnode",
                "\nDisconnects a connected UDP node.\n",
                {
                    {"node", RPCArg::Type::STR, RPCArg::Optional::NO, "The node IP:port"},
@@ -145,9 +150,9 @@ UniValue disconnectudpnode(const JSONRPCRequest& request)
                RPCResults{},
                RPCExamples{
                    HelpExampleCli("disconnectudpnode", "\"192.168.0.6:8333\"") +
-                   HelpExampleRpc("disconnectudpnode", "\"192.168.0.6:8333\"")}}
-        .Check(request);
-
+                   HelpExampleRpc("disconnectudpnode", "\"192.168.0.6:8333\"")},
+                [&](const RPCHelpMan& self, const JSONRPCRequest& request) -> UniValue
+{
     string strNode = request.params[0].get_str();
 
     CService addr;
@@ -157,11 +162,13 @@ UniValue disconnectudpnode(const JSONRPCRequest& request)
     CloseUDPConnectionTo(addr);
 
     return NullUniValue;
+},
+    };
 }
 
-UniValue getudpmulticastinfo(const JSONRPCRequest& request)
+RPCHelpMan getudpmulticastinfo()
 {
-    RPCHelpMan{"getudpmulticastinfo",
+    return RPCHelpMan{"getudpmulticastinfo",
                "\nRetrieve information about the UDP multicast Rx instances.\n",
                {},
                RPCResult{
@@ -183,10 +190,12 @@ UniValue getudpmulticastinfo(const JSONRPCRequest& request)
                             {RPCResult::Type::BOOL, "trusted", "Whether the sending peer is trusted"},
                         }},
                    }},
-               RPCExamples{HelpExampleCli("getudpmulticastinfo", "") + HelpExampleRpc("getudpmulticastinfo", "")}}
-        .Check(request);
-
+               RPCExamples{HelpExampleCli("getudpmulticastinfo", "") + HelpExampleRpc("getudpmulticastinfo", "")},
+                [&](const RPCHelpMan& self, const JSONRPCRequest& request) -> UniValue
+{
     return UdpMulticastRxInfoToJson();
+},
+    };
 }
 
 static std::vector<RPCResult> StatsDescriptionString()
@@ -199,9 +208,9 @@ static std::vector<RPCResult> StatsDescriptionString()
     };
 }
 
-UniValue getchunkstats(const JSONRPCRequest& request)
+RPCHelpMan getchunkstats()
 {
-    RPCHelpMan{"getchunkstats",
+    return RPCHelpMan{"getchunkstats",
                "\nReturns chunk statistics of current partial blocks.\n",
                {
                    {"height", RPCArg::Type::NUM, RPCArg::Optional::OMITTED, "Height of the partial block of interest. If set to 0, shows all current partial blocks."},
@@ -228,9 +237,10 @@ UniValue getchunkstats(const JSONRPCRequest& request)
                              }},
                },
                RPCExamples{
-                   HelpExampleCli("getchunkstats", "") + HelpExampleRpc("getchunkstats", "100000")}}
-        .Check(request);
-
+                   HelpExampleCli("getchunkstats", "") + HelpExampleRpc("getchunkstats", "100000")
+                },
+                [&](const RPCHelpMan& self, const JSONRPCRequest& request) -> UniValue
+{
     if (request.params[0].isNull())
         return MaxMinBlkChunkStatsToJSON();
     else {
@@ -246,11 +256,13 @@ UniValue getchunkstats(const JSONRPCRequest& request)
                 return info;
         }
     }
+},
+    };
 }
 
-UniValue gettxwindowinfo(const JSONRPCRequest& request)
+RPCHelpMan gettxwindowinfo()
 {
-    RPCHelpMan{
+    return RPCHelpMan{
         "gettxwindowinfo",
         "\nGet information from the multicast Tx block-interleave window.\n",
         {
@@ -288,9 +300,9 @@ UniValue gettxwindowinfo(const JSONRPCRequest& request)
                            }},
                       }},
         },
-        RPCExamples{HelpExampleCli("gettxwindowinfo", "") + HelpExampleRpc("gettxwindowinfo", "0, 0")}}
-        .Check(request);
-
+        RPCExamples{HelpExampleCli("gettxwindowinfo", "") + HelpExampleRpc("gettxwindowinfo", "0, 0")},
+        [&](const RPCHelpMan& self, const JSONRPCRequest& request) -> UniValue
+{
     if (request.params[1].isNull() && !request.params[0].isNull())
         throw JSONRPCError(RPC_INVALID_PARAMS,
                            "Both physical and logical indexes are required");
@@ -305,11 +317,13 @@ UniValue gettxwindowinfo(const JSONRPCRequest& request)
         throw JSONRPCError(RPC_INVALID_PARAMS, "Tx stream does not exist");
 
     return info;
+},
+    };
 }
 
-UniValue gettxntxinfo(const JSONRPCRequest& request)
+RPCHelpMan gettxntxinfo()
 {
-    RPCHelpMan{
+    return RPCHelpMan{
         "gettxntxinfo",
         "\nGet information regarding multicast transmissions of mempool txns.\n",
         {},
@@ -325,19 +339,21 @@ UniValue gettxntxinfo(const JSONRPCRequest& request)
                      {RPCResult::Type::NUM, "tx_count", "Total number of txns transmitted"},
                  }},
             }},
-        RPCExamples{HelpExampleCli("gettxntxinfo", "") + HelpExampleRpc("gettxntxinfo", "")}}
-        .Check(request);
-
+        RPCExamples{HelpExampleCli("gettxntxinfo", "") + HelpExampleRpc("gettxntxinfo", "")},
+        [&](const RPCHelpMan& self, const JSONRPCRequest& request) -> UniValue
+{
     UniValue info = TxnTxInfoToJSON();
     if (info.isNull())
         throw JSONRPCError(RPC_INVALID_PARAMS, "Could not find any txn transmission stream");
 
     return info;
+},
+    };
 }
 
-UniValue gettxqueueinfo(const JSONRPCRequest& request)
+RPCHelpMan gettxqueueinfo()
 {
-    RPCHelpMan{
+    return RPCHelpMan{
         "gettxqueueinfo",
         "\nGet information from the UDP Tx queues.\n",
         {},
@@ -359,19 +375,21 @@ UniValue gettxqueueinfo(const JSONRPCRequest& request)
                       }},
                  }},
             }},
-        RPCExamples{HelpExampleCli("gettxqueueinfo", "") + HelpExampleRpc("gettxqueueinfo", "")}}
-        .Check(request);
-
+        RPCExamples{HelpExampleCli("gettxqueueinfo", "") + HelpExampleRpc("gettxqueueinfo", "")},
+        [&](const RPCHelpMan& self, const JSONRPCRequest& request) -> UniValue
+{
     UniValue info = TxQueueInfoToJSON();
     if (info.isNull())
         throw JSONRPCError(RPC_INVALID_PARAMS, "Could not find any Tx queue");
 
     return info;
+},
+    };
 }
 
-UniValue getfechitratio(const JSONRPCRequest& request)
+RPCHelpMan getfechitratio()
 {
-    RPCHelpMan{
+    return RPCHelpMan{
         "getfechitratio",
         "\nGet the last FEC hit ratios achieved on reception of blocks coming via UDP.\n"
         "\nNew blocks are relayed over UDP connections using compact block format. On\n"
@@ -398,26 +416,28 @@ UniValue getfechitratio(const JSONRPCRequest& request)
                      },
                  }},
             }},
-        RPCExamples{HelpExampleCli("getfechitratio", "") + HelpExampleRpc("getfechitratio", "")}}
-        .Check(request);
-
+        RPCExamples{HelpExampleCli("getfechitratio", "") + HelpExampleRpc("getfechitratio", "")},
+        [&](const RPCHelpMan& self, const JSONRPCRequest& request) -> UniValue
+{
     return FecHitRatioToJson();
+},
+    };
 }
 
-UniValue txblock(const JSONRPCRequest& request)
+RPCHelpMan txblock()
 {
-    RPCHelpMan{"txblock",
+    return RPCHelpMan{"txblock",
                "Transmit a chosen block over all UDP multicast Tx interfaces with block relaying enabled.\n"
                "\nSends a different set of FEC chunks over each of those interfaces.\n",
                {
                    {"height", RPCArg::Type::NUM, RPCArg::Optional::NO, "Block height."},
                    {"codec", RPCArg::Type::NUM, RPCArg::Optional::OMITTED, "Txn compression codec."},
                },
-               RPCResults{},
+               RPCResult{RPCResult::Type::NONE, "", ""},
                RPCExamples{
-                   HelpExampleCli("txblock", "600000") + HelpExampleRpc("txblock", "600000")}}
-        .Check(request);
-
+                   HelpExampleCli("txblock", "600000") + HelpExampleRpc("txblock", "600000")},
+                [&](const RPCHelpMan& self, const JSONRPCRequest& request) -> UniValue
+{
     codec_version_t codec = codec_version_t::default_version;
     if (!request.params[1].isNull()) {
         int codec_arg = request.params[1].get_int();
@@ -430,24 +450,29 @@ UniValue txblock(const JSONRPCRequest& request)
     MulticastTxBlock(request.params[0].get_int(), codec);
 
     return NullUniValue;
+},
+    };
 }
-
-static const CRPCCommand commands[] =
-    { //  category              name                      actor (function)         argNames
-        //  --------------------- ------------------------  -----------------------  ----------
-        {"udpnetwork", "getudppeerinfo", &getudppeerinfo, {}},
-        {"udpnetwork", "addudpnode", &addudpnode, {"node", "local_magic", "remote_magic", "ultimately_trusted", "command", "group"}},
-        {"udpnetwork", "disconnectudpnode", &disconnectudpnode, {"node"}},
-        {"udpnetwork", "getudpmulticastinfo", &getudpmulticastinfo, {}},
-        {"udpnetwork", "getchunkstats", &getchunkstats, {"height"}},
-        {"udpnetwork", "gettxwindowinfo", &gettxwindowinfo, {"physical_idx", "logical_idx"}},
-        {"udpnetwork", "gettxntxinfo", &gettxntxinfo, {}},
-        {"udpnetwork", "gettxqueueinfo", &gettxqueueinfo, {}},
-        {"udpnetwork", "getfechitratio", &getfechitratio, {}},
-        {"udpnetwork", "txblock", &txblock, {"height", "codec"}}};
 
 void RegisterUDPNetRPCCommands(CRPCTable& t)
 {
-    for (unsigned int vcidx = 0; vcidx < ARRAYLEN(commands); vcidx++)
-        t.appendCommand(commands[vcidx].name, &commands[vcidx]);
+// clang-format off
+    static const CRPCCommand commands[] =
+    { //  category              actor (function)
+      //  --------------------- ------------------------
+        {"udpnetwork",          &getudppeerinfo          },
+        {"udpnetwork",          &addudpnode              },
+        {"udpnetwork",          &disconnectudpnode       },
+        {"udpnetwork",          &getudpmulticastinfo     },
+        {"udpnetwork",          &getchunkstats           },
+        {"udpnetwork",          &gettxwindowinfo         },
+        {"udpnetwork",          &gettxntxinfo            },
+        {"udpnetwork",          &gettxqueueinfo          },
+        {"udpnetwork",          &getfechitratio          },
+        {"udpnetwork",          &txblock                 },
+    };
+// clang-format on
+    for (const auto& c : commands) {
+        t.appendCommand(c.name, &c);
+    }
 }

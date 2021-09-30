@@ -1046,18 +1046,46 @@ float blockMetrics(const CBlock& block)
     return txsavings;
 }
 
-UniValue getblocksize(const JSONRPCRequest& request)
+RPCHelpMan getblocksize()
 {
-    if (request.fHelp || request.params.size() > 1)
-        throw std::runtime_error(
-            "getblocksize \"height\"\n"
-            "\nArguments:\n"
-            "1. \"height\"     (numeric, optional) The height of the requested block.\n"
-            "Result:"
-            "Returns an object with information about block and transaction sizes."
-            "Accepts a height as an argument, and chooses a uniform sample of historical blocks otherwise."
-        );
-
+    return RPCHelpMan{"getblocksize",
+        "\nReturns the average space saving achieved with compression on each analyzed block.\n"
+        "More specifically, computes the \"savings\" metric by avaraging out the individual\n"
+        "space saving achieved for each txn in a particular block.\n\n"
+        "If a block height is not provided, chooses a uniform sample of historical blocks.\n"
+        "Otherwise, analyzes the specified block chosen by height.\n",
+        {
+            {"height", RPCArg::Type::NUM, RPCArg::Optional::OMITTED, "Block height"}
+        },
+        {
+            RPCResult{
+                "when the height is specified",
+                RPCResult::Type::OBJ,
+                "",
+                "",
+                {
+                    {RPCResult::Type::NUM, "savings", "Average space saving"},
+                }
+            },
+            RPCResult{
+                "when the height is omitted",
+                RPCResult::Type::OBJ,
+                "",
+                "",
+                {
+                    {RPCResult::Type::ARR, "blocks", "",
+                    {
+                        {RPCResult::Type::NUM, "savings", "Average space saving"},
+                    }}
+                }
+            }
+        },
+        RPCExamples{
+            HelpExampleCli("getblocksize", "600000") +
+            HelpExampleRpc("getblocksize", "600000")
+        },
+        [&](const RPCHelpMan& self, const JSONRPCRequest& request) -> UniValue
+{
     LOCK(cs_main);
 
     int tipheight = ::ChainActive().Height();
@@ -1091,8 +1119,6 @@ UniValue getblocksize(const JSONRPCRequest& request)
         }
 
         result.pushKV("blocks", blocksizes);
-
-        return result;
     } else {
         if (initialheight > tipheight)
             throw JSONRPCError(RPC_MISC_ERROR, "Block not yet seen by node.");
@@ -1101,9 +1127,11 @@ UniValue getblocksize(const JSONRPCRequest& request)
             throw JSONRPCError(RPC_MISC_ERROR, "Block not found on disk.");
 
         result.pushKV("savings", blockMetrics(block));
-
-        return result;
     }
+
+    return result;
+},
+    };
 }
 
 void blockAnalyzer(const CBlock& block, std::vector<std::array<uint64_t, 3>>& statistics, stattype multisigstats)
@@ -1136,18 +1164,32 @@ void blockAnalyzer(const CBlock& block, std::vector<std::array<uint64_t, 3>>& st
     }
 }
 
-UniValue getblockanalysis(const JSONRPCRequest& request)
+RPCHelpMan getblockanalysis()
 {
-    if (request.fHelp || request.params.size() > 1)
-        throw std::runtime_error(
-            "getblockanalysis \"height\"\n"
-            "\nArguments:\n"
-            "1. \"height\"     (numeric, optional) The height to start scanning from.\n"
-            "Result:"
-            "Returns an object with information about transaction input scripts."
-            "Accepts a height as an argument, and chooses all blocks otherwise."
-        );
-
+    return RPCHelpMan{"getblockanalysis",
+        "Returns an object with information about transaction input scripts.\n"
+        "Accepts a height argument to define the starting block for the analysis.\n"
+        "Otherwise, analyzes all blocks in the chain.",
+        {
+            {"height", RPCArg::Type::NUM, RPCArg::Optional::OMITTED, "Height to start scanning from."}
+        },
+        RPCResult{RPCResult::Type::OBJ, "", "Compression analysis",
+            {
+                {RPCResult::Type::NUM, "starting block", "Starting block height"},
+                {RPCResult::Type::NUM, "total", "Final total"},
+                {RPCResult::Type::ARR, "blocks", "Block analysis",
+                    {
+                        {RPCResult::Type::ELISION, "info", "Info such as k, n, frequency, "}, // FIXME
+                    }
+                }
+            }
+        },
+        RPCExamples{
+            HelpExampleCli("getblockanalysis", "600000") +
+            HelpExampleRpc("getblockanalysis", "600000")
+        },
+        [&](const RPCHelpMan& self, const JSONRPCRequest& request) -> UniValue
+{
     LOCK(cs_main);
 
     int tipheight = ::ChainActive().Height();
@@ -1225,11 +1267,13 @@ UniValue getblockanalysis(const JSONRPCRequest& request)
     result.pushKV("blocks", blockanalysis);
 
     return result;
+},
+    };
 }
 
-UniValue testcompression(const JSONRPCRequest& request)
+RPCHelpMan testcompression()
 {
-    RPCHelpMan{"testcompression",
+    return RPCHelpMan{"testcompression",
                "Test round-trip compression of all transactions in all blocks within the selected range.\n"
                "\nAccepts start and end block heights as arguments to define the range of blocks to test.\n"
                "If the start height is not defined, start from height 0. If the end height is undefined,\n"
@@ -1238,12 +1282,12 @@ UniValue testcompression(const JSONRPCRequest& request)
                    {"start_height", RPCArg::Type::NUM, RPCArg::Optional::OMITTED, "Starting height of the block range to be tested."},
                    {"end_height", RPCArg::Type::NUM, RPCArg::Optional::OMITTED, "Ending height of the block range to be tested."},
                },
-               RPCResults{},
+               RPCResult{RPCResult::Type::NONE, "", ""},
                RPCExamples{
                    HelpExampleCli("testcompression", "600000 600005") +
-                   HelpExampleRpc("testcompression", "600000, 600005")}}
-        .Check(request);
-
+                   HelpExampleRpc("testcompression", "600000, 600005")},
+               [&](const RPCHelpMan& self, const JSONRPCRequest& request) -> UniValue
+{
     LOCK(cs_main);
 
     int tipheight = ::ChainActive().Height();
@@ -1313,7 +1357,9 @@ UniValue testcompression(const JSONRPCRequest& request)
         }
     }
 
-    return UniValue(UniValue::VARR);
+    return NullUniValue;
+},
+    };
 }
 
 static RPCHelpMan pruneblockchain()
@@ -2920,13 +2966,13 @@ UniValue CreateUTXOSnapshot(NodeContext& node, CChainState& chainstate, CAutoFil
     return result;
 }
 
-static UniValue getoooblocks(const JSONRPCRequest& request)
+static RPCHelpMan getoooblocks()
 {
-    RPCHelpMan{
+    return RPCHelpMan{
         "getoooblocks",
         "\nReturn information about the out-of-order blocks (OOOBs) stored in disk.\n",
         {
-            {"verbose", RPCArg::Type::BOOL, /* default */ "false",
+            {"verbose", RPCArg::Type::BOOL, RPCArg::Default{false},
                 "False to obtain the number of OOOBs in disk, true to obtain their hashes"},
         },
         {
@@ -2946,9 +2992,8 @@ static UniValue getoooblocks(const JSONRPCRequest& request)
         },
         RPCExamples{
             HelpExampleCli("getoooblocks", "true") + HelpExampleRpc("getoooblocks", "true")},
-    }
-        .Check(request);
-
+        [&](const RPCHelpMan& self, const JSONRPCRequest& request) -> UniValue
+{
     bool fVerbose = false;
     if (!request.params[0].isNull())
         fVerbose = request.params[0].get_bool();
@@ -2967,6 +3012,8 @@ static UniValue getoooblocks(const JSONRPCRequest& request)
         }
         return ret;
     }
+},
+    };
 }
 
 void RegisterBlockchainRPCCommands(CRPCTable &t)
