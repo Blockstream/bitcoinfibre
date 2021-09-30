@@ -815,7 +815,7 @@ static void ProcessBlockThread(ChainstateManager* chainman)
                     const CBlockIndex* pblockindex;
                     {
                         LOCK(cs_main);
-                        pblockindex = LookupBlockIndex(header.header.GetHash());
+                        pblockindex = chainman->m_blockman.LookupBlockIndex(header.header.GetHash());
                     }
                     block.chain_lookup = true;
                     if (pblockindex && (pblockindex->nStatus & BLOCK_HAVE_DATA)) {
@@ -1002,7 +1002,7 @@ static void ProcessBlockThread(ChainstateManager* chainman)
                          * valid */
                         bool ooob_saved = false;
                         if (outoforder_and_valid) {
-                            ooob_saved = StoreOoOBlock(Params(), pdecoded_block, force_requested, block.height);
+                            ooob_saved = StoreOoOBlock(*chainman, Params(), pdecoded_block, force_requested, block.height);
 
                             // If the OOOB was actually a tip block coming from
                             // a trusted peer, we are no longer in sync
@@ -1467,8 +1467,9 @@ static bool HandleTx(UDPMessage& msg, size_t length, const CService& node, UDPCo
             stream >> CTxCompressor(tx, codec_version);
             LOCK(cs_main);
             TxValidationState state;
-            if (AcceptToMemoryPool(*node_context->mempool.get(), state, tx, nullptr, false, 0)) {
-                RelayTransaction(tx->GetHash(), tx->GetWitnessHash(), *node_context->connman.get());
+            const MempoolAcceptResult result = AcceptToMemoryPool(node_context->chainman->ActiveChainstate(), *node_context->mempool.get(), tx, false);
+            if (result.m_result_type == MempoolAcceptResult::ResultType::VALID) {
+                node_context->peerman->RelayTransaction(tx->GetHash(), tx->GetWitnessHash());
             }
         } catch (std::exception& e) {
             LogPrintf("UDP: Tx decode failed for tx %lu from %s: %s\n", msg.msg.block.hash_prefix, node.ToString(), e.what());
