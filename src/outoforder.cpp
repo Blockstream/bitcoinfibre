@@ -50,7 +50,7 @@ static CDBWrapper* GetOoOBlockDB() EXCLUSIVE_LOCKS_REQUIRED(cs_ooob)
     return &ooob_db;
 }
 
-bool StoreOoOBlock(const CChainParams& chainparams, const std::shared_ptr<const CBlock> pblock, const bool force, const int in_height)
+bool StoreOoOBlock(const ChainstateManager& chainman, const CChainParams& chainparams, const std::shared_ptr<const CBlock> pblock, const bool force, const int in_height)
 {
     LOCK(cs_ooob);
     LOCK(cs_main);
@@ -70,10 +70,10 @@ bool StoreOoOBlock(const CChainParams& chainparams, const std::shared_ptr<const 
     if (height == -1 || (!force && height < consensusParams.BIP34Height)) return false; // nonsensical
 
     // Don't save blocks too far in the future, to prevent a DoS on pruning
-    if (!force && (height > int(::ChainActive().Height() + MIN_BLOCKS_TO_KEEP))) return false;
+    if (!force && (height > int(chainman.ActiveHeight() + MIN_BLOCKS_TO_KEEP))) return false;
 
     LogPrintf("Adding block %s (height %u) to out-of-order disk cache\n", pblock->GetHash().GetHex(), height);
-    const FlatFilePos diskpos = SaveBlockToDisk(*pblock, height, chainparams, nullptr);
+    const FlatFilePos diskpos = SaveBlockToDisk(*pblock, height, chainman.ActiveChain(), chainparams, nullptr);
     successors.emplace(pblock->GetHash(), diskpos);
     if (!ooob_db->Write(key, successors)) {
         LogPrintf("ERROR adding block %s to out-of-order disk cache\n", pblock->GetHash().GetHex());
