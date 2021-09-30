@@ -387,12 +387,14 @@ bool round_trip_compress_transaction(CMutableTransaction& tx)
     stream >> CTxCompressor(ret, codec_version_t::v1);
 
     stream << tx;
-    CSerializeData original;
-    stream.GetAndClear(original);
+    SerializeData original;
+    stream >> original;
+    stream.clear();
 
     stream << ret;
-    CSerializeData round_tripped;
-    stream.GetAndClear(round_tripped);
+    SerializeData round_tripped;
+    stream >> round_tripped;
+    stream.clear();
 
     BOOST_CHECK(round_tripped == original);
     if (round_tripped != original) {
@@ -423,7 +425,7 @@ BOOST_AUTO_TEST_CASE(compress_transaction_corpus)
     int counter = 0;
     int success = 0;
     int factor = 15;
-    CSerializeData data;
+    SerializeData data;
 
     DIR* d = opendir("test-tx");
     for (struct dirent* ent = readdir(d); ent; ent = readdir(d)) {
@@ -470,7 +472,7 @@ BOOST_AUTO_TEST_CASE(compress_transaction_corpus)
 
 BOOST_AUTO_TEST_CASE(compress_transaction_roundtrip)
 {
-    CSerializeData data;
+    SerializeData data;
     data.resize(1000000);
 
     char const* filename = "test-tx/tx-00000";

@@ -1351,10 +1351,10 @@ RPCHelpMan testcompression()
             std::array<char, 50> name;
             snprintf(name.data(), name.size(), "./test-tx/tx-%05d", txcount);
             {
-                CSerializeData data;
-                str.GetAndClear(data);
+                SerializeData data;
+                str >> data;
                 std::ofstream f(name.data());
-                f.write(data.data(), data.size());
+                f.write((char *)data.data(), data.size());
             }
             ++txcount;
         }
