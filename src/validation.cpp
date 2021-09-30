@@ -3519,7 +3519,7 @@ bool ChainstateManager::ProcessNewBlock(const CChainParams& chainparams, const s
 
     if (do_ooob) {
         // Check if we have any other blocks to process waiting on this one
-	    ProcessSuccessorOoOBlocks(*this, chainparams, pblock->GetHash(), fForceProcessing);
+	    ProcessSuccessorOoOBlocks(*this, chainparams, block->GetHash(), force_processing);
     }
 
     return true;
