@@ -825,9 +825,10 @@ RPCHelpMan getblocksize()
         },
         [&](const RPCHelpMan& self, const JSONRPCRequest& request) -> UniValue
 {
+    ChainstateManager& chainman = EnsureAnyChainman(request.context);
     LOCK(cs_main);
 
-    int tipheight = ::ChainActive().Height();
+    int tipheight = chainman.ActiveHeight();
     CBlock block;
     int initialheight = 0;
     int interval = 1000;
@@ -851,7 +852,7 @@ RPCHelpMan getblocksize()
         {
             int height = index * interval;
 
-            if (!ReadBlockFromDisk(block, ::ChainActive()[height], Params().GetConsensus()))
+            if (!ReadBlockFromDisk(block, chainman.ActiveChain()[height], Params().GetConsensus()))
                 throw JSONRPCError(RPC_MISC_ERROR, "Block not found on disk.");
 
             blocksizes.push_back(UniValue(blockMetrics(block)));
@@ -862,7 +863,7 @@ RPCHelpMan getblocksize()
         if (initialheight > tipheight)
             throw JSONRPCError(RPC_MISC_ERROR, "Block not yet seen by node.");
 
-        if (!ReadBlockFromDisk(block, ::ChainActive()[initialheight], Params().GetConsensus()))
+        if (!ReadBlockFromDisk(block, chainman.ActiveChain()[initialheight], Params().GetConsensus()))
             throw JSONRPCError(RPC_MISC_ERROR, "Block not found on disk.");
 
         result.pushKV("savings", blockMetrics(block));
@@ -929,9 +930,10 @@ RPCHelpMan getblockanalysis()
         },
         [&](const RPCHelpMan& self, const JSONRPCRequest& request) -> UniValue
 {
+    ChainstateManager& chainman = EnsureAnyChainman(request.context);
     LOCK(cs_main);
 
-    int tipheight = ::ChainActive().Height();
+    int tipheight = chainman.ActiveHeight();
     CBlock block;
     UniValue result(UniValue::VOBJ);
     UniValue blockanalysis(UniValue::VARR);
@@ -949,7 +951,7 @@ RPCHelpMan getblockanalysis()
         throw JSONRPCError(RPC_MISC_ERROR, "Block not yet seen by node.");
 
     for (int index = baseheight; index <= tipheight; ++index) {
-        if (!ReadBlockFromDisk(block, ::ChainActive()[index], Params().GetConsensus()))
+        if (!ReadBlockFromDisk(block, chainman.ActiveChain()[index], Params().GetConsensus()))
             throw JSONRPCError(RPC_MISC_ERROR, "Block not found on disk.");
 
         blockAnalyzer(block, finalstatistics, MakeSpan(finalmultisigstats));
@@ -1027,9 +1029,10 @@ RPCHelpMan testcompression()
                    HelpExampleRpc("testcompression", "600000, 600005")},
                [&](const RPCHelpMan& self, const JSONRPCRequest& request) -> UniValue
 {
+    ChainstateManager& chainman = EnsureAnyChainman(request.context);
     LOCK(cs_main);
 
-    int tipheight = ::ChainActive().Height();
+    int tipheight = chainman.ActiveHeight();
     int baseheight = 0;
     if (!request.params[0].isNull())
         baseheight = request.params[0].get_int();
@@ -1047,7 +1050,7 @@ RPCHelpMan testcompression()
 
     for (int index = baseheight; index <= tipheight; ++index) {
         CBlock block;
-        if (!ReadBlockFromDisk(block, ::ChainActive()[index], Params().GetConsensus()))
+        if (!ReadBlockFromDisk(block, chainman.ActiveChain()[index], Params().GetConsensus()))
             throw JSONRPCError(RPC_MISC_ERROR, "Block not found on disk.");
 
         if (!IsRPCRunning())

@@ -705,7 +705,7 @@ bool InitializeUDPConnections(NodeContext* const node_context)
     /* Multicast transmission threads */
     LaunchMulticastBackfillThreads();
 
-    BlockRecvInit(node_context->chainman);
+    BlockRecvInit(node_context->chainman.get());
 
     partial_block_load_thread.reset(new std::thread(&util::TraceThread,
                                                     "udploadpartialblks",
@@ -1350,7 +1350,7 @@ static void MulticastBackfillThread(const CService& mcastNode,
                                     const UDPMulticastInfo* info)
 {
     /* Start only after the initial sync */
-    while (::ChainstateActive().IsInitialBlockDownload() && !send_messages_break)
+    while (g_node_context->chainman->ActiveChainstate().IsInitialBlockDownload() && !send_messages_break)
         std::this_thread::sleep_for(std::chrono::milliseconds(50));
 
     // if IsInitialBlockDownload() is false, chainActive.Tip()->pprev will
@@ -1362,10 +1362,10 @@ static void MulticastBackfillThread(const CService& mcastNode,
     const CBlockIndex* pindex;
     {
         LOCK(cs_main);
-        pindex = ::ChainActive().Tip();
+        pindex = g_node_context->chainman->ActiveTip();
         assert(pindex);
 
-        const int chain_height = ::ChainActive().Height();
+        const int chain_height = g_node_context->chainman->ActiveHeight();
         LogPrint(BCLog::UDPMCAST, "UDP: Multicast Tx %lu-%lu - chain height: %d\n",
                  info->physical_idx, info->logical_idx, chain_height);
 
@@ -1379,7 +1379,7 @@ static void MulticastBackfillThread(const CService& mcastNode,
 
         LogPrint(BCLog::UDPMCAST, "UDP: Multicast Tx %lu-%lu - starting height: %d\n",
                  info->physical_idx, info->logical_idx, height);
-        pindex = ::ChainActive()[height];
+        pindex = g_node_context->chainman->ActiveChain()[height];
         assert(pindex->nHeight == height);
     }
 
@@ -1448,7 +1448,7 @@ static void MulticastBackfillThread(const CService& mcastNode,
             {
                 LOCK(cs_main);
                 int height = pindex->nHeight + 1;
-                const int chain_height = ::ChainActive().Height();
+                const int chain_height = g_node_context->chainman->ActiveHeight();
 
                 if ((height < chain_height - backfill_depth + 1) && (backfill_depth > 0))
                     height = chain_height - backfill_depth + 1;
@@ -1459,7 +1459,7 @@ static void MulticastBackfillThread(const CService& mcastNode,
                         height = chain_height - backfill_depth + 1;
                 }
 
-                pindex = ::ChainActive()[height];
+                pindex = g_node_context->chainman->ActiveChain()[height];
             }
         }
 
@@ -1566,7 +1566,7 @@ static void MulticastTxnThread(const CService& mcastNode,
     assert(info->txn_per_sec > 0);
 
     /* Start only after the initial sync */
-    while (::ChainstateActive().IsInitialBlockDownload() && !send_messages_break)
+    while (g_node_context->chainman->ActiveChainstate().IsInitialBlockDownload() && !send_messages_break)
         std::this_thread::sleep_for(std::chrono::milliseconds(50));
 
     if (send_messages_break) return;
@@ -1737,7 +1737,7 @@ void MulticastTxBlock(const int height, codec_version_t codec_version)
     const CBlockIndex* pindex;
     {
         LOCK(cs_main);
-        pindex = ::ChainActive()[height];
+        pindex = g_node_context->chainman->ActiveChain()[height];
         assert(pindex->nHeight == height);
     }
 
