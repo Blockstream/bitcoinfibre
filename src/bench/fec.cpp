@@ -34,7 +34,10 @@ private:
 public:
     Receiver(CTxMemPool& poolIn, size_t* total_chunks_consumed_in, size_t* total_chunks_in_mempool_in, size_t* non_fec_chunks_in, bool fIncludeBlock)
         : partialBlock(&poolIn), expecting_full_block(fIncludeBlock), total_chunks_consumed(total_chunks_consumed_in),
-          total_chunks_in_mempool(total_chunks_in_mempool_in), non_fec_chunks(non_fec_chunks_in) {}
+          total_chunks_in_mempool(total_chunks_in_mempool_in), non_fec_chunks(non_fec_chunks_in)
+    {
+        InitFec();
+    }
 
     ~Receiver()
     {
@@ -275,6 +278,7 @@ static void FECEncodeAllBenchmark(benchmark::Bench& bench) { FECEncodeBenchmark(
 static void FECDecodeBenchmark(benchmark::Bench& bench, unsigned mask, const MemoryUsageMode memory_usage_mode)
 {
     SelectParams(CBaseChainParams::REGTEST);
+    InitFec();
 
     const auto& data = benchmark::data::block413567;
     size_t fec_chunk_count = DIV_CEIL(data.size(), FEC_CHUNK_SIZE);

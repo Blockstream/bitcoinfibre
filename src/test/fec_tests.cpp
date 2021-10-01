@@ -12,6 +12,10 @@ static const std::array<MemoryUsageMode, 2> memory_usage_modes{MemoryUsageMode::
 constexpr size_t default_encoding_overhead = 10;
 
 struct FecTestingSetup : public BasicTestingSetup {
+    FecTestingSetup()
+    {
+        InitFec();
+    }
     /**
      * The files generated within the partial_blocks directory during tests get
      * cleaned once the tests finish, but the directories stay. Thus, after a

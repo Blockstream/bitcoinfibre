@@ -201,5 +201,6 @@ public:
 };
 
 bool BuildFECChunks(const std::vector<unsigned char>& data, std::pair<std::unique_ptr<FECChunkType[]>, std::vector<uint32_t>>& fec_chunks);
+bool InitFec();
 
 #endif
