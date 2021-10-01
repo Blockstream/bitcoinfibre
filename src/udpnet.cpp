@@ -620,6 +620,10 @@ bool InitializeUDPConnections(NodeContext* const node_context)
     assert(udp_write_threads.empty() && !udp_read_thread);
     g_node_context = node_context;
 
+    if (!InitFec()) {
+        return false;
+    }
+
     if (gArgs.IsArgSet("-udpmulticastloginterval") && (atoi(gArgs.GetArg("-udpmulticastloginterval", "")) > 0))
         g_mcast_log_interval = atoi(gArgs.GetArg("-udpmulticastloginterval", ""));
 
