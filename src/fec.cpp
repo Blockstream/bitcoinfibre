@@ -552,15 +552,21 @@ bool BuildFECChunks(const std::vector<unsigned char>& data, std::pair<std::uniqu
     return enc.PrefillChunks();
 }
 
-class FECInit
+bool InitFec()
 {
-public:
-    FECInit()
-    {
-        assert(!wirehair_init());
-        assert(!cm256_init());
-        for (size_t i = 0; i < CACHE_STATES_COUNT; i++) {
-            cache_states[i] = wirehair_decoder_create(nullptr, MAX_BLOCK_SERIALIZED_SIZE * MAX_CHUNK_CODED_BLOCK_SIZE_FACTOR, FEC_CHUNK_SIZE);
-        }
+    if (wirehair_init() != Wirehair_Success) {
+        LogPrintf("FEC: Wirehair initialization failure\n");
+        return false;
     }
-} instance_of_fecinit;
+
+    if (cm256_init() != 0) {
+        LogPrintf("FEC: cm256 initialization failure\n");
+        return false;
+    }
+
+    for (size_t i = 0; i < CACHE_STATES_COUNT; i++) {
+        cache_states[i] = wirehair_decoder_create(nullptr, MAX_BLOCK_SERIALIZED_SIZE * MAX_CHUNK_CODED_BLOCK_SIZE_FACTOR, FEC_CHUNK_SIZE);
+    }
+
+    return true;
+}
