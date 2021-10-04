@@ -578,13 +578,18 @@ static void gf256_mul_mem_init()
             GF256Ctx.MM128.TABLE_HI_Y[y] = vld1q_u8(hi);
         }
 #elif !defined(GF256_TARGET_MOBILE)
-        const GF256_M128 table_lo = _mm_loadu_si128((GF256_M128*)lo);
-        const GF256_M128 table_hi = _mm_loadu_si128((GF256_M128*)hi);
-        _mm_storeu_si128(GF256Ctx.MM128.TABLE_LO_Y + y, table_lo);
-        _mm_storeu_si128(GF256Ctx.MM128.TABLE_HI_Y + y, table_hi);
+        if (CpuHasSSSE3)
+        {
+            const GF256_M128 table_lo = _mm_loadu_si128((GF256_M128*)lo);
+            const GF256_M128 table_hi = _mm_loadu_si128((GF256_M128*)hi);
+            _mm_storeu_si128(GF256Ctx.MM128.TABLE_LO_Y + y, table_lo);
+            _mm_storeu_si128(GF256Ctx.MM128.TABLE_HI_Y + y, table_hi);
+        }
 # ifdef GF256_TRY_AVX2
         if (CpuHasAVX2)
         {
+            const GF256_M128 table_lo = _mm_loadu_si128((GF256_M128*)lo);
+            const GF256_M128 table_hi = _mm_loadu_si128((GF256_M128*)hi);
             const GF256_M256 table_lo2 = _mm256_broadcastsi128_si256(table_lo);
             const GF256_M256 table_hi2 = _mm256_broadcastsi128_si256(table_hi);
             _mm256_storeu_si256(GF256Ctx.MM256.TABLE_LO_Y + y, table_lo2);
