@@ -9,6 +9,8 @@
 
 #include <ringbuffer.h>
 #include <throttle.h>
+#include <udpmulticasttx.h>
+#include <udpmulticasttxdb.h>
 #include <udpnet.h>
 #include <udprelay.h>
 
@@ -1143,8 +1145,6 @@ static void do_send_messages()
     }
 
     while (true) {
-        if (send_messages_break)
-            return;
         /* If all queues are rate-limited, keep track of the next upcoming
          * transmission time and, by the end of this loop, sleep until this time
          * comes. Start with a timestamp far into the future and reduce the
@@ -1276,6 +1276,13 @@ static void do_send_messages()
             t_next_tx = std::min(t_next_tx, queue.next_send);
         }
 
+        // Make sure all messages are transmitted before terminating this loop.
+        // This is especially useful to ensure the transmission progress saved
+        // on the UDP Multicast Tx db corresponds to the chunks actually
+        // transmitted by this loop (i.e., no chunks were skipped).
+        if (send_messages_break && maybe_all_empty)
+            return;
+
         // Wait until at least one socket is writable
         if (maybe_all_full) {
             int n_ready = 0;
@@ -1328,23 +1335,12 @@ UniValue TxQueueInfoToJSON()
     return ret;
 }
 
-struct backfill_block {
-    std::vector<UDPMessage> msgs;
-    mutable size_t idx = 0; // index of next message to be transmitted
-};
-
-struct backfill_block_window {
-    std::map<int, backfill_block> map;
-    std::mutex mutex;
-    uint64_t bytes_in_window = 0;
-};
-
 struct backfill_txn_window {
     std::mutex mutex;
     uint64_t tx_count = 0;
 };
 
-std::map<std::pair<uint16_t, uint16_t>, std::shared_ptr<backfill_block_window>> block_window_map;
+std::map<std::pair<uint16_t, uint16_t>, std::shared_ptr<BackfillBlockWindow>> block_window_map;
 std::map<std::pair<uint16_t, uint16_t>, backfill_txn_window> txn_window_map;
 
 std::mutex block_window_map_mutex;
@@ -1357,8 +1353,6 @@ static void MulticastBackfillThread(const CService& mcastNode,
     while (g_node_context->chainman->ActiveChainstate().IsInitialBlockDownload() && !send_messages_break)
         std::this_thread::sleep_for(std::chrono::milliseconds(50));
 
-    // if IsInitialBlockDownload() is false, chainActive.Tip()->pprev will
-    // return nullptr and trip the assert below
     if (send_messages_break) return;
 
     /* Define the initial block height */
@@ -1396,57 +1390,47 @@ static void MulticastBackfillThread(const CService& mcastNode,
     const auto tx_idx_pair = std::make_pair(info->physical_idx, info->logical_idx);
     std::unique_lock<std::mutex> window_map_lock(block_window_map_mutex);
     const auto res = block_window_map.insert(
-        std::make_pair(tx_idx_pair, std::make_shared<backfill_block_window>()));
+        std::make_pair(tx_idx_pair, std::make_shared<BackfillBlockWindow>(tx_idx_pair, info->save_tx_state)));
     window_map_lock.unlock();
     if (!res.second)
         throw std::runtime_error("Couldn't add new block window");
     const auto pblock_window = res.first->second;
 
-    /* Protect pblock_window->map with a mutex
-     *
-     * NOTE: This is the only thread that mutates the map and its
-     * content. Hence, the mutex is only locked here on the segments that
-     * actually mutate the map. In contrast, when reading the map, we do not
-     * lock the mutex, as we know no other thread is mutating it.
-     */
-    std::unique_lock<std::mutex> lock(pblock_window->mutex, std::defer_lock);
+    /* Recover the state left from the previous session */
+    if (info->save_tx_state) {
+        UdpMulticastTxDb mcast_tx_db(tx_idx_pair);
+        const auto height_idx_map = mcast_tx_db.GetBlockProgressMap();
+        LogPrintf("UDP: Multicast Tx %lu-%lu - Restoring %lu blocks from the previous session\n",
+                  tx_idx_pair.first, tx_idx_pair.second, height_idx_map.size());
+        size_t n_success = 0;
+        for (const auto elem : height_idx_map) {
+            if (send_messages_break)
+                break;
+            {
+                LOCK(cs_main);
+                pindex = g_node_context->chainman->ActiveChain()[elem.first];
+            }
+            if (pindex == nullptr) {
+                LogPrintf("UDP: Multicast Tx %lu-%lu - Failed to restore block %d\n",
+                          tx_idx_pair.first, tx_idx_pair.second, elem.first);
+                continue;
+            }
+            pblock_window->Add(pindex, info->overhead_rep_blks, elem.second);
+            n_success++;
+        }
+        LogPrintf("UDP: Multicast Tx %lu-%lu - Successfully restored %lu blocks\n",
+                  tx_idx_pair.first, tx_idx_pair.second, n_success);
+        // If the previous session did not terminate gracefully, some restored
+        // blocks can be in fully transmitted state but not yet removed from the
+        // Tx window. Clean up those blocks now.
+        pblock_window->Cleanup();
+    }
 
+    /* Main loop */
     while (!send_messages_break) {
         /* Fill FEC chunk interleaving window */
-        while ((pblock_window->map.size() < info->interleave_len) && (!send_messages_break)) {
-            // Add the next block to the protected block window map
-            lock.lock();
-            const auto res = pblock_window->map.insert(std::make_pair(pindex->nHeight, backfill_block()));
-            lock.unlock(); // safe to release (no other thread mutates the map)
-
-            /* It's perfectly possible that the block already exists in the
-             * interleave window. The block index could be back on a block that
-             * is still being transmitted. In this case, don't fill the block in
-             * the window, but do advance the block index. */
-            if (res.second) {
-                /* Fetch block from disk and generate its FEC chunks */
-                CBlock block;
-                assert(ReadBlockFromDisk(block, pindex, Params().GetConsensus()));
-                const uint256 block_hash(block.GetHash());
-
-                const auto block_it = res.first;
-
-                // Fill the FEC messages on this backfill block within the
-                // protected window of blocks
-                lock.lock();
-                UDPFillMessagesFromBlock(block,
-                                         block_it->second.msgs,
-                                         pindex->nHeight,
-                                         info->overhead_rep_blks);
-                pblock_window->bytes_in_window += block_it->second.msgs.size() * FEC_CHUNK_SIZE;
-                lock.unlock(); // safe to release (no other thread mutates the map)
-
-                LogPrint(BCLog::FEC, "UDP: Multicast Tx %lu-%lu - "
-                                     "fill block %s (%20lu) - height %7d - %5d chunks\n",
-                         info->physical_idx, info->logical_idx,
-                         block_hash.ToString(), block_hash.GetUint64(0),
-                         pindex->nHeight, block_it->second.msgs.size());
-            }
+        while ((pblock_window->Size() < info->interleave_len) && (!send_messages_break)) {
+            pblock_window->Add(pindex, info->overhead_rep_blks);
 
             /* Advance to the next block to be inserted in the block window */
             {
@@ -1468,79 +1452,18 @@ static void MulticastBackfillThread(const CService& mcastNode,
         }
 
         /* Send window of interleaved chunks */
-        for (const auto& b : pblock_window->map) {
+        for (const auto& b : pblock_window->GetWindow()) {
             if (send_messages_break)
                 break;
 
-            assert(b.second.idx < b.second.msgs.size());
-            const UDPMessage& msg = b.second.msgs[b.second.idx];
+            const UDPMessage& msg = pblock_window->GetNextMsg(b.first, b.second);
             const unsigned int msg_len = sizeof(UDPMessageHeader) + MAX_UDP_MESSAGE_LENGTH;
-
-            // Update the index of the next message to be transmitted within the
-            // protected block window map
-            lock.lock();
-            b.second.idx++;
-            lock.unlock(); // safe to release (no other thread mutates the map)
-
             SendMessage(msg, msg_len, queue, queue.buffs[3], mcastNode, multicast_checksum_magic);
         }
 
         /* Cleanup the blocks that have been fully transmitted */
-        lock.lock();
-        for (auto it = pblock_window->map.cbegin(); it != pblock_window->map.cend();) {
-            if (it->second.idx == it->second.msgs.size()) {
-                pblock_window->bytes_in_window -= it->second.msgs.size() * FEC_CHUNK_SIZE;
-                it = pblock_window->map.erase(it);
-            } else {
-                ++it;
-            }
-        }
-        lock.unlock();
+        pblock_window->Cleanup();
     }
-}
-
-static UniValue TxWindowShortInfoToJSON(std::shared_ptr<backfill_block_window> pblock_window)
-{
-    UniValue ret(UniValue::VOBJ);
-    std::unique_lock<std::mutex> lock(pblock_window->mutex);
-
-    /* Find the minimum height, the maximum height, and the height corresponding
-     * to the largest block */
-    int min_height = std::numeric_limits<int>::max();
-    int max_height = 0;
-    size_t max_n_chunks = 0;
-    int height_largest_block = -1;
-    for (const auto& b : pblock_window->map) {
-        if (b.first < min_height)
-            min_height = b.first;
-
-        if (b.first > max_height)
-            max_height = b.first;
-
-        if (b.second.msgs.size() > max_n_chunks) {
-            max_n_chunks = b.second.msgs.size();
-            height_largest_block = b.first;
-        }
-    }
-    ret.pushKV("size", ((double)pblock_window->bytes_in_window / (1048576)));
-    ret.pushKV("n_blks", (uint64_t)pblock_window->map.size());
-    ret.pushKV("min", min_height);
-    ret.pushKV("max", max_height);
-    ret.pushKV("largest", height_largest_block);
-    return ret;
-}
-
-static UniValue TxWindowFullInfoToJSON(std::shared_ptr<backfill_block_window> pblock_window)
-{
-    UniValue ret(UniValue::VOBJ);
-    std::unique_lock<std::mutex> lock(pblock_window->mutex);
-    for (const auto& b : pblock_window->map) {
-        UniValue info(UniValue::VOBJ);
-        info.pushKV("index", (uint64_t)b.second.idx);
-        info.pushKV("total", (uint64_t)b.second.msgs.size());
-        ret.__pushKV(std::to_string(b.first), info);
-    }
-    return ret;
 }
 
 UniValue TxWindowInfoToJSON(int phy_idx, int log_idx)
@@ -1552,7 +1475,7 @@ UniValue TxWindowInfoToJSON(int phy_idx, int log_idx)
         for (const auto& w : block_window_map) {
             const std::string key = std::to_string(w.first.first) + "-" +
                                     std::to_string(w.first.second);
-            ret.__pushKV(key, TxWindowShortInfoToJSON(w.second));
+            ret.__pushKV(key, w.second->ShortInfoToJSON());
         }
         return ret;
     } else {
@@ -1560,7 +1483,7 @@ UniValue TxWindowInfoToJSON(int phy_idx, int log_idx)
         const auto tx_idx_pair = std::make_pair(phy_idx, log_idx);
         const auto it = block_window_map.find(tx_idx_pair);
         if (it == block_window_map.end()) return UniValue::VNULL;
-        return TxWindowFullInfoToJSON(it->second);
+        return it->second->FullInfoToJSON();
     }
 }
 
@@ -1887,6 +1810,8 @@ static bool ParseUDPMulticastTxOpt(UDPMulticastInfo& info,
             info.overhead_rep_blks.fixed = atoi(value.substr(0, pos));
             info.overhead_rep_blks.variable = atoi(value.substr(pos + 1)) / 1000.0;
         }
+    } else if (opt == "save_tx_state") {
+        info.save_tx_state = (value == "true" || value == "1");
     } else {
         error = "unknown option";
     }

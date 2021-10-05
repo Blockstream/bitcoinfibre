@@ -258,33 +258,20 @@ struct UDPMulticastInfo {
     std::string groupname = "";           /** optional label for stream */
     bool trusted = false;                 /** whether multicast Tx peer is trusted */
     /* Tx only: */
-    int ttl = 1;                                /** time-to-live desired for multicast
-                                   * packets */
-    uint64_t bw = 0;                            /** target throughput in bps. Set zero to
-                                   * attempt the maximum speed. */
-    int depth = 0;                              /** backfill depth - no. of blocks to iterate
-                                   * over. Set zero to iterate over the full
-                                   * blockchain. */
-    int offset = 0;                             /** offset within the backfill as starting
-                                   * point */
-    uint32_t interleave_len = 1;                /** determines the depth of the sub-window of
-                                   *  blocks within the backfill window whose
-                                   *  FEC chunks are interleaved (sent in
-                                   *  parallel). */
-    uint16_t physical_idx = 0;                  /** index of destination IP - net interface
-                                   * pair */
-    uint16_t logical_idx = 0;                   /** logical idx for streams sharing physical
-                                   * idx */
-    unsigned int txn_per_sec = 0;               /** txns to send per second (0 to disable) */
-    char dscp = 0;                              /** Differentiated Services Code Point
-                                   * (DSCP) */
-    bool send_rep_blks = true;                  /** Whether this stream should transmit
-                                   * repeated (i.e., historic) blocks */
-    bool relay_new_blks = true;                 /** Whether this stream should relay new
-                                   * (i.e., recently mined) blocks */
-    FecOverhead overhead_rep_blks = {60, 0.05}; /** Overhead applied when
-                                                 * FEC-encoding repeated
-                                                 * (historic) blocks */
+    int ttl = 1;                  /** time-to-live desired for multicast packets */
+    uint64_t bw = 0;              /** target throughput in bps. Set zero to attempt the maximum speed. */
+    int depth = 0;                /** backfill depth - no. of blocks to iterate over. Set zero to iterate over the full blockchain. */
+    int offset = 0;               /** offset within the backfill as starting point */
+    uint32_t interleave_len = 1;  /** determines the depth of the sub-window of blocks within the backfill window whose FEC chunks are interleaved (sent in parallel). */
+    uint16_t physical_idx = 0;    /** index of destination IP - net interface pair */
+    uint16_t logical_idx = 0;     /** logical idx for streams sharing physical idx */
+    unsigned int txn_per_sec = 0; /** txns to send per second (0 to disable) */
+    char dscp = 0;                /** Differentiated Services Code Point (DSCP) */
+    bool send_rep_blks = true;    /** Whether this stream should transmit repeated (i.e., historic) blocks */
+    bool relay_new_blks = true;   /** Whether this stream should relay new (i.e., recently mined) blocks */
+    bool save_tx_state = false;   /** Whether the Tx state should be saved on the UDP Multicast Tx DB */
+
+    FecOverhead overhead_rep_blks = {60, 0.05}; /** Overhead applied when FEC-encoding repeated (historic) blocks */
 };
 
 struct UDPConnectionState {

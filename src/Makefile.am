@@ -263,6 +263,8 @@ BITCOIN_CORE_H = \
   txorphanage.h \
   txrequest.h \
   udpapi.h \
+  udpmulticasttx.h \
+  udpmulticasttxdb.h \
   udpnet.h \
   udprelay.h \
   undo.h \
@@ -441,6 +443,8 @@ libbitcoin_server_a_SOURCES = \
   txmempool.cpp \
   txorphanage.cpp \
   txrequest.cpp \
+  udpmulticasttx.cpp \
+  udpmulticasttxdb.cpp \
   udpnet.cpp \
   udprelay.cpp \
   validation.cpp \
