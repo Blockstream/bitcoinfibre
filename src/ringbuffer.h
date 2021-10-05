@@ -6,7 +6,7 @@
 #include <condition_variable>
 #include <mutex>
 
-static const size_t BUFF_DEPTH = 8192;
+static const size_t BUFF_DEPTH = 512;
 
 
 /**
