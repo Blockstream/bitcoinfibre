@@ -578,6 +578,7 @@ static void gf256_mul_mem_init()
             GF256Ctx.MM128.TABLE_HI_Y[y] = vld1q_u8(hi);
         }
 #elif !defined(GF256_TARGET_MOBILE)
+#ifdef GF256_TRY_SSSE3
         if (CpuHasSSSE3)
         {
             const GF256_M128 table_lo = _mm_loadu_si128((GF256_M128*)lo);
@@ -585,6 +586,7 @@ static void gf256_mul_mem_init()
             _mm_storeu_si128(GF256Ctx.MM128.TABLE_LO_Y + y, table_lo);
             _mm_storeu_si128(GF256Ctx.MM128.TABLE_HI_Y + y, table_hi);
         }
+#endif // GF256_TRY_SSSE3
 # ifdef GF256_TRY_AVX2
         if (CpuHasAVX2)
         {
@@ -1193,6 +1195,7 @@ extern "C" void gf256_mul_mem(void * GF256_RESTRICT vz, const void * GF256_RESTR
         x16 = reinterpret_cast<const GF256_M128 *>(x32);
     }
 # endif // GF256_TRY_AVX2
+#ifdef GF256_TRY_SSSE3
     if (bytes >= 16 && CpuHasSSSE3)
     {
         // Partial product tables; see above
@@ -1217,6 +1220,7 @@ extern "C" void gf256_mul_mem(void * GF256_RESTRICT vz, const void * GF256_RESTR
             bytes -= 16, ++x16, ++z16;
         } while (bytes >= 16);
     }
+#endif // GF256_TRY_SSSE3
 #endif
 
     uint8_t * GF256_RESTRICT z1 = reinterpret_cast<uint8_t*>(z16);
@@ -1394,6 +1398,7 @@ extern "C" void gf256_muladd_mem(void * GF256_RESTRICT vz, uint8_t y,
         x16 = reinterpret_cast<const GF256_M128 *>(x32);
     }
 # endif // GF256_TRY_AVX2
+#ifdef GF256_TRY_SSSE3
     if (bytes >= 16 && CpuHasSSSE3)
     {
         // Partial product tables; see above
@@ -1450,6 +1455,7 @@ extern "C" void gf256_muladd_mem(void * GF256_RESTRICT vz, uint8_t y,
             bytes -= 16, ++x16, ++z16;
         }
     }
+#endif // GF256_TRY_SSSE3
 #endif // GF256_TARGET_MOBILE
 
     uint8_t * GF256_RESTRICT z1 = reinterpret_cast<uint8_t*>(z16);
