@@ -479,7 +479,8 @@ AX_CHECK_COMPILE_FLAG([-fno-extended-identifiers],[[CXXFLAGS="$CXXFLAGS -fno-ext
 
 enable_sse42=no
 enable_sse41=no
-enable_sse3=no
+enable_ssse3=no
+enable_sse2=no
 enable_avx2=no
 enable_shani=no
 enable_neon=no
@@ -493,7 +494,8 @@ dnl compatibility.
 dnl x86
 AX_CHECK_COMPILE_FLAG([-msse4.2],[[SSE42_CXXFLAGS="-msse4.2"]],,[[$CXXFLAG_WERROR]])
 AX_CHECK_COMPILE_FLAG([-msse4.1],[[SSE41_CXXFLAGS="-msse4.1"]],,[[$CXXFLAG_WERROR]])
-AX_CHECK_COMPILE_FLAG([-msse3],[[SSE3_CXXFLAGS="-msse3"]],,[[$CXXFLAG_WERROR]])
+AX_CHECK_COMPILE_FLAG([-mssse3],[[SSSE3_CXXFLAGS="-mssse3"]],,[[$CXXFLAG_WERROR]])
+AX_CHECK_COMPILE_FLAG([-msse2],[[SSE2_CXXFLAGS="-msse2"]],,[[$CXXFLAG_WERROR]])
 AX_CHECK_COMPILE_FLAG([-mavx -mavx2],[[AVX2_CXXFLAGS="-mavx -mavx2"]],,[[$CXXFLAG_WERROR]])
 AX_CHECK_COMPILE_FLAG([-msse4 -msha],[[SHANI_CXXFLAGS="-msse4 -msha"]],,[[$CXXFLAG_WERROR]])
 
@@ -535,15 +537,31 @@ AC_COMPILE_IFELSE([AC_LANG_PROGRAM([[
 CXXFLAGS="$TEMP_CXXFLAGS"
 
 TEMP_CXXFLAGS="$CXXFLAGS"
-CXXFLAGS="$CXXFLAGS $SSE3_CXXFLAGS"
-AC_MSG_CHECKING(for SSE3 intrinsics)
+CXXFLAGS="$CXXFLAGS $SSSE3_CXXFLAGS"
+AC_MSG_CHECKING(for SSSE3 intrinsics)
 AC_COMPILE_IFELSE([AC_LANG_PROGRAM([[
     #include <tmmintrin.h>
   ]],[[
-   __m128 x = _mm_addsub_ps(_mm_cvtpd_ps(_mm_setzero_pd()),
-                            _mm_cvtpd_ps(_mm_setzero_pd()));
+   __m128i a, b, c;
+   c = _mm_shuffle_epi8(a, b);
   ]])],
- [ AC_MSG_RESULT(yes); enable_sse3=yes; AC_DEFINE(ENABLE_SSE3, 1, [Define this symbol to build code that uses SSE3 intrinsics]) ],
+ [ AC_MSG_RESULT(yes); enable_ssse3=yes; AC_DEFINE(ENABLE_SSSE3, 1, [Define this symbol to build code that uses SSSE3 intrinsics]) ],
+ [ AC_MSG_RESULT(no)]
+)
+CXXFLAGS="$TEMP_CXXFLAGS"
+
+TEMP_CXXFLAGS="$CXXFLAGS"
+CXXFLAGS="$CXXFLAGS $SSE2_CXXFLAGS"
+AC_MSG_CHECKING(for SSE2 intrinsics)
+AC_COMPILE_IFELSE([AC_LANG_PROGRAM([[
+    #include <emmintrin.h>
+  ]],[[
+   __m128i x = _mm_set1_epi32(0);
+   __m128i y = _mm_set1_epi32(0);
+   __m128i z = _mm_xor_si128(x, y);
+   return _mm_extract_epi16(z, 0);
+  ]])],
+ [ AC_MSG_RESULT(yes); enable_sse2=yes; AC_DEFINE(ENABLE_SSE2, 1, [Define this symbol to build code that uses SSE2 intrinsics]) ],
  [ AC_MSG_RESULT(no)]
 )
 CXXFLAGS="$TEMP_CXXFLAGS"
@@ -1801,7 +1819,8 @@ AM_CONDITIONAL([GLIBC_BACK_COMPAT],[test x$use_glibc_compat = xyes])
 AM_CONDITIONAL([HARDEN],[test x$use_hardening = xyes])
 AM_CONDITIONAL([ENABLE_SSE42],[test x$enable_sse42 = xyes])
 AM_CONDITIONAL([ENABLE_SSE41],[test x$enable_sse41 = xyes])
-AM_CONDITIONAL([ENABLE_SSE3],[test x$enable_sse3 = xyes])
+AM_CONDITIONAL([ENABLE_SSSE3],[test x$enable_ssse3 = xyes])
+AM_CONDITIONAL([ENABLE_SSE2],[test x$enable_sse2 = xyes])
 AM_CONDITIONAL([ENABLE_AVX2],[test x$enable_avx2 = xyes])
 AM_CONDITIONAL([ENABLE_SHANI],[test x$enable_shani = xyes])
 AM_CONDITIONAL([ENABLE_ARM_CRC],[test x$enable_arm_crc = xyes])
@@ -1852,9 +1871,10 @@ AC_SUBST(PIC_FLAGS)
 AC_SUBST(PIE_FLAGS)
 AC_SUBST(SANITIZER_CXXFLAGS)
 AC_SUBST(SANITIZER_LDFLAGS)
-AC_SUBST(SSE3_CXXFLAGS)
 AC_SUBST(SSE42_CXXFLAGS)
 AC_SUBST(SSE41_CXXFLAGS)
+AC_SUBST(SSSE3_CXXFLAGS)
+AC_SUBST(SSE2_CXXFLAGS)
 AC_SUBST(AVX2_CXXFLAGS)
 AC_SUBST(SHANI_CXXFLAGS)
 AC_SUBST(ARM_CRC_CXXFLAGS)
@@ -1980,8 +2000,10 @@ echo "  LDFLAGS         = $PTHREAD_LIBS $HARDENED_LDFLAGS $GPROF_LDFLAGS $LDFLAG
 echo "  ARFLAGS         = $ARFLAGS"
 echo
 echo "Intrinsics Options:"
-echo "  sse3          = $enable_sse3"
+echo "  sse2          = $enable_sse2"
+echo "  ssse3         = $enable_ssse3"
 echo "  sse41         = $enable_sse41"
+echo "  sse42         = $enable_sse42"
 echo "  avx2          = $enable_avx2"
 echo "  shani         = $enable_shani"
 echo "  neon          = $enable_neon"

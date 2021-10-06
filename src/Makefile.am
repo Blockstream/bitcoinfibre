@@ -327,8 +327,11 @@ ipc/capnp/libbitcoin_ipc_a-ipc.$(OBJEXT): $(libbitcoin_ipc_mpgen_input:=.h)
 
 fec_libbitcoin_fec_a_CXXFLAGS = $(AM_CXXFLAGS) $(PIE_FLAGS)
 fec_libbitcoin_fec_a_CPPFLAGS = $(AM_CPPFLAGS)
-if ENABLE_SSE3
-fec_libbitcoin_fec_a_CXXFLAGS += $(SSE3_CXXFLAGS)
+if ENABLE_SSE2
+fec_libbitcoin_fec_a_CXXFLAGS += $(SSE2_CXXFLAGS)
+endif
+if ENABLE_SSSE3
+fec_libbitcoin_fec_a_CXXFLAGS += $(SSSE3_CXXFLAGS)
 endif
 if ENABLE_AVX2
 fec_libbitcoin_fec_a_CXXFLAGS += $(AVX2_CXXFLAGS)
