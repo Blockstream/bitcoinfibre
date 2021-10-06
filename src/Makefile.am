@@ -26,10 +26,10 @@ endif
 
 BITCOIN_INCLUDES=-I$(builddir) -I$(srcdir)/secp256k1/include $(BDB_CPPFLAGS) $(BOOST_CPPFLAGS) $(LEVELDB_CPPFLAGS)
 
-BITCOIN_INCLUDES += -I$(srcdir)/wirehair/src
+BITCOIN_INCLUDES += -I$(srcdir)/fec/src
 BITCOIN_INCLUDES += $(UNIVALUE_CFLAGS)
 
-LIBBITCOIN_FEC=wirehair/libbitcoin_fec.a
+LIBBITCOIN_FEC=fec/libbitcoin_fec.a
 LIBBITCOIN_SERVER=libbitcoin_server.a
 LIBBITCOIN_COMMON=libbitcoin_common.a
 LIBBITCOIN_CONSENSUS=libbitcoin_consensus.a
@@ -325,26 +325,26 @@ libbitcoin_util_a-clientversion.$(OBJEXT): obj/build.h
 
 ipc/capnp/libbitcoin_ipc_a-ipc.$(OBJEXT): $(libbitcoin_ipc_mpgen_input:=.h)
 
-wirehair_libbitcoin_fec_a_CXXFLAGS = $(AM_CXXFLAGS) $(PIE_FLAGS)
-wirehair_libbitcoin_fec_a_CPPFLAGS = $(AM_CPPFLAGS)
+fec_libbitcoin_fec_a_CXXFLAGS = $(AM_CXXFLAGS) $(PIE_FLAGS)
+fec_libbitcoin_fec_a_CPPFLAGS = $(AM_CPPFLAGS)
 if ENABLE_SSE3
-wirehair_libbitcoin_fec_a_CXXFLAGS += $(SSE3_CXXFLAGS)
+fec_libbitcoin_fec_a_CXXFLAGS += $(SSE3_CXXFLAGS)
 endif
 if ENABLE_AVX2
-wirehair_libbitcoin_fec_a_CXXFLAGS += $(AVX2_CXXFLAGS)
+fec_libbitcoin_fec_a_CXXFLAGS += $(AVX2_CXXFLAGS)
 endif
 
-wirehair_libbitcoin_fec_a_SOURCES = \
-  wirehair/gf256.h \
-  wirehair/gf256.cpp \
-  wirehair/cm256.h \
-  wirehair/cm256.cpp \
-  wirehair/wirehair.h \
-  wirehair/wirehair.cpp \
-  wirehair/WirehairCodec.h \
-  wirehair/WirehairCodec.cpp \
-  wirehair/WirehairTools.h \
-  wirehair/WirehairTools.cpp
+fec_libbitcoin_fec_a_SOURCES = \
+  fec/gf256.h \
+  fec/gf256.cpp \
+  fec/cm256.h \
+  fec/cm256.cpp \
+  fec/wirehair.h \
+  fec/wirehair.cpp \
+  fec/WirehairCodec.h \
+  fec/WirehairCodec.cpp \
+  fec/WirehairTools.h \
+  fec/WirehairTools.cpp
 
 # server: shared between bitcoind and bitcoin-qt
 # Contains code accessing mempool and chain state that is meant to be separated

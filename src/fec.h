@@ -20,8 +20,8 @@
 #include "mmapstorage.h"
 #include "open_hash_set.h"
 #include "random.h"
-#include "wirehair/cm256.h"
-#include "wirehair/wirehair.h"
+#include "fec/cm256.h"
+#include "fec/wirehair.h"
 
 typedef std::aligned_storage<FEC_CHUNK_SIZE, 16>::type FECChunkType;
 static_assert(FEC_CHUNK_SIZE % 16 == 0, "Padding of FECChunkType may hurt performance, and really shouldn't be required");
