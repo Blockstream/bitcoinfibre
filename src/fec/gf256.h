@@ -72,7 +72,10 @@
 #endif // __AVX2__
 
 #if !defined(GF256_TARGET_MOBILE)
+#if defined(__SSSE3__)
+    #define GF256_TRY_SSSE3
     #include <tmmintrin.h> // SSSE3: _mm_shuffle_epi8
+#endif
     #include <emmintrin.h> // SSE2
 #endif // GF256_TARGET_MOBILE
 
