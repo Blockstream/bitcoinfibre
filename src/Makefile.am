@@ -29,7 +29,7 @@ BITCOIN_INCLUDES=-I$(builddir) -I$(srcdir)/secp256k1/include $(BDB_CPPFLAGS) $(B
 BITCOIN_INCLUDES += -I$(srcdir)/fec/src
 BITCOIN_INCLUDES += $(UNIVALUE_CFLAGS)
 
-LIBBITCOIN_FEC=fec/libbitcoin_fec.a
+LIBBITCOIN_FEC_BASE=fec/libbitcoin_fec_base.a
 LIBBITCOIN_SERVER=libbitcoin_server.a
 LIBBITCOIN_COMMON=libbitcoin_common.a
 LIBBITCOIN_CONSENSUS=libbitcoin_consensus.a
@@ -62,6 +62,16 @@ endif
 if ENABLE_SHANI
 LIBBITCOIN_CRYPTO_SHANI = crypto/libbitcoin_crypto_shani.a
 LIBBITCOIN_CRYPTO += $(LIBBITCOIN_CRYPTO_SHANI)
+endif
+
+LIBBITCOIN_FEC = $(LIBBITCOIN_FEC_BASE)
+if ENABLE_AVX2
+LIBBITCOIN_FEC_AVX2 = fec/libbitcoin_fec_avx2.a
+LIBBITCOIN_FEC += $(LIBBITCOIN_FEC_AVX2)
+endif
+if ENABLE_SSSE3
+LIBBITCOIN_FEC_SSSE3 = fec/libbitcoin_fec_ssse3.a
+LIBBITCOIN_FEC += $(LIBBITCOIN_FEC_SSSE3)
 endif
 
 $(LIBSECP256K1): $(wildcard secp256k1/src/*.h) $(wildcard secp256k1/src/*.c) $(wildcard secp256k1/include/*)
@@ -325,19 +335,13 @@ libbitcoin_util_a-clientversion.$(OBJEXT): obj/build.h
 
 ipc/capnp/libbitcoin_ipc_a-ipc.$(OBJEXT): $(libbitcoin_ipc_mpgen_input:=.h)
 
-fec_libbitcoin_fec_a_CXXFLAGS = $(AM_CXXFLAGS) $(PIE_FLAGS)
-fec_libbitcoin_fec_a_CPPFLAGS = $(AM_CPPFLAGS)
+fec_libbitcoin_fec_base_a_CXXFLAGS = $(AM_CXXFLAGS) $(PIE_FLAGS)
+fec_libbitcoin_fec_base_a_CPPFLAGS = $(AM_CPPFLAGS)
 if ENABLE_SSE2
-fec_libbitcoin_fec_a_CXXFLAGS += $(SSE2_CXXFLAGS)
-endif
-if ENABLE_SSSE3
-fec_libbitcoin_fec_a_CXXFLAGS += $(SSSE3_CXXFLAGS)
-endif
-if ENABLE_AVX2
-fec_libbitcoin_fec_a_CXXFLAGS += $(AVX2_CXXFLAGS)
+fec_libbitcoin_fec_base_a_CXXFLAGS += $(SSE2_CXXFLAGS)
 endif
 
-fec_libbitcoin_fec_a_SOURCES = \
+fec_libbitcoin_fec_base_a_SOURCES = \
   fec/gf256.h \
   fec/gf256.cpp \
   fec/cm256.h \
@@ -348,6 +352,18 @@ fec_libbitcoin_fec_a_SOURCES = \
   fec/WirehairCodec.cpp \
   fec/WirehairTools.h \
   fec/WirehairTools.cpp
+
+fec_libbitcoin_fec_avx2_a_CXXFLAGS = $(AM_CXXFLAGS) $(PIE_FLAGS)
+fec_libbitcoin_fec_avx2_a_CPPFLAGS = $(AM_CPPFLAGS)
+fec_libbitcoin_fec_avx2_a_CXXFLAGS += $(AVX2_CXXFLAGS)
+fec_libbitcoin_fec_avx2_a_CPPFLAGS += -DENABLE_AVX2
+fec_libbitcoin_fec_avx2_a_SOURCES = fec/gf256_avx2.cpp fec/gf256_avx2.h
+
+fec_libbitcoin_fec_ssse3_a_CXXFLAGS = $(AM_CXXFLAGS) $(PIE_FLAGS)
+fec_libbitcoin_fec_ssse3_a_CPPFLAGS = $(AM_CPPFLAGS)
+fec_libbitcoin_fec_ssse3_a_CXXFLAGS += $(SSSE3_CXXFLAGS)
+fec_libbitcoin_fec_ssse3_a_CPPFLAGS += -DENABLE_SSSE3
+fec_libbitcoin_fec_ssse3_a_SOURCES = fec/gf256_ssse3.cpp fec/gf256_ssse3.h
 
 # server: shared between bitcoind and bitcoin-qt
 # Contains code accessing mempool and chain state that is meant to be separated
