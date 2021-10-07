@@ -415,15 +415,18 @@ void ShuffleDeck16(
                 deck[ii] = deck[jj];
                 deck[jj] = (uint16_t)ii;
                 ++ii;
+                [[fallthrough]];
             case 2:
                 jj = (uint8_t)(rv >> 8) % ii;
                 deck[ii] = deck[jj];
                 deck[jj] = (uint16_t)ii;
                 ++ii;
+                [[fallthrough]];
             case 1:
                 jj = (uint8_t)(rv >> 16) % ii;
                 deck[ii] = deck[jj];
                 deck[jj] = (uint16_t)ii;
+                [[fallthrough]];
             case 0:
                 return;
             }
