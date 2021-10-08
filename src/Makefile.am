@@ -79,6 +79,10 @@ if ENABLE_SSSE3
 LIBBITCOIN_FEC_SSSE3 = fec/libbitcoin_fec_ssse3.a
 LIBBITCOIN_FEC += $(LIBBITCOIN_FEC_SSSE3)
 endif
+if ENABLE_NEON
+LIBBITCOIN_FEC_NEON = fec/libbitcoin_fec_neon.a
+LIBBITCOIN_FEC += $(LIBBITCOIN_FEC_NEON)
+endif
 
 $(LIBSECP256K1): $(wildcard secp256k1/src/*.h) $(wildcard secp256k1/src/*.c) $(wildcard secp256k1/include/*)
 	$(AM_V_at)$(MAKE) $(AM_MAKEFLAGS) -C $(@D) $(@F)
@@ -408,6 +412,12 @@ fec_libbitcoin_fec_ssse3_a_CPPFLAGS = $(AM_CPPFLAGS)
 fec_libbitcoin_fec_ssse3_a_CXXFLAGS += $(SSSE3_CXXFLAGS)
 fec_libbitcoin_fec_ssse3_a_CPPFLAGS += -DENABLE_SSSE3
 fec_libbitcoin_fec_ssse3_a_SOURCES = fec/gf256_ssse3.cpp fec/gf256_ssse3.h
+
+fec_libbitcoin_fec_neon_a_CXXFLAGS = $(AM_CXXFLAGS) $(PIE_FLAGS)
+fec_libbitcoin_fec_neon_a_CPPFLAGS = $(AM_CPPFLAGS)
+fec_libbitcoin_fec_neon_a_CXXFLAGS += $(NEON_CXXFLAGS)
+fec_libbitcoin_fec_neon_a_CPPFLAGS += -DENABLE_NEON
+fec_libbitcoin_fec_neon_a_SOURCES = fec/gf256_neon.cpp fec/gf256_neon.h
 
 # node #
 libbitcoin_node_a_CPPFLAGS = $(AM_CPPFLAGS) $(BITCOIN_INCLUDES) $(BOOST_CPPFLAGS) $(MINIUPNPC_CPPFLAGS) $(NATPMP_CPPFLAGS) $(EVENT_CFLAGS) $(EVENT_PTHREADS_CFLAGS)

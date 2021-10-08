@@ -30,6 +30,7 @@
 #include "gf256.h"
 #include "gf256_avx2.h"
 #include "gf256_ssse3.h"
+#include "gf256_neon.h"
 
 #ifdef LINUX_ARM
 #include <unistd.h>
@@ -572,8 +573,7 @@ static void gf256_mul_mem_init()
 #if defined(GF256_TRY_NEON)
         if (CpuHasNeon)
         {
-            GF256Ctx.MM128.TABLE_LO_Y[y] = vld1q_u8(lo);
-            GF256Ctx.MM128.TABLE_HI_Y[y] = vld1q_u8(hi);
+            gf256_neon::gf256_mul_mem_init(lo, hi, y);
         }
 #elif !defined(GF256_TARGET_MOBILE)
         if (CpuHasSSSE3)
@@ -654,35 +654,7 @@ extern "C" void gf256_add_mem(void * GF256_RESTRICT vx,
     // Handle multiples of 64 bytes
     if (CpuHasNeon)
     {
-        while (bytes >= 64)
-        {
-            GF256_M128 x0 = vld1q_u8((uint8_t*) x16);
-            GF256_M128 x1 = vld1q_u8((uint8_t*)(x16 + 1) );
-            GF256_M128 x2 = vld1q_u8((uint8_t*)(x16 + 2) );
-            GF256_M128 x3 = vld1q_u8((uint8_t*)(x16 + 3) );
-            GF256_M128 y0 = vld1q_u8((uint8_t*)y16);
-            GF256_M128 y1 = vld1q_u8((uint8_t*)(y16 + 1));
-            GF256_M128 y2 = vld1q_u8((uint8_t*)(y16 + 2));
-            GF256_M128 y3 = vld1q_u8((uint8_t*)(y16 + 3));
-
-            vst1q_u8((uint8_t*)x16,     veorq_u8(x0, y0));
-            vst1q_u8((uint8_t*)(x16 + 1), veorq_u8(x1, y1));
-            vst1q_u8((uint8_t*)(x16 + 2), veorq_u8(x2, y2));
-            vst1q_u8((uint8_t*)(x16 + 3), veorq_u8(x3, y3));
-
-            bytes -= 64, x16 += 4, y16 += 4;
-        }
-
-        // Handle multiples of 16 bytes
-        while (bytes >= 16)
-        {
-            GF256_M128 x0 = vld1q_u8((uint8_t*)x16);
-            GF256_M128 y0 = vld1q_u8((uint8_t*)y16);
-
-            vst1q_u8((uint8_t*)x16, veorq_u8(x0, y0));
-
-            bytes -= 16, ++x16, ++y16;
-        }
+        gf256_neon::gf256_add_mem(x16, y16, bytes);
     }
     else
 # endif // GF256_TRY_NEON
@@ -794,19 +766,7 @@ extern "C" void gf256_add2_mem(void * GF256_RESTRICT vz, const void * GF256_REST
     // Handle multiples of 64 bytes
     if (CpuHasNeon)
     {
-        // Handle multiples of 16 bytes
-        while (bytes >= 16)
-        {
-            // z[i] = z[i] xor x[i] xor y[i]
-            vst1q_u8((uint8_t*)z16,
-                veorq_u8(
-                    vld1q_u8((uint8_t*)z16),
-                    veorq_u8(
-                        vld1q_u8((uint8_t*)x16),
-                        vld1q_u8((uint8_t*)y16))));
-
-            bytes -= 16, ++x16, ++y16, ++z16;
-        }
+        gf256_neon::gf256_add2_mem(x16, y16, z16, bytes);
     }
     else
 # endif // GF256_TRY_NEON
@@ -898,36 +858,7 @@ extern "C" void gf256_addset_mem(void * GF256_RESTRICT vz, const void * GF256_RE
     // Handle multiples of 64 bytes
     if (CpuHasNeon)
     {
-        while (bytes >= 64)
-        {
-            GF256_M128 x0 = vld1q_u8((uint8_t*)x16);
-            GF256_M128 x1 = vld1q_u8((uint8_t*)(x16 + 1));
-            GF256_M128 x2 = vld1q_u8((uint8_t*)(x16 + 2));
-            GF256_M128 x3 = vld1q_u8((uint8_t*)(x16 + 3));
-            GF256_M128 y0 = vld1q_u8((uint8_t*)(y16));
-            GF256_M128 y1 = vld1q_u8((uint8_t*)(y16 + 1));
-            GF256_M128 y2 = vld1q_u8((uint8_t*)(y16 + 2));
-            GF256_M128 y3 = vld1q_u8((uint8_t*)(y16 + 3));
-
-            vst1q_u8((uint8_t*)z16,     veorq_u8(x0, y0));
-            vst1q_u8((uint8_t*)(z16 + 1), veorq_u8(x1, y1));
-            vst1q_u8((uint8_t*)(z16 + 2), veorq_u8(x2, y2));
-            vst1q_u8((uint8_t*)(z16 + 3), veorq_u8(x3, y3));
-
-            bytes -= 64, x16 += 4, y16 += 4, z16 += 4;
-        }
-
-        // Handle multiples of 16 bytes
-        while (bytes >= 16)
-        {
-            // z[i] = x[i] xor y[i]
-            vst1q_u8((uint8_t*)z16,
-                     veorq_u8(
-                         vld1q_u8((uint8_t*)x16),
-                         vld1q_u8((uint8_t*)y16)));
-
-            bytes -= 16, ++x16, ++y16, ++z16;
-        }
+        gf256_neon::gf256_addset_mem(x16, y16, z16, bytes);
     }
     else
 # endif // GF256_TRY_NEON
@@ -1046,27 +977,7 @@ extern "C" void gf256_mul_mem(void * GF256_RESTRICT vz, const void * GF256_RESTR
 #if defined(GF256_TRY_NEON)
     if (bytes >= 16 && CpuHasNeon)
     {
-        // Partial product tables; see above
-        const GF256_M128 table_lo_y = vld1q_u8((uint8_t*)(GF256Ctx.MM128.TABLE_LO_Y + y));
-        const GF256_M128 table_hi_y = vld1q_u8((uint8_t*)(GF256Ctx.MM128.TABLE_HI_Y + y));
-
-        // clr_mask = 0x0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f
-        const GF256_M128 clr_mask = vdupq_n_u8(0x0f);
-
-        // Handle multiples of 16 bytes
-        do
-        {
-            // See above comments for details
-            GF256_M128 x0 = vld1q_u8((uint8_t*)x16);
-            GF256_M128 l0 = vandq_u8(x0, clr_mask);
-            x0 = vshrq_n_u8(x0, 4);
-            GF256_M128 h0 = vandq_u8(x0, clr_mask);
-            l0 = vqtbl1q_u8(table_lo_y, l0);
-            h0 = vqtbl1q_u8(table_hi_y, h0);
-            vst1q_u8((uint8_t*)z16, veorq_u8(l0, h0));
-
-            bytes -= 16, ++x16, ++z16;
-        } while (bytes >= 16);
+        gf256_neon::gf256_mul_mem(x16, z16, y, bytes);
     }
 #endif
 #else
@@ -1165,30 +1076,7 @@ extern "C" void gf256_muladd_mem(void * GF256_RESTRICT vz, uint8_t y,
 #if defined(GF256_TRY_NEON)
     if (bytes >= 16 && CpuHasNeon)
     {
-        // Partial product tables; see above
-        const GF256_M128 table_lo_y = vld1q_u8((uint8_t*)(GF256Ctx.MM128.TABLE_LO_Y + y));
-        const GF256_M128 table_hi_y = vld1q_u8((uint8_t*)(GF256Ctx.MM128.TABLE_HI_Y + y));
-
-        // clr_mask = 0x0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f
-        const GF256_M128 clr_mask = vdupq_n_u8(0x0f);
-
-        // Handle multiples of 16 bytes
-        do
-        {
-            // See above comments for details
-            GF256_M128 x0 = vld1q_u8((uint8_t*)x16);
-            GF256_M128 l0 = vandq_u8(x0, clr_mask);
-
-            // x0 = vshrq_n_u8(x0, 4);
-            x0 = (GF256_M128)vshrq_n_u64( (uint64x2_t)x0, 4);
-            GF256_M128 h0 = vandq_u8(x0, clr_mask);
-            l0 = vqtbl1q_u8(table_lo_y, l0);
-            h0 = vqtbl1q_u8(table_hi_y, h0);
-            const GF256_M128 p0 = veorq_u8(l0, h0);
-            const GF256_M128 z0 = vld1q_u8((uint8_t*)z16);
-            vst1q_u8((uint8_t*)z16, veorq_u8(p0, z0));
-            bytes -= 16, ++x16, ++z16;
-        } while (bytes >= 16);
+        gf256_neon::gf256_muladd_mem(x16, z16, y, bytes);
     }
 #endif
 #else // GF256_TARGET_MOBILE
