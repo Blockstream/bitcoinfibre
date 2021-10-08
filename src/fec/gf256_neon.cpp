@@ -7,6 +7,24 @@ namespace gf256_neon {
 GF256_NEON_ALIGNED GF256_M128 TABLE_LO_Y[256];
 GF256_NEON_ALIGNED GF256_M128 TABLE_HI_Y[256];
 
+#ifndef ENABLE_NEON64
+/*
+ * AArch32 does not provide this intrinsic natively because it does not
+ * implement the underlying instruction. AArch32 only provides a 64-bit
+ * wide vtbl.8 instruction, so use that instead.
+ */
+static uint8x16_t vqtbl1q_u8(uint8x16_t a, uint8x16_t b)
+{
+    union {
+        uint8x16_t val;
+        uint8x8x2_t pair;
+    } __a = {a};
+
+    return vcombine_u8(vtbl2_u8(__a.pair, vget_low_u8(b)),
+                       vtbl2_u8(__a.pair, vget_high_u8(b)));
+}
+#endif
+
 void gf256_mul_mem_init(uint8_t* lo, uint8_t* hi, int y)
 {
     TABLE_LO_Y[y] = vld1q_u8(lo);
