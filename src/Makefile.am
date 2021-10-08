@@ -373,6 +373,9 @@ fec_libbitcoin_fec_neon_a_CXXFLAGS = $(AM_CXXFLAGS) $(PIE_FLAGS)
 fec_libbitcoin_fec_neon_a_CPPFLAGS = $(AM_CPPFLAGS)
 fec_libbitcoin_fec_neon_a_CXXFLAGS += $(NEON_CXXFLAGS)
 fec_libbitcoin_fec_neon_a_CPPFLAGS += -DENABLE_NEON
+if ENABLE_NEON64
+fec_libbitcoin_fec_neon_a_CPPFLAGS += -DENABLE_NEON64
+endif
 fec_libbitcoin_fec_neon_a_SOURCES = fec/gf256_neon.cpp fec/gf256_neon.h
 
 # server: shared between bitcoind and bitcoin-qt

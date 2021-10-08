@@ -484,6 +484,7 @@ enable_sse2=no
 enable_avx2=no
 enable_shani=no
 enable_neon=no
+enable_neon64=no
 
 if test "x$use_asm" = "xyes"; then
 
@@ -619,14 +620,28 @@ CXXFLAGS="$TEMP_CXXFLAGS"
 
 TEMP_CXXFLAGS="$CXXFLAGS"
 CXXFLAGS="$CXXFLAGS $NEON_CXXFLAGS"
-AC_MSG_CHECKING(for ARM Neon)
+AC_MSG_CHECKING(for ARM Neon AArch32)
 AC_COMPILE_IFELSE([AC_LANG_PROGRAM([[
     #include <arm_neon.h>
     int32x4_t testfunc(int16_t *a, int16_t *b) {
         return vmull_s16(vld1_s16(a), vld1_s16(b));
     }
   ]])],
-[ AC_MSG_RESULT(yes); enable_neon=yes; AC_DEFINE(ENABLE_NEON, 1, [Define this symbol to build code that uses NEON intrinsics]) ],
+[ AC_MSG_RESULT(yes); enable_neon=yes; AC_DEFINE(ENABLE_NEON, 1, [Define this symbol to build code that uses NEON A32 intrinsics]) ],
+[ AC_MSG_RESULT(no)]
+)
+CXXFLAGS="$TEMP_CXXFLAGS"
+
+TEMP_CXXFLAGS="$CXXFLAGS"
+CXXFLAGS="$CXXFLAGS $NEON_CXXFLAGS"
+AC_MSG_CHECKING(for ARM Neon AArch64)
+AC_COMPILE_IFELSE([AC_LANG_PROGRAM([[
+    #include <arm_neon.h>
+    uint8x16_t testfunc(uint8_t const * a, uint8_t const * b) {
+        return vqtbl1q_u8(vld1q_u8(a), vld1q_u8(b));
+    }
+  ]])],
+[ AC_MSG_RESULT(yes); enable_neon64=yes; AC_DEFINE(ENABLE_NEON64, 1, [Define this symbol to build code that uses NEON A64 intrinsics]) ],
 [ AC_MSG_RESULT(no)]
 )
 CXXFLAGS="$TEMP_CXXFLAGS"
@@ -1829,6 +1844,7 @@ AM_CONDITIONAL([ENABLE_AVX2],[test x$enable_avx2 = xyes])
 AM_CONDITIONAL([ENABLE_SHANI],[test x$enable_shani = xyes])
 AM_CONDITIONAL([ENABLE_ARM_CRC],[test x$enable_arm_crc = xyes])
 AM_CONDITIONAL([ENABLE_NEON],[test x$enable_neon = xyes])
+AM_CONDITIONAL([ENABLE_NEON64],[test x$enable_neon64 = xyes])
 AM_CONDITIONAL([USE_ASM],[test x$use_asm = xyes])
 AM_CONDITIONAL([WORDS_BIGENDIAN],[test x$ac_cv_c_bigendian = xyes])
 AM_CONDITIONAL([USE_NATPMP],[test x$use_natpmp = xyes])
@@ -2012,5 +2028,6 @@ echo "  sse41         = $enable_sse41"
 echo "  sse42         = $enable_sse42"
 echo "  avx2          = $enable_avx2"
 echo "  shani         = $enable_shani"
-echo "  neon          = $enable_neon"
+echo "  neon-a32      = $enable_neon"
+echo "  neon-a64      = $enable_neon64"
 echo
