@@ -125,14 +125,6 @@ extern void gf256_memswap(void * GF256_RESTRICT vx, void * GF256_RESTRICT vy, in
 /// The context object stores tables required to perform library calculations
 struct gf256_ctx
 {
-    /// We require memory to be aligned since the SIMD instructions benefit from
-    /// or require aligned accesses to the table data.
-    struct
-    {
-        GF256_ALIGNED GF256_M128 TABLE_LO_Y[256];
-        GF256_ALIGNED GF256_M128 TABLE_HI_Y[256];
-    } MM128;
-
     /// Mul/Div/Inv/Sqr tables
     uint8_t GF256_MUL_TABLE[256 * 256];
     uint8_t GF256_DIV_TABLE[256 * 256];

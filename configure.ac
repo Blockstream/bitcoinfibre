@@ -498,6 +498,7 @@ AX_CHECK_COMPILE_FLAG([-mssse3],[[SSSE3_CXXFLAGS="-mssse3"]],,[[$CXXFLAG_WERROR]
 AX_CHECK_COMPILE_FLAG([-msse2],[[SSE2_CXXFLAGS="-msse2"]],,[[$CXXFLAG_WERROR]])
 AX_CHECK_COMPILE_FLAG([-mavx -mavx2],[[AVX2_CXXFLAGS="-mavx -mavx2"]],,[[$CXXFLAG_WERROR]])
 AX_CHECK_COMPILE_FLAG([-msse4 -msha],[[SHANI_CXXFLAGS="-msse4 -msha"]],,[[$CXXFLAG_WERROR]])
+AX_CHECK_COMPILE_FLAG([-mfpu=neon],[[NEON_CXXFLAGS="-mfpu=neon"]],,[[$CXXFLAG_WERROR]])
 
 TEMP_CXXFLAGS="$CXXFLAGS"
 CXXFLAGS="$CXXFLAGS $SSE42_CXXFLAGS"
@@ -616,6 +617,8 @@ AC_COMPILE_IFELSE([AC_LANG_PROGRAM([[
 )
 CXXFLAGS="$TEMP_CXXFLAGS"
 
+TEMP_CXXFLAGS="$CXXFLAGS"
+CXXFLAGS="$CXXFLAGS $NEON_CXXFLAGS"
 AC_MSG_CHECKING(for ARM Neon)
 AC_COMPILE_IFELSE([AC_LANG_PROGRAM([[
     #include <arm_neon.h>
@@ -623,9 +626,10 @@ AC_COMPILE_IFELSE([AC_LANG_PROGRAM([[
         return vmull_s16(vld1_s16(a), vld1_s16(b));
     }
   ]])],
-[ AC_MSG_RESULT(yes); enable_neon=yes ],
+[ AC_MSG_RESULT(yes); enable_neon=yes; AC_DEFINE(ENABLE_NEON, 1, [Define this symbol to build code that uses NEON intrinsics]) ],
 [ AC_MSG_RESULT(no)]
 )
+CXXFLAGS="$TEMP_CXXFLAGS"
 
 fi
 
@@ -1824,6 +1828,7 @@ AM_CONDITIONAL([ENABLE_SSE2],[test x$enable_sse2 = xyes])
 AM_CONDITIONAL([ENABLE_AVX2],[test x$enable_avx2 = xyes])
 AM_CONDITIONAL([ENABLE_SHANI],[test x$enable_shani = xyes])
 AM_CONDITIONAL([ENABLE_ARM_CRC],[test x$enable_arm_crc = xyes])
+AM_CONDITIONAL([ENABLE_NEON],[test x$enable_neon = xyes])
 AM_CONDITIONAL([USE_ASM],[test x$use_asm = xyes])
 AM_CONDITIONAL([WORDS_BIGENDIAN],[test x$ac_cv_c_bigendian = xyes])
 AM_CONDITIONAL([USE_NATPMP],[test x$use_natpmp = xyes])
@@ -1878,6 +1883,7 @@ AC_SUBST(SSE2_CXXFLAGS)
 AC_SUBST(AVX2_CXXFLAGS)
 AC_SUBST(SHANI_CXXFLAGS)
 AC_SUBST(ARM_CRC_CXXFLAGS)
+AC_SUBST(NEON_CXXFLAGS)
 AC_SUBST(LIBTOOL_APP_LDFLAGS)
 AC_SUBST(USE_SQLITE)
 AC_SUBST(USE_BDB)
