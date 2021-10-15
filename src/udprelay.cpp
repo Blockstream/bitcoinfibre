@@ -98,11 +98,6 @@ std::shared_ptr<PartialBlockData> GetPartialBlockData(const std::pair<uint64_t, 
     return nullptr;
 }
 
-void ResetPartialBlocks()
-{
-    mapPartialBlocks.clear();
-}
-
 static inline void SendMessageToNode(const UDPMessage& msg, unsigned int length, bool high_prio, uint64_t hash_prefix, std::map<CService, UDPConnectionState>::iterator it)
 {
     if ((it->second.state & STATE_INIT_COMPLETE) != STATE_INIT_COMPLETE)
@@ -338,6 +333,24 @@ static void SendLimitedDataChunks(const uint256& blockhash, UDPMessageType type,
 }
 
 static std::unique_ptr<std::thread> process_block_thread;
+
+
+void ResetPartialBlocks()
+{
+    mapPartialBlocks.clear();
+}
+
+void ResetPartialBlockState()
+{
+    mapPartialBlocks.clear();
+    setBlocksRelayed.clear();
+    setBlocksReceived.clear();
+}
+
+const CService& GetTrustedPeer()
+{
+    return TRUSTED_PEER_DUMMY;
+}
 
 void UDPRelayBlock(const CBlock& block, int nHeight)
 {
@@ -741,8 +754,6 @@ static void DoBackgroundBlockProcessing(const std::pair<std::pair<uint64_t, CSer
 
 static void ProcessBlockThread(ChainstateManager* chainman)
 {
-    const bool fBench = LogAcceptCategory(BCLog::BENCH);
-
     while (true) {
         std::unique_lock<std::mutex> process_lock(block_process_mutex);
         while (block_process_queue.empty() && !block_process_shutdown)
@@ -753,364 +764,371 @@ static void ProcessBlockThread(ChainstateManager* chainman)
 
         auto process_block = block_process_queue.front();
         auto hash_peer_pair = process_block.first;
-        CService& node = hash_peer_pair.second;
+
         PartialBlockData& block = *process_block.second;
         block_process_queue.pop();
         process_lock.unlock();
 
-        bool more_work;
-        std::unique_lock<std::mutex> lock(block.state_mutex);
-        block.awaiting_processing = false;
-        do {
-            more_work = false;
-            if (block.is_header_processing) {
-                std::chrono::steady_clock::time_point decode_start;
-                if (fBench)
-                    decode_start = std::chrono::steady_clock::now();
+        ProcessBlock(chainman, hash_peer_pair, block);
+    }
+}
 
-                std::vector<unsigned char> header_data;
-                try {
-                    header_data = block.header_decoder.GetDecodedData();
-                } catch (const std::runtime_error& e) {
-                    lock.unlock();
-                    std::stringstream stream;
-                    stream << std::hex << hash_peer_pair.first;
-                    std::string hex_hash_prefix(stream.str());
-                    LogPrintf("UDP: Failed to decode block %lu from %s: %s\n", hex_hash_prefix, node.ToString(), e.what());
-                    break;
+void ProcessBlock(ChainstateManager* chainman, const std::pair<uint64_t, CService>& hash_peer_pair, PartialBlockData& block)
+{
+    const bool fBench = LogAcceptCategory(BCLog::BENCH);
+    const CService& node = hash_peer_pair.second;
+    bool more_work;
+    std::unique_lock<std::mutex> lock(block.state_mutex);
+    block.awaiting_processing = false;
+
+    do {
+        more_work = false;
+        if (block.is_header_processing) {
+            std::chrono::steady_clock::time_point decode_start;
+            if (fBench)
+                decode_start = std::chrono::steady_clock::now();
+
+            std::vector<unsigned char> header_data;
+            try {
+                header_data = block.header_decoder.GetDecodedData();
+            } catch (const std::runtime_error& e) {
+                lock.unlock();
+                std::stringstream stream;
+                stream << std::hex << hash_peer_pair.first;
+                std::string hex_hash_prefix(stream.str());
+                LogPrintf("UDP: Failed to decode block %lu from %s: %s\n", hex_hash_prefix, node.ToString(), e.what());
+                break;
+            }
+
+            std::chrono::steady_clock::time_point data_copied;
+            if (fBench)
+                data_copied = std::chrono::steady_clock::now();
+
+            CBlockHeaderAndLengthShortTxIDs header;
+            try {
+                VectorInputStream stream(&header_data, SER_NETWORK, PROTOCOL_VERSION);
+                stream >> header;
+            } catch (std::ios_base::failure& e) {
+                lock.unlock();
+                std::lock_guard<std::recursive_mutex> udpNodesLock(cs_mapUDPNodes);
+                if (node == TRUSTED_PEER_DUMMY)
+                    LogPrintf("UDP: Failed to decode received header and short txids from trusted peer(s), check your trusted peers are behaving well.\n");
+                else {
+                    LogPrintf("UDP: Failed to decode received header and short txids from %s, disconnecting\n", node.ToString());
+                    const auto it = mapUDPNodes.find(node);
+                    if (it != mapUDPNodes.end())
+                        DisconnectNode(it);
                 }
+                break;
+            }
+            std::chrono::steady_clock::time_point header_deserialized;
+            if (fBench)
+                header_deserialized = std::chrono::steady_clock::now();
 
-                std::chrono::steady_clock::time_point data_copied;
-                if (fBench)
-                    data_copied = std::chrono::steady_clock::now();
+            // We may not process the header yet (depending on conditions
+            // checked below), but at least we can extract the block height from
+            // the header and save it on the partial block.
+            block.height = header.getBlockHeight();
 
-                CBlockHeaderAndLengthShortTxIDs header;
-                try {
-                    VectorInputStream stream(&header_data, SER_NETWORK, PROTOCOL_VERSION);
-                    stream >> header;
-                } catch (std::ios_base::failure& e) {
+            // Do we have the block already?
+            if (!block.chain_lookup) {
+                const CBlockIndex* pblockindex;
+                {
+                    LOCK(cs_main);
+                    pblockindex = chainman->m_blockman.LookupBlockIndex(header.header.GetHash());
+                }
+                block.chain_lookup = true;
+                if (pblockindex && (pblockindex->nStatus & BLOCK_HAVE_DATA)) {
+                    // We do have the full block already. Drop the partial block
+                    // immediately and add it to setBlocksReceived, so that its
+                    // subsequent chunks are ignored.
                     lock.unlock();
                     std::lock_guard<std::recursive_mutex> udpNodesLock(cs_mapUDPNodes);
+                    setBlocksReceived.insert(hash_peer_pair);
+                    RemovePartialBlock(hash_peer_pair);
+                    break;
+                }
+            }
+
+            // Continue with the processing of a non-tip (repeated) block only
+            // if the body is also decodable or empty. This is to save memory,
+            // given that as soon as we call ProvideHeaderData below,
+            // significant amounts of memory are preallocated.
+            const bool non_empty_block = (header.ShortTxIdCount() != 0);
+            if (!block.tip_blk && non_empty_block && !block.is_decodeable)
+                break;
+
+            ReadStatus decode_status = block.ProvideHeaderData(header);
+            if (decode_status != READ_STATUS_OK) {
+                lock.unlock();
+                std::lock_guard<std::recursive_mutex> udpNodesLock(cs_mapUDPNodes);
+                if (decode_status == READ_STATUS_INVALID) {
                     if (node == TRUSTED_PEER_DUMMY)
-                        LogPrintf("UDP: Failed to decode received header and short txids from trusted peer(s), check your trusted peers are behaving well.\n");
+                        LogPrintf("UDP: Got invalid header and short txids from trusted peer(s), check your trusted peers are behaving well.\n");
                     else {
-                        LogPrintf("UDP: Failed to decode received header and short txids from %s, disconnecting\n", node.ToString());
+                        LogPrintf("UDP: Got invalid header and short txids from %s, disconnecting\n", node.ToString());
                         const auto it = mapUDPNodes.find(node);
                         if (it != mapUDPNodes.end())
                             DisconnectNode(it);
                     }
-                    break;
+                } else
+                    LogPrintf("UDP: Failed to read header and short txids\n");
+
+                // Dont remove the block, let it time out...
+                break;
+            }
+
+            if (block.block_data.IsBlockAvailable())
+                block.is_decodeable = true;
+            block.is_header_processing = false;
+
+            const uint256 blockHash = block.block_data.GetBlockHash();
+
+            if (fBench) {
+                std::chrono::steady_clock::time_point header_provided(std::chrono::steady_clock::now());
+                LogPrintf("UDP: Block %s (height %7d) - Got full header and shorttxids from %s in %lf %lf %lf ms\n", blockHash.ToString(), block.height, block.GetSenders(), to_millis_double(data_copied - decode_start), to_millis_double(header_deserialized - data_copied), to_millis_double(header_provided - header_deserialized));
+            } else
+                LogPrintf("UDP: Block %s (height %7d) - Got full header and shorttxids from: [%s]\n", blockHash.ToString(), block.height, block.GetSenders());
+
+            if (block.block_data.AreAllTxnsInMempool())
+                LogPrintf("UDP: Block %s - Ready to be decoded (all txns available)\n", blockHash.ToString());
+            else if (block.block_data.IsBlockAvailable())
+                LogPrintf("UDP: Block %s - Ready to be decoded (all uncoded chunks available)\n", blockHash.ToString());
+            else if (block.is_decodeable)
+                LogPrintf("UDP: Block %s - Ready to be decoded (enough FEC chunks available)\n", blockHash.ToString());
+
+            if (block.tip_blk) {
+                size_t mempool_txns = block.block_data.GetMempoolCount();
+                size_t n_blk_txns = header.BlockShortTxCount();
+                block.txn_hit_ratio = (double)mempool_txns / n_blk_txns;
+                LogPrint(BCLog::FEC, "UDP: Block %s - Txns available: %ld/%ld  Txn hit ratio: %f\n",
+                         blockHash.ToString(), mempool_txns, n_blk_txns, block.txn_hit_ratio);
+                // When all txns are available in the mempool, the FEC-coded
+                // block is not even decoded. The block is decoded directly
+                // based on the local txns. However, mark as if all chunks were
+                // available for consistency with the txn hit ratio.
+                if (block.block_data.AreAllTxnsInMempool())
+                    block.chunk_hit_ratio = 1.0;
+            }
+
+            // Do more work if we can already decode the block or in case we
+            // should try to fill in the erasures based on mempool txns that we
+            // already have (for new blocks, i.e., tip blocks)
+            if (block.is_decodeable || (block.blk_initialized && block.tip_blk))
+                more_work = true;
+            else
+                lock.unlock();
+
+        } else if (block.block_data.IsHeaderNull()) {
+            // If we are not going to process the header data now, it is because
+            // we are either going to process block data or fill block data.
+            // However, in order for this to succeed we must have had processed
+            // the header before. Double check.
+            break;
+        } else if (block.is_decodeable || block.block_data.IsBlockAvailable()) {
+            if (block.currentlyProcessing) {
+                // We often duplicatively schedule DoBackgroundBlockProcessing,
+                // but we do not do anything to avoid duplicate
+                // final-processing. Thus, we have to check if we have already
+                // done final processing by checking currentlyProcessing (which
+                // is never un-set after we set it).
+                break;
+            }
+            block.currentlyProcessing = true;
+            std::chrono::steady_clock::time_point reconstruct_start;
+            if (fBench)
+                reconstruct_start = std::chrono::steady_clock::now();
+
+            if (!block.block_data.IsBlockAvailable()) {
+                block.ReconstructBlockFromDecoder();
+                assert(block.block_data.IsBlockAvailable());
+            }
+
+            std::chrono::steady_clock::time_point fec_reconstruct_finished;
+            if (fBench)
+                fec_reconstruct_finished = std::chrono::steady_clock::now();
+
+            ReadStatus status = block.block_data.FinalizeBlock();
+
+            std::chrono::steady_clock::time_point block_finalized;
+            if (fBench)
+                block_finalized = std::chrono::steady_clock::now();
+
+            if (status != READ_STATUS_OK) {
+                lock.unlock();
+                std::lock_guard<std::recursive_mutex> udpNodesLock(cs_mapUDPNodes);
+
+                if (status == READ_STATUS_INVALID) {
+                    if (node == TRUSTED_PEER_DUMMY)
+                        LogPrintf("UDP: Unable to decode block from trusted peer(s), check your trusted peers are behaving well.\n");
+                    else {
+                        const auto it = mapUDPNodes.find(node);
+                        if (it != mapUDPNodes.end())
+                            DisconnectNode(it);
+                    }
+                    // Make sure this invalid block is not downloaded again in the future
+                    setBlocksReceived.insert(hash_peer_pair);
+                } else if (status == READ_STATUS_UNSUPPORTED) {
+                    LogPrintf("UDP: Dropping block %s received with unsupported txn codec version.\n", block.block_data.GetBlockHash().ToString());
+                } else {
+                    LogPrintf("UDP: Failed to process block %s. Dropping.\n", block.block_data.GetBlockHash().ToString());
                 }
-                std::chrono::steady_clock::time_point header_deserialized;
+                RemovePartialBlock(hash_peer_pair);
+                break;
+            } else {
+                std::shared_ptr<const CBlock> pdecoded_block = block.block_data.GetBlock();
+                const CBlock& decoded_block = *pdecoded_block;
+                if (fBench) {
+                    uint32_t total_chunks_recvd = 0, total_chunks_used = 0;
+                    std::map<CService, std::pair<uint32_t, uint32_t>>& chunksProvidedByNode = block.perNodeChunkCount;
+                    for (const auto& provider : chunksProvidedByNode) {
+                        total_chunks_recvd += provider.second.second;
+                        total_chunks_used += provider.second.first;
+                    }
+                    // NOTE: the chunk count printed next is not necessarily
+                    // accurate. It reflects the count up to when the block is
+                    // decoded. However, further chunks may still be received
+                    // after the block is decoded.
+                    LogPrintf("UDP: Block %s reconstructed with %u chunks in %lf ms (%u recvd from %u peers)\n", decoded_block.GetHash().ToString(), total_chunks_used, to_millis_double(std::chrono::steady_clock::now() - block.t_created), total_chunks_recvd, chunksProvidedByNode.size());
+                    for (const auto& provider : chunksProvidedByNode)
+                        LogPrintf("UDP:    %u/%u used from %s\n", provider.second.first, provider.second.second, provider.first.ToString());
+                }
+
+                lock.unlock();
+
+                std::chrono::steady_clock::time_point process_start;
                 if (fBench)
-                    header_deserialized = std::chrono::steady_clock::now();
+                    process_start = std::chrono::steady_clock::now();
 
-                /* We may not process the header yet (depending on conditions
-                 * checked below), but at least we can extract the block height
-                 * from the header and save it on the partial block. */
-                block.height = header.getBlockHeight();
+                // Treat the block as a solicited block in case it came from a
+                // trusted peer
+                const bool force_requested = (node == TRUSTED_PEER_DUMMY);
 
-                /* Do we have the block already?  */
-                if (!block.chain_lookup) {
-                    const CBlockIndex* pblockindex;
+                bool fNewBlock;
+                if (!chainman->ProcessNewBlock(Params(), pdecoded_block, force_requested, &fNewBlock)) {
+                    bool have_prev, outoforder_and_valid;
                     {
                         LOCK(cs_main);
-                        pblockindex = chainman->m_blockman.LookupBlockIndex(header.header.GetHash());
+
+                        have_prev = chainman->BlockIndex().count(pdecoded_block->hashPrevBlock);
+                        BlockValidationState state;
+                        outoforder_and_valid = !have_prev &&
+                                               CheckBlock(*pdecoded_block, state, Params().GetConsensus());
                     }
-                    block.chain_lookup = true;
-                    if (pblockindex && (pblockindex->nStatus & BLOCK_HAVE_DATA)) {
-                        /* We do have the full block already. Drop the partial
-                         * block immediately and add it to setBlocksReceived, so
-                         * that its subsequent chunks are ignored. */
-                        lock.unlock();
-                        std::lock_guard<std::recursive_mutex> udpNodesLock(cs_mapUDPNodes);
+
+                    LogPrintf("UDP: Failed to decode block %s\n", decoded_block.GetHash().ToString());
+
+                    // Only save out-of-order blocks that are minimally valid
+                    bool ooob_saved = false;
+                    if (outoforder_and_valid) {
+                        ooob_saved = StoreOoOBlock(*chainman, Params(), pdecoded_block, force_requested, block.height);
+
+                        // If the OOOB was actually a tip block coming from a
+                        // trusted peer, we are no longer in sync
+                        if (ooob_saved && node == TRUSTED_PEER_DUMMY && block.tip_blk) {
+                            sync_with_trusted_peer = false;
+                        }
+                    }
+
+                    std::lock_guard<std::recursive_mutex> udpNodesLock(cs_mapUDPNodes);
+
+                    if (ooob_saved) {
                         setBlocksReceived.insert(hash_peer_pair);
-                        RemovePartialBlock(hash_peer_pair);
-                        break;
+                    } else {
+                        // Allow re-downloading again later, useful for local backfill downloads
+                        setBlocksReceived.erase(hash_peer_pair);
+                    }
+                    RemovePartialBlock(hash_peer_pair);
+                    break; // Probably a tx collision generating merkle-tree errors
+                }
+                if (fBench) {
+                    LogPrintf("UDP: Final block processing for %s took %lf %lf %lf %lf ms (new: %d)\n", decoded_block.GetHash().ToString(), to_millis_double(fec_reconstruct_finished - reconstruct_start), to_millis_double(block_finalized - fec_reconstruct_finished), to_millis_double(process_start - block_finalized), to_millis_double(std::chrono::steady_clock::now() - process_start), fNewBlock);
+                    if (fNewBlock) {
+                        LogPrintf("UDP: Block %s had serialized size %lu\n", decoded_block.GetHash().ToString(), GetSerializeSize(decoded_block, PROTOCOL_VERSION));
                     }
                 }
 
-                /* Continue with the processing of a non-tip (repeated) block
-                 * only if the body is also decodable or empty. This is to save
-                 * memory, given that as soon as we call ProvideHeaderData
-                 * below, significant amounts of memory are preallocated. */
-                const bool non_empty_block = (header.ShortTxIdCount() != 0);
-                if (!block.tip_blk && non_empty_block && !block.is_decodeable)
-                    break;
+                // Assume we are in sync when, upon reception of a tip block
+                // from a trusted peer, the received block actually becomes the
+                // tip of the active chain.
+                uint256 tip_hash;
+                {
+                    LOCK(cs_main);
+                    tip_hash = chainman->ActiveChain().Tip()->GetBlockHash();
+                }
+                if (node == TRUSTED_PEER_DUMMY && block.tip_blk) {
+                    sync_with_trusted_peer = tip_hash == decoded_block.GetHash();
+                }
 
-                ReadStatus decode_status = block.ProvideHeaderData(header);
-                if (decode_status != READ_STATUS_OK) {
+                std::lock_guard<std::recursive_mutex> udpNodesLock(cs_mapUDPNodes);
+                setBlocksReceived.insert(hash_peer_pair);
+                RemovePartialBlocks(hash_peer_pair.first); // Ensure we remove even if we didnt UDPRelayBlock()
+            }
+        } else if (!block.in_header && block.blk_initialized) {
+            uint32_t mempool_provided_chunks = 0;
+            uint32_t total_chunk_count = 0;
+            uint256 blockHash;
+            bool fDone = block.block_data.IsIterativeFillDone();
+            while (!fDone) {
+                size_t firstChunkProcessed;
+                if (!lock)
+                    lock.lock();
+                if (!total_chunk_count) {
+                    total_chunk_count = block.block_data.GetChunkCount();
+                    blockHash = block.block_data.GetBlockHash();
+                }
+                ReadStatus res = block.block_data.DoIterativeFill(firstChunkProcessed);
+                if (res != READ_STATUS_OK) {
                     lock.unlock();
                     std::lock_guard<std::recursive_mutex> udpNodesLock(cs_mapUDPNodes);
-                    if (decode_status == READ_STATUS_INVALID) {
+                    if (res == READ_STATUS_INVALID) {
                         if (node == TRUSTED_PEER_DUMMY)
-                            LogPrintf("UDP: Got invalid header and short txids from trusted peer(s), check your trusted peers are behaving well.\n");
+                            LogPrintf("UDP: Unable to process mempool for block %s from trusted peer(s), check your trusted peers are behaving well.\n", blockHash.ToString());
                         else {
-                            LogPrintf("UDP: Got invalid header and short txids from %s, disconnecting\n", node.ToString());
+                            LogPrintf("UDP: Unable to process mempool for block %s from %s, disconnecting\n", blockHash.ToString(), node.ToString());
                             const auto it = mapUDPNodes.find(node);
                             if (it != mapUDPNodes.end())
                                 DisconnectNode(it);
                         }
                     } else
-                        LogPrintf("UDP: Failed to read header and short txids\n");
-
-                    // Dont remove the block, let it time out...
-                    break;
-                }
-
-                if (block.block_data.IsBlockAvailable())
-                    block.is_decodeable = true;
-                block.is_header_processing = false;
-
-                const uint256 blockHash = block.block_data.GetBlockHash();
-
-                if (fBench) {
-                    std::chrono::steady_clock::time_point header_provided(std::chrono::steady_clock::now());
-                    LogPrintf("UDP: Block %s (height %7d) - Got full header and shorttxids from %s in %lf %lf %lf ms\n", blockHash.ToString(), block.height, block.GetSenders(), to_millis_double(data_copied - decode_start), to_millis_double(header_deserialized - data_copied), to_millis_double(header_provided - header_deserialized));
-                } else
-                    LogPrintf("UDP: Block %s (height %7d) - Got full header and shorttxids from: [%s]\n", blockHash.ToString(), block.height, block.GetSenders());
-
-                if (block.block_data.AreAllTxnsInMempool())
-                    LogPrintf("UDP: Block %s - Ready to be decoded (all txns available)\n", blockHash.ToString());
-                else if (block.block_data.IsBlockAvailable())
-                    LogPrintf("UDP: Block %s - Ready to be decoded (all uncoded chunks available)\n", blockHash.ToString());
-                else if (block.is_decodeable)
-                    LogPrintf("UDP: Block %s - Ready to be decoded (enough FEC chunks available)\n", blockHash.ToString());
-
-                if (block.tip_blk) {
-                    size_t mempool_txns = block.block_data.GetMempoolCount();
-                    size_t n_blk_txns = header.BlockShortTxCount();
-                    block.txn_hit_ratio = (double)mempool_txns / n_blk_txns;
-                    LogPrint(BCLog::FEC, "UDP: Block %s - Txns available: %ld/%ld  Txn hit ratio: %f\n",
-                             blockHash.ToString(), mempool_txns, n_blk_txns, block.txn_hit_ratio);
-                    // When all txns are available in the mempool, the FEC-coded
-                    // block is not even decoded. The block is decoded directly
-                    // based on the local txns. However, mark as if all chunks
-                    // were available for consistency with the txn hit ratio.
-                    if (block.block_data.AreAllTxnsInMempool())
-                        block.chunk_hit_ratio = 1.0;
-                }
-
-                // Do more work if we can already decode the block or in case we
-                // should try to fill in the erasures based on mempool txns that
-                // we already have (for new blocks, i.e., tip blocks)
-                if (block.is_decodeable || (block.blk_initialized && block.tip_blk))
-                    more_work = true;
-                else
-                    lock.unlock();
-
-            } else if (block.block_data.IsHeaderNull()) {
-                /* If we are not going to process the header data now, it is
-                 * because we are either going to process block data or fill
-                 * block data. However, in order for this to succeed we must
-                 * have had processed the header before. Double check. */
-                break;
-            } else if (block.is_decodeable || block.block_data.IsBlockAvailable()) {
-                if (block.currentlyProcessing) {
-                    // We often duplicatively schedule DoBackgroundBlockProcessing,
-                    // but we do not do anything to avoid duplicate
-                    // final-processing. Thus, we have to check if we have already
-                    // done final processing by checking currentlyProcessing (which
-                    // is never un-set after we set it).
-                    break;
-                }
-                block.currentlyProcessing = true;
-                std::chrono::steady_clock::time_point reconstruct_start;
-                if (fBench)
-                    reconstruct_start = std::chrono::steady_clock::now();
-
-                if (!block.block_data.IsBlockAvailable()) {
-                    block.ReconstructBlockFromDecoder();
-                    assert(block.block_data.IsBlockAvailable());
-                }
-
-                std::chrono::steady_clock::time_point fec_reconstruct_finished;
-                if (fBench)
-                    fec_reconstruct_finished = std::chrono::steady_clock::now();
-
-                ReadStatus status = block.block_data.FinalizeBlock();
-
-                std::chrono::steady_clock::time_point block_finalized;
-                if (fBench)
-                    block_finalized = std::chrono::steady_clock::now();
-
-                if (status != READ_STATUS_OK) {
-                    lock.unlock();
-                    std::lock_guard<std::recursive_mutex> udpNodesLock(cs_mapUDPNodes);
-
-                    if (status == READ_STATUS_INVALID) {
-                        if (node == TRUSTED_PEER_DUMMY)
-                            LogPrintf("UDP: Unable to decode block from trusted peer(s), check your trusted peers are behaving well.\n");
-                        else {
-                            const auto it = mapUDPNodes.find(node);
-                            if (it != mapUDPNodes.end())
-                                DisconnectNode(it);
-                        }
-                        // Make sure this invalid block is not downloaded again in the future
-                        setBlocksReceived.insert(hash_peer_pair);
-                    } else if (status == READ_STATUS_UNSUPPORTED) {
-                        LogPrintf("UDP: Dropping block %s received with unsupported txn codec version.\n", block.block_data.GetBlockHash().ToString());
-                    } else {
-                        LogPrintf("UDP: Failed to process block %s. Dropping.\n", block.block_data.GetBlockHash().ToString());
-                    }
+                        LogPrintf("UDP: Unable to process mempool for block %s, dropping block\n", blockHash.ToString());
+                    setBlocksReceived.insert(hash_peer_pair);
                     RemovePartialBlock(hash_peer_pair);
                     break;
                 } else {
-                    std::shared_ptr<const CBlock> pdecoded_block = block.block_data.GetBlock();
-                    const CBlock& decoded_block = *pdecoded_block;
-                    if (fBench) {
-                        uint32_t total_chunks_recvd = 0, total_chunks_used = 0;
-                        std::map<CService, std::pair<uint32_t, uint32_t>>& chunksProvidedByNode = block.perNodeChunkCount;
-                        for (const auto& provider : chunksProvidedByNode) {
-                            total_chunks_recvd += provider.second.second;
-                            total_chunks_used += provider.second.first;
+                    while (firstChunkProcessed < total_chunk_count && block.block_data.IsChunkAvailable(firstChunkProcessed)) {
+                        if (!block.body_decoder.HasChunk(firstChunkProcessed)) {
+                            block.body_decoder.ProvideChunk(block.block_data.GetChunk(firstChunkProcessed), firstChunkProcessed);
+                            mempool_provided_chunks++;
                         }
-                        /* NOTE: the chunk count printed next is not necessarily
-                         * accurate. It reflects the count up to when the block
-                         * is decoded. However, further chunks may still be
-                         * received after the block is decoded. */
-                        LogPrintf("UDP: Block %s reconstructed with %u chunks in %lf ms (%u recvd from %u peers)\n", decoded_block.GetHash().ToString(), total_chunks_used, to_millis_double(std::chrono::steady_clock::now() - block.t_created), total_chunks_recvd, chunksProvidedByNode.size());
-                        for (const auto& provider : chunksProvidedByNode)
-                            LogPrintf("UDP:    %u/%u used from %s\n", provider.second.first, provider.second.second, provider.first.ToString());
+                        firstChunkProcessed++;
                     }
 
-                    lock.unlock();
-
-                    std::chrono::steady_clock::time_point process_start;
-                    if (fBench)
-                        process_start = std::chrono::steady_clock::now();
-
-                    /* Treat the block as a solicited block in case it came from
-                     * a trusted peer */
-                    const bool force_requested = (node == TRUSTED_PEER_DUMMY);
-
-                    bool fNewBlock;
-                    if (!chainman->ProcessNewBlock(Params(), pdecoded_block, force_requested, &fNewBlock)) {
-                        bool have_prev, outoforder_and_valid;
-                        {
-                            LOCK(cs_main);
-
-                            have_prev = chainman->BlockIndex().count(pdecoded_block->hashPrevBlock);
-                            BlockValidationState state;
-                            outoforder_and_valid = !have_prev &&
-                                                   CheckBlock(*pdecoded_block, state, Params().GetConsensus());
-                        }
-
-                        LogPrintf("UDP: Failed to decode block %s\n", decoded_block.GetHash().ToString());
-
-                        /* Only save out-of-order blocks that are minimally
-                         * valid */
-                        bool ooob_saved = false;
-                        if (outoforder_and_valid) {
-                            ooob_saved = StoreOoOBlock(*chainman, Params(), pdecoded_block, force_requested, block.height);
-
-                            // If the OOOB was actually a tip block coming from
-                            // a trusted peer, we are no longer in sync
-                            if (ooob_saved && node == TRUSTED_PEER_DUMMY && block.tip_blk) {
-                                sync_with_trusted_peer = false;
-                            }
-                        }
-
-                        std::lock_guard<std::recursive_mutex> udpNodesLock(cs_mapUDPNodes);
-
-                        if (ooob_saved) {
-                            setBlocksReceived.insert(hash_peer_pair);
-                        } else {
-                            // Allow re-downloading again later, useful for local backfill downloads
-                            setBlocksReceived.erase(hash_peer_pair);
-                        }
-                        RemovePartialBlock(hash_peer_pair);
-                        break; // Probably a tx collision generating merkle-tree errors
-                    }
-                    if (fBench) {
-                        LogPrintf("UDP: Final block processing for %s took %lf %lf %lf %lf ms (new: %d)\n", decoded_block.GetHash().ToString(), to_millis_double(fec_reconstruct_finished - reconstruct_start), to_millis_double(block_finalized - fec_reconstruct_finished), to_millis_double(process_start - block_finalized), to_millis_double(std::chrono::steady_clock::now() - process_start), fNewBlock);
-                        if (fNewBlock) {
-                            LogPrintf("UDP: Block %s had serialized size %lu\n", decoded_block.GetHash().ToString(), GetSerializeSize(decoded_block, PROTOCOL_VERSION));
-                        }
-                    }
-
-                    // Assume we are in sync when, upon reception of a tip block
-                    // from a trusted peer, the received block actually becomes
-                    // the tip of the active chain.
-                    uint256 tip_hash;
-                    {
-                        LOCK(cs_main);
-                        tip_hash = chainman->ActiveChain().Tip()->GetBlockHash();
-                    }
-                    if (node == TRUSTED_PEER_DUMMY && block.tip_blk) {
-                        sync_with_trusted_peer = tip_hash == decoded_block.GetHash();
-                    }
-
-                    std::lock_guard<std::recursive_mutex> udpNodesLock(cs_mapUDPNodes);
-                    setBlocksReceived.insert(hash_peer_pair);
-                    RemovePartialBlocks(hash_peer_pair.first); // Ensure we remove even if we didnt UDPRelayBlock()
-                }
-            } else if (!block.in_header && block.blk_initialized) {
-                uint32_t mempool_provided_chunks = 0;
-                uint32_t total_chunk_count = 0;
-                uint256 blockHash;
-                bool fDone = block.block_data.IsIterativeFillDone();
-                while (!fDone) {
-                    size_t firstChunkProcessed;
-                    if (!lock)
-                        lock.lock();
-                    if (!total_chunk_count) {
-                        total_chunk_count = block.block_data.GetChunkCount();
-                        blockHash = block.block_data.GetBlockHash();
-                    }
-                    ReadStatus res = block.block_data.DoIterativeFill(firstChunkProcessed);
-                    if (res != READ_STATUS_OK) {
-                        lock.unlock();
-                        std::lock_guard<std::recursive_mutex> udpNodesLock(cs_mapUDPNodes);
-                        if (res == READ_STATUS_INVALID) {
-                            if (node == TRUSTED_PEER_DUMMY)
-                                LogPrintf("UDP: Unable to process mempool for block %s from trusted peer(s), check your trusted peers are behaving well.\n", blockHash.ToString());
-                            else {
-                                LogPrintf("UDP: Unable to process mempool for block %s from %s, disconnecting\n", blockHash.ToString(), node.ToString());
-                                const auto it = mapUDPNodes.find(node);
-                                if (it != mapUDPNodes.end())
-                                    DisconnectNode(it);
-                            }
-                        } else
-                            LogPrintf("UDP: Unable to process mempool for block %s, dropping block\n", blockHash.ToString());
-                        setBlocksReceived.insert(hash_peer_pair);
-                        RemovePartialBlock(hash_peer_pair);
+                    if (block.body_decoder.DecodeReady() || block.block_data.IsBlockAvailable()) {
+                        block.is_decodeable = true;
+                        more_work = true;
                         break;
-                    } else {
-                        while (firstChunkProcessed < total_chunk_count && block.block_data.IsChunkAvailable(firstChunkProcessed)) {
-                            if (!block.body_decoder.HasChunk(firstChunkProcessed)) {
-                                block.body_decoder.ProvideChunk(block.block_data.GetChunk(firstChunkProcessed), firstChunkProcessed);
-                                mempool_provided_chunks++;
-                            }
-                            firstChunkProcessed++;
-                        }
-
-                        if (block.body_decoder.DecodeReady() || block.block_data.IsBlockAvailable()) {
-                            block.is_decodeable = true;
-                            more_work = true;
-                            break;
-                        }
-                    }
-                    fDone = block.block_data.IsIterativeFillDone();
-                    if (!fDone && block.packet_awaiting_lock) {
-                        lock.unlock();
-                        std::this_thread::yield();
                     }
                 }
-
-                double chunk_hit_ratio = (double)mempool_provided_chunks / total_chunk_count;
-
-                if (lock)
-                    block.chunk_hit_ratio = chunk_hit_ratio;
-
-                if (lock && !more_work)
+                fDone = block.block_data.IsIterativeFillDone();
+                if (!fDone && block.packet_awaiting_lock) {
                     lock.unlock();
-                LogPrintf("UDP: Block %s - Initialized with %ld/%ld mempool-provided chunks (or more)\n", blockHash.ToString(), mempool_provided_chunks, total_chunk_count);
-                LogPrint(BCLog::FEC, "UDP: Block %s - Chunk hit ratio: %f\n",
-                         blockHash.ToString(), chunk_hit_ratio);
+                    std::this_thread::yield();
+                }
             }
-        } while (more_work);
-    }
+
+            double chunk_hit_ratio = (double)mempool_provided_chunks / total_chunk_count;
+
+            if (lock)
+                block.chunk_hit_ratio = chunk_hit_ratio;
+
+            if (lock && !more_work)
+                lock.unlock();
+            LogPrintf("UDP: Block %s - Initialized with %ld/%ld mempool-provided chunks (or more)\n", blockHash.ToString(), mempool_provided_chunks, total_chunk_count);
+            LogPrint(BCLog::FEC, "UDP: Block %s - Chunk hit ratio: %f\n",
+                     blockHash.ToString(), chunk_hit_ratio);
+        }
+    } while (more_work);
 }
 
 void BlockRecvInit(ChainstateManager* chainman)
@@ -1266,13 +1284,13 @@ static std::string GetChunkFilePrefix(const CService& peer, uint64_t hash_prefix
 
 bool PartialBlockData::Init(const UDPMessage& msg)
 {
-    assert((msg.header.msg_type & UDP_MSG_TYPE_TYPE_MASK) == MSG_TYPE_BLOCK_HEADER || (msg.header.msg_type & UDP_MSG_TYPE_TYPE_MASK) == MSG_TYPE_BLOCK_CONTENTS);
+    assert(IS_BLOCK_HEADER_MSG(msg) || IS_BLOCK_CONTENTS_MSG(msg));
     const uint32_t obj_length = msg.msg.block.obj_length;
     if (obj_length > MAX_BLOCK_SERIALIZED_SIZE * MAX_CHUNK_CODED_BLOCK_SIZE_FACTOR)
         return false;
 
-    tip_blk = msg.header.msg_type & TIP_BLOCK;
-    const bool is_blk_header_chunk = (msg.header.msg_type & UDP_MSG_TYPE_TYPE_MASK) == MSG_TYPE_BLOCK_HEADER;
+    tip_blk = IS_TIP_BLOCK(msg);
+    const bool is_blk_header_chunk = IS_BLOCK_HEADER_MSG(msg);
 
     // When receiving a block at the tip of the blockchain, load FEC chunks
     // directly in memory. They are expected to remain there only briefly until
@@ -1481,7 +1499,7 @@ static bool HandleTx(UDPMessage& msg, size_t length, const CService& node, UDPCo
     return true;
 }
 
-bool HandleBlockTxMessage(UDPMessage& msg, size_t length, const CService& node, UDPConnectionState& state, const std::chrono::steady_clock::time_point& packet_process_start, const int sockfd, const NodeContext* const node_context)
+bool HandleBlockTxMessage(UDPMessage& msg, size_t length, const CService& node, UDPConnectionState& state, const std::chrono::steady_clock::time_point& packet_process_start, const NodeContext* const node_context)
 {
     //TODO: There are way too many damn tree lookups here...either cut them down or increase parallelism
     const bool fBench = LogAcceptCategory(BCLog::BENCH);
@@ -1489,7 +1507,7 @@ bool HandleBlockTxMessage(UDPMessage& msg, size_t length, const CService& node, 
     if (fBench)
         start = std::chrono::steady_clock::now();
 
-    assert((msg.header.msg_type & UDP_MSG_TYPE_TYPE_MASK) == MSG_TYPE_BLOCK_HEADER || (msg.header.msg_type & UDP_MSG_TYPE_TYPE_MASK) == MSG_TYPE_BLOCK_CONTENTS || (msg.header.msg_type & UDP_MSG_TYPE_TYPE_MASK) == MSG_TYPE_TX_CONTENTS);
+    assert(IS_BLOCK_HEADER_MSG(msg) || IS_BLOCK_CONTENTS_MSG(msg) || IS_TX_CONTENTS_MSG(msg));
 
     if (length != sizeof(UDPMessageHeader) + sizeof(UDPBlockMessage)) {
         LogPrintf("UDP: Got invalidly-sized (%d bytes) message from %s\n", length, node.ToString());
@@ -1503,10 +1521,10 @@ bool HandleBlockTxMessage(UDPMessage& msg, size_t length, const CService& node, 
     if ((msg.header.msg_type & UDP_MSG_TYPE_TYPE_MASK) == MSG_TYPE_TX_CONTENTS)
         return HandleTx(msg, length, node, state, node_context);
 
-    const bool is_blk_header_chunk = (msg.header.msg_type & UDP_MSG_TYPE_TYPE_MASK) == MSG_TYPE_BLOCK_HEADER;
-    const bool is_blk_content_chunk = (msg.header.msg_type & UDP_MSG_TYPE_TYPE_MASK) == MSG_TYPE_BLOCK_CONTENTS;
+    const bool is_blk_header_chunk = IS_BLOCK_HEADER_MSG(msg);
+    const bool is_blk_content_chunk = IS_BLOCK_CONTENTS_MSG(msg);
     const bool they_have_block = msg.header.msg_type & HAVE_BLOCK;
-    const bool empty_block = msg.header.msg_type & EMPTY_BLOCK; // a block that comes entirely through the header
+    const bool empty_block = IS_EMPTY_BLOCK(msg); // a block that comes entirely through the header
 
     const uint64_t hash_prefix = msg.msg.block.hash_prefix; // Need a reference in a few places, but its packed, so we can't have one directly
     CService peer = state.connection.fTrusted ? TRUSTED_PEER_DUMMY : node;

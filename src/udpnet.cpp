@@ -882,7 +882,7 @@ static void read_socket_func(evutil_socket_t fd, short event, void* arg)
         if (msg_type_masked == MSG_TYPE_BLOCK_HEADER ||
             msg_type_masked == MSG_TYPE_BLOCK_CONTENTS ||
             msg_type_masked == MSG_TYPE_TX_CONTENTS) {
-            if (!HandleBlockTxMessage(msg, sizeof(UDPMessage) - 1, it->first, it->second, start, fd, g_node_context))
+            if (!HandleBlockTxMessage(msg, sizeof(UDPMessage) - 1, it->first, it->second, start, g_node_context))
                 send_and_disconnect(it);
             else
                 UpdateUdpMulticastRxBytes(mcast_info, res);
@@ -931,7 +931,7 @@ static void read_socket_func(evutil_socket_t fd, short event, void* arg)
         return;
 
     if (msg_type_masked == MSG_TYPE_BLOCK_HEADER || msg_type_masked == MSG_TYPE_BLOCK_CONTENTS) {
-        if (!HandleBlockTxMessage(msg, res, it->first, it->second, start, fd, g_node_context)) {
+        if (!HandleBlockTxMessage(msg, res, it->first, it->second, start, g_node_context)) {
             send_and_disconnect(it);
             return;
         }
@@ -1201,9 +1201,9 @@ static void do_send_messages()
                 // Set the checksum and scramble the data
                 if (next_tx->msg.header.chk1 == 0 && next_tx->msg.header.chk2 == 0) {
                     if (queue.multicast) {
-                        assert((next_tx->msg.header.msg_type & UDP_MSG_TYPE_TYPE_MASK) == MSG_TYPE_BLOCK_HEADER ||
-                               (next_tx->msg.header.msg_type & UDP_MSG_TYPE_TYPE_MASK) == MSG_TYPE_BLOCK_CONTENTS ||
-                               (next_tx->msg.header.msg_type & UDP_MSG_TYPE_TYPE_MASK) == MSG_TYPE_TX_CONTENTS);
+                        assert(IS_BLOCK_HEADER_MSG(next_tx->msg) ||
+                               IS_BLOCK_CONTENTS_MSG(next_tx->msg) ||
+                               IS_TX_CONTENTS_MSG(next_tx->msg));
                     }
                     FillChecksum(next_tx->magic, next_tx->msg, next_tx->length);
                 }

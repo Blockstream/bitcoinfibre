@@ -38,6 +38,10 @@ enum UDPMessageType {
     MSG_TYPE_TX_CONTENTS = 7,
 };
 
+#define IS_BLOCK_HEADER_MSG(msg) ((msg.header.msg_type & UDP_MSG_TYPE_TYPE_MASK) == MSG_TYPE_BLOCK_HEADER)
+#define IS_BLOCK_CONTENTS_MSG(msg) ((msg.header.msg_type & UDP_MSG_TYPE_TYPE_MASK) == MSG_TYPE_BLOCK_CONTENTS)
+#define IS_TX_CONTENTS_MSG(msg) ((msg.header.msg_type & UDP_MSG_TYPE_TYPE_MASK) == MSG_TYPE_TX_CONTENTS)
+
 static const uint8_t UDP_MSG_TYPE_FLAGS_MASK = 0b11100000;
 static const uint8_t UDP_MSG_TYPE_TYPE_MASK = 0b00011111;
 
@@ -57,6 +61,9 @@ enum UDPBlockMessageFlags { // Put in the msg_type
     HAVE_BLOCK = (1 << 6),
     TIP_BLOCK = (1 << 7) // mark that this is a block on the chain's tip (relayed)
 };
+
+#define IS_TIP_BLOCK(msg) (msg.header.msg_type & TIP_BLOCK)
+#define IS_EMPTY_BLOCK(msg) (msg.header.msg_type & EMPTY_BLOCK)
 
 struct __attribute__((packed)) UDPBlockMessage { // (also used for txn)
     /**
