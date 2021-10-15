@@ -43,18 +43,26 @@ static int ExtractHeightFromBlock(const Consensus::Params& consensusParams, cons
 static const char DB_SUBSEQUENT_BLOCK = 'S';
 
 static RecursiveMutex cs_ooob;
+static std::unique_ptr<CDBWrapper> ooob_db;
 
-static CDBWrapper* GetOoOBlockDB() EXCLUSIVE_LOCKS_REQUIRED(cs_ooob)
+static void AssertInitOoOBlockDB() EXCLUSIVE_LOCKS_REQUIRED(cs_ooob)
 {
-    static CDBWrapper ooob_db(gArgs.GetDataDirNet() / "future_blocks", /*cache size=*/1024);
-    return &ooob_db;
+    if (!ooob_db) {
+        ooob_db = std::make_unique<CDBWrapper>(gArgs.GetDataDirNet() / "future_blocks", /*cache size=*/1024);
+    }
+}
+
+void ResetOoOBlockDb()
+{
+    LOCK(cs_ooob);
+    ooob_db.reset();
 }
 
 bool StoreOoOBlock(const ChainstateManager& chainman, const CChainParams& chainparams, const std::shared_ptr<const CBlock> pblock, const bool force, const int in_height)
 {
     LOCK(cs_ooob);
     LOCK(cs_main);
-    CDBWrapper* const ooob_db = GetOoOBlockDB();
+    AssertInitOoOBlockDB();
     auto key = std::make_pair(DB_SUBSEQUENT_BLOCK, pblock->hashPrevBlock);
     std::map<uint256, FlatFilePos> successors;
 
@@ -91,9 +99,8 @@ void ProcessSuccessorOoOBlocks(ChainstateManager& chainman, const CChainParams& 
         auto key = std::make_pair(DB_SUBSEQUENT_BLOCK, head);
 
         LOCK(cs_ooob);
+        AssertInitOoOBlockDB();
         std::map<uint256, FlatFilePos> successors;
-
-        CDBWrapper* ooob_db = GetOoOBlockDB();
         ooob_db->Read(key, successors);
 
         if (successors.empty()) continue;
@@ -118,8 +125,7 @@ void CheckForOoOBlocks(ChainstateManager& chainman, const CChainParams& chainpar
     std::vector<uint256> to_process;
     {
         LOCK(cs_ooob);
-        CDBWrapper* const ooob_db = GetOoOBlockDB();
-
+        AssertInitOoOBlockDB();
         std::unique_ptr<CDBIterator> pcursor(ooob_db->NewIterator());
 
         LOCK(cs_main);
@@ -144,7 +150,7 @@ size_t CountOoOBlocks()
     size_t n_blocks = 0;
     {
         LOCK(cs_ooob);
-        CDBWrapper* const ooob_db = GetOoOBlockDB();
+        AssertInitOoOBlockDB();
         std::unique_ptr<CDBIterator> pcursor(ooob_db->NewIterator());
         for (pcursor->SeekToFirst(); pcursor->Valid(); pcursor->Next()) {
             n_blocks++;
@@ -158,8 +164,7 @@ std::map<uint256, std::vector<uint256>> GetOoOBlockMap()
     std::map<uint256, std::vector<uint256>> ooob_map;
     {
         LOCK(cs_ooob);
-        CDBWrapper* const ooob_db = GetOoOBlockDB();
-
+        AssertInitOoOBlockDB();
         std::unique_ptr<CDBIterator> pcursor(ooob_db->NewIterator());
 
         for (pcursor->SeekToFirst(); pcursor->Valid(); pcursor->Next()) {
