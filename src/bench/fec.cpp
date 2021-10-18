@@ -9,11 +9,11 @@
 #include "consensus/merkle.h"
 #include "fec.h"
 #include "random.h"
+#include "streams.h"
 #include "txmempool.h"
 #include "util/time.h"
-
-#include "streams.h"
 #include "version.h"
+#include <chainparams.h>
 
 #include <random>
 
@@ -274,6 +274,8 @@ static void FECEncodeAllBenchmark(benchmark::Bench& bench) { FECEncodeBenchmark(
 
 static void FECDecodeBenchmark(benchmark::Bench& bench, unsigned mask, const MemoryUsageMode memory_usage_mode)
 {
+    SelectParams(CBaseChainParams::REGTEST);
+
     const auto& data = benchmark::data::block413567;
     size_t fec_chunk_count = DIV_CEIL(data.size(), FEC_CHUNK_SIZE);
     std::pair<std::unique_ptr<FECChunkType[]>, std::vector<uint32_t>> fec(std::piecewise_construct, std::forward_as_tuple(new FECChunkType[fec_chunk_count]), std::forward_as_tuple(fec_chunk_count));
