@@ -342,9 +342,10 @@ void ResetPartialBlocks()
 
 void ResetPartialBlockState()
 {
-    mapPartialBlocks.clear();
     setBlocksRelayed.clear();
     setBlocksReceived.clear();
+    ResetPartialBlocks();
+    ResetBlockProcessQueue();
 }
 
 const CService& GetTrustedPeer()
@@ -1129,6 +1130,13 @@ void ProcessBlock(ChainstateManager* chainman, const std::pair<uint64_t, CServic
                      blockHash.ToString(), chunk_hit_ratio);
         }
     } while (more_work);
+}
+
+void ResetBlockProcessQueue()
+{
+    std::unique_lock<std::mutex> lock(block_process_mutex);
+    while (!block_process_queue.empty())
+        block_process_queue.pop();
 }
 
 void BlockRecvInit(ChainstateManager* chainman)
