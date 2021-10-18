@@ -18,6 +18,7 @@ const CService& GetTrustedPeer();
 void BlockRecvInit(ChainstateManager* chainman);
 
 void BlockRecvShutdown();
+void ResetBlockProcessQueue();
 
 void LoadPartialBlocks(CTxMemPool* mempool);
 void StopLoadPartialBlocks();

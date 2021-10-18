@@ -42,6 +42,8 @@ struct UdpRelayTestingSetup : public RegTestingSetup {
         // Reset the state of setBlocksReceived so that the same hash prefix can
         // be fed again on a new test case
         ResetPartialBlockState();
+        // Stop the block processing thread in case it was enabled
+        BlockRecvShutdown();
     }
 
     void SetDefaultTestBlock()
@@ -501,10 +503,10 @@ BOOST_FIXTURE_TEST_CASE(test_recovery_handles_body_and_header, BasicTestingSetup
     // object, and the second FEC object should reuse the previous
     // PartialBlockData object while setting the proper data fields (header or
     // body decoder data). Hence, the expectation is that the data recovered
-    // from decoder1 and decoder2 is succesfully loaded into the same
+    // from decoder1 and decoder2 is successfully loaded into the same
     // PartialBlockData object.
     partial_block_state = AllBlkChunkStatsToJSON();
-    BOOST_CHECK(partial_block_state.size() == 1); // two decoders belonging to the same block insert only 1 PartialBlockData
+    BOOST_CHECK(partial_block_state.size() == 1);
 
     const std::pair<uint64_t, CService> hash_peer_pair = std::make_pair(hash_prefix, peer);
     auto partial_block = GetPartialBlockData(hash_peer_pair);
@@ -522,52 +524,79 @@ BOOST_FIXTURE_TEST_CASE(test_recovery_handles_body_and_header, BasicTestingSetup
     ResetPartialBlocks();
 }
 
-BOOST_FIXTURE_TEST_CASE(test_recovery_of_decodable_state, BasicTestingSetup)
+BOOST_FIXTURE_TEST_CASE(test_recovery_of_decodable_header_state, UdpRelayTestingSetup)
 {
-    // Define a hash prefix and peer address
-    char ip_addr[INET_ADDRSTRLEN] = "172.16.235.1";
-    const uint64_t hash_prefix = 1234;
-    unsigned short port = 8080;
-
-    struct in_addr ipv4Addr;
-    inet_pton(AF_INET, ip_addr, &(ipv4Addr));
-    CService peer(ipv4Addr, port);
-
-    // Construct two decoders for the same hash prefix, one for the header data,
-    // the other for body data. Provide all the header chunks. Then, destroy the
-    // decoders while persisting their chunk files in disk.
-    std::vector<unsigned char> dummy_chunk(FEC_CHUNK_SIZE);
-    size_t n_body_chunks = 5;
-    size_t n_header_chunks = 2;
-    std::string chunk_file_prefix = peer.ToStringIP() + "_" + peer.ToStringPort() + "_" + std::to_string(hash_prefix);
-    std::string obj_id1 = chunk_file_prefix + "_body";
-    std::string obj_id2 = chunk_file_prefix + "_header";
-    {
-        const bool keep_mmap_file = true;
-        FECDecoder decoder1(FEC_CHUNK_SIZE * n_body_chunks, MemoryUsageMode::USE_MMAP, obj_id1, keep_mmap_file);
-        FECDecoder decoder2(FEC_CHUNK_SIZE * n_header_chunks, MemoryUsageMode::USE_MMAP, obj_id2, keep_mmap_file);
-
-        for (size_t chunk_id = 0; chunk_id < n_header_chunks; chunk_id++) {
-            decoder2.ProvideChunk(dummy_chunk.data(), chunk_id);
+    // Feed all the header chunks of a test block
+    SetTestBlock413567();
+    FecOverhead overhead{10, 0};
+    std::vector<UDPMessage> msgs;
+    UDPFillMessagesFromBlock(m_test_block.block, msgs, m_test_block.height, overhead);
+    for (size_t i = 0; i < msgs.size(); i++) {
+        if (IS_BLOCK_HEADER_MSG(msgs[i])) {
+            HandleBlockMessage(msgs[i]);
         }
-        BOOST_CHECK(!decoder1.DecodeReady());
-        BOOST_CHECK(decoder2.DecodeReady());
     }
 
-    // Assume the application was aborted/closed, leaving partial block data in
-    // disk. Next, reload the partial blocks, as if relaunching the application.
-    LoadPartialBlocks(nullptr);
-
-    // The recovered partial block should indicate that its header is ready to
-    // be processed/decoded, while the body is still not decodable.
-    const std::pair<uint64_t, CService> hash_peer_pair = std::make_pair(hash_prefix, peer);
-    auto partial_block = GetPartialBlockData(hash_peer_pair);
+    // Only the header should be decodable at this point
+    auto partial_block = GetPartialBlockData(m_test_block.hash_peer_pair);
     BOOST_CHECK(partial_block != nullptr);
     BOOST_CHECK(partial_block->is_header_processing);
     BOOST_CHECK(!partial_block->is_decodeable);
 
-    // cleanup mapPartialBlocks
-    ResetPartialBlocks();
+    // Assume the application was aborted/closed, leaving partial block data in
+    // disk. Next, reload the partial blocks, as if relaunching the application.
+    ResetPartialBlockState();
+    LoadPartialBlocks(m_node.mempool.get());
+
+    // The recovered partial block should indicate that its header is ready to
+    // be processed/decoded, while the body is still not decodable.
+    partial_block = GetPartialBlockData(m_test_block.hash_peer_pair);
+    BOOST_CHECK(partial_block != nullptr);
+    BOOST_CHECK(partial_block->is_header_processing);
+    BOOST_CHECK(!partial_block->is_decodeable);
+}
+
+BOOST_FIXTURE_TEST_CASE(test_recovery_of_fully_decodable_block, UdpRelayTestingSetup)
+{
+    // Feed all chunks of a test block
+    SetTestBlock413567();
+    FecOverhead overhead{10, 0};
+    std::vector<UDPMessage> msgs;
+    UDPFillMessagesFromBlock(m_test_block.block, msgs, m_test_block.height, overhead);
+    for (size_t i = 0; i < msgs.size(); i++) {
+        HandleBlockMessage(msgs[i]);
+    }
+
+    // Both header and body should be decodable at this point
+    auto partial_block = GetPartialBlockData(m_test_block.hash_peer_pair);
+    BOOST_CHECK(partial_block != nullptr);
+    BOOST_CHECK(partial_block->is_header_processing);
+    BOOST_CHECK(partial_block->is_decodeable);
+
+    // Next, assume the application was closed before the block was processed by
+    // the block processing thread, such that the partial block data remains in
+    // disk. Then, reload the partial blocks from disk, as if relaunching the
+    // application. This time, enable the block processing thread on the
+    // background so that the decodable partial block can be processed.
+    ResetPartialBlockState();             // simulate a restart
+    BlockRecvInit(m_node.chainman.get()); // enable the block processing thread
+    LoadPartialBlocks(m_node.mempool.get());
+
+    // Since both header and body were already decodable previously, the partial
+    // block recovered from disk should be completely processed now and removed
+    // from the partial block map. Just wait long enough.
+    auto t_start = std::chrono::system_clock::now();
+    bool timeout = false;
+    double timeout_sec = 10.0;
+    while (GetPartialBlockData(m_test_block.hash_peer_pair) != nullptr) {
+        auto t_end = std::chrono::system_clock::now();
+        if (std::chrono::duration_cast<std::chrono::duration<double, std::chrono::seconds::period>>(t_end - t_start).count() > timeout_sec) {
+            timeout = true;
+            break;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    BOOST_CHECK(!timeout);
 }
 
 BOOST_FIXTURE_TEST_CASE(test_recovery_multiple_blocks, BasicTestingSetup)
