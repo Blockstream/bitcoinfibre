@@ -738,8 +738,12 @@ static std::atomic_bool block_process_shutdown(false);
 static std::queue<std::pair<std::pair<uint64_t, CService>, std::shared_ptr<PartialBlockData>>> block_process_queue;
 static size_t queue_size_warn = 10; // Print queue size when it exceeds this
 
-static void DoBackgroundBlockProcessing(const std::pair<std::pair<uint64_t, CService>, std::shared_ptr<PartialBlockData>>& block_data)
+static void DoBackgroundBlockProcessing(const std::pair<std::pair<uint64_t, CService>, std::shared_ptr<PartialBlockData>>& block_data) EXCLUSIVE_LOCKS_REQUIRED(block_data.second->state_mutex)
 {
+    if (block_data.second->awaiting_processing)
+        return;
+    block_data.second->awaiting_processing = true;
+
     // If we just blindly call ProcessNewBlock here, we have a cs_main/cs_mapUDPNodes inversion
     // (actually because fucking P2P code calls everything with cs_main already locked).
     // Instead we pass the processing back to ProcessNewBlockThread without cs_mapUDPNodes
@@ -1260,7 +1264,6 @@ void LoadPartialBlocks(CTxMemPool* mempool)
             if ((block->is_header_processing && (!block->chain_lookup || block->is_decodeable)) ||
                 (block->is_decodeable && !block->in_header)) // if for some reason we've processed the header of the non-tip block already
             {
-                block->awaiting_processing = true;
                 DoBackgroundBlockProcessing(std::make_pair(hash_peer_pair, block));
             }
         }
@@ -1683,13 +1686,9 @@ bool HandleBlockTxMessage(UDPMessage& msg, size_t length, const CService& node, 
          * waiting on the block_process_queue to be processed, the
          * erasure-filling process will start automatically right after the
          * header processing, now that we have the first body chunk (i.e.,
-         * block.blk_initialized). In this case, we don't even need to push the
-         * block into the processing queue again (and we won't given that
-         * awaiting_processing would still be true in this case). Importantly,
-         * note the scan is only useful for new (relayed) blocks inserted on the
-         * tip of the chain. Further notes below. */
-        if (is_blk_content_chunk && block.tip_blk && !block.awaiting_processing) {
-            block.awaiting_processing = true;
+         * block.blk_initialized). Importantly, the scan is only useful for
+         * tip-of-the-chain (relayed) blocks inserted. Further notes below. */
+        if (is_blk_content_chunk && block.tip_blk) {
             DoBackgroundBlockProcessing(*it); // Kick off mempool scan (waits on us to unlock block_lock)
         }
     }
@@ -1804,12 +1803,10 @@ bool HandleBlockTxMessage(UDPMessage& msg, size_t length, const CService& node, 
          * partial block (i.e., block.tip_blk below). This way, the partial
          * block that started from a tip block remains like so.
          */
-        if (!block.awaiting_processing &&
-            (block.tip_blk ||
+        if ((block.tip_blk ||
              (block.is_header_processing && (!block.chain_lookup || empty_block || block.is_decodeable)) ||
              (block.is_decodeable && !block.in_header)) // if for some reason we've processed the header of the non-tip block already
         ) {
-            block.awaiting_processing = true;
             DoBackgroundBlockProcessing(*it);
         }
 
