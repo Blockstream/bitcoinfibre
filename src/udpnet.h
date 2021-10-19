@@ -121,6 +121,7 @@ struct PartialBlockData {
     std::atomic_bool packet_awaiting_lock; // Indicates there is a packet ready to process that needs state_mutex
     std::atomic_bool awaiting_processing;  // Indicates the block has been pushed to the processing queue already
     std::atomic_bool chain_lookup;         // Indicates the header has been processed to check if our chain has the block already
+    std::atomic_bool removed;              // Indicates this object was removed from the partial block map already
 
     std::mutex state_mutex;
     // Background thread is preparing to, and is submitting to core
