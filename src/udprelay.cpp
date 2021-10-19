@@ -70,9 +70,14 @@ static std::map<std::pair<uint64_t, CService>, std::shared_ptr<PartialBlockData>
             continue; // Peer reconnected at some point
         nodeIt->second.chunks_avail.erase(chunks_avail_it);
     }
-    /* Now that we are done with the FEC data, remove any underlying mmap FEC chunk files */
+    // Now that we are done with the FEC data, remove any underlying mmap FEC chunk files
     it->second->header_decoder.RemoveMmapFile();
     it->second->body_decoder.RemoveMmapFile();
+
+    // Remove the PartialBlockData from mapPartialBlocks. The PartialBlockData
+    // may still survive until the last shared_ptr owning the object is
+    // destroyed, so mark it as removed to prevent further processing.
+    it->second->removed = true;
     return mapPartialBlocks.erase(it);
 }
 
@@ -786,6 +791,11 @@ void ProcessBlock(ChainstateManager* chainman, const std::pair<uint64_t, CServic
     std::unique_lock<std::mutex> lock(block.state_mutex);
     block.awaiting_processing = false;
 
+    // If the processing has already completed before (successfully or not) such
+    // that RemovePartialBlock was called, don't process this block again.
+    if (block.removed)
+        return;
+
     do {
         more_work = false;
         if (block.is_header_processing) {
@@ -1352,8 +1362,8 @@ PartialBlockData::PartialBlockData(const CService& peer, CTxMemPool* mempool, co
                                                                                                                                                                  in_header(true), blk_initialized(false), header_initialized(false),
                                                                                                                                                                  is_decodeable(false), is_header_processing(false),
                                                                                                                                                                  packet_awaiting_lock(false), awaiting_processing(false),
-                                                                                                                                                                 chain_lookup(false), currentlyProcessing(false), blk_len(0),
-                                                                                                                                                                 header_len(0), block_data(mempool), tip_blk(false)
+                                                                                                                                                                 chain_lookup(false), removed(false), currentlyProcessing(false),
+                                                                                                                                                                 blk_len(0), header_len(0), block_data(mempool), tip_blk(false)
 {
 }
 
@@ -1403,8 +1413,8 @@ PartialBlockData::PartialBlockData(const CService& peer, CTxMemPool* mempool, co
                                                                                                                in_header(true), blk_initialized(false), header_initialized(false),
                                                                                                                is_decodeable(false), is_header_processing(false),
                                                                                                                packet_awaiting_lock(false), awaiting_processing(false),
-                                                                                                               chain_lookup(false), currentlyProcessing(false), blk_len(0),
-                                                                                                               header_len(0), block_data(mempool), tip_blk(false)
+                                                                                                               chain_lookup(false), removed(false), currentlyProcessing(false),
+                                                                                                               blk_len(0), header_len(0), block_data(mempool), tip_blk(false)
 {
 }
 
