@@ -1079,7 +1079,7 @@ void ProcessBlock(ChainstateManager* chainman, const std::pair<uint64_t, CServic
                 setBlocksReceived.insert(hash_peer_pair);
                 RemovePartialBlocks(hash_peer_pair.first); // Ensure we remove even if we didnt UDPRelayBlock()
             }
-        } else if (!block.in_header && block.blk_initialized) {
+        } else if (!block.in_header && block.blk_initialized && block.tip_blk) {
             uint32_t mempool_provided_chunks = 0;
             uint32_t total_chunk_count = 0;
             uint256 blockHash;
