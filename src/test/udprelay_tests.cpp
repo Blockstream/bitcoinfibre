@@ -418,6 +418,202 @@ BOOST_FIXTURE_TEST_CASE(test_non_tip_ooob_uncompressed, UdpRelayTestingSetup)
     BOOST_CHECK(CountOoOBlocks() > 0);
 }
 
+// Test decoding of a block obtained from a mix of tip and non-tip chunks. This
+// scenario reflects the case when the block relaying is only partially received
+// and the node completes the reception based on the repetition chunks sent
+// later. Try a couple of distinct scenarios:
+//
+// 1) Even chunks marked as tip, odd chunks as non-tip.
+// 2) Header chunks as tip, body chunks as non-tip.
+// 3) Header chunks as non-tip, body chunks as tip.
+// 4) Header chunks as non-tip, one body chunk as non-tip, the remaining as tip.
+BOOST_FIXTURE_TEST_CASE(test_tip_and_non_tip_mixing1, UdpRelayTestingSetup)
+{
+    SetTestBlock413567();
+    FecOverhead overhead{10, 0};
+    std::vector<UDPMessage> msgs;
+    UDPFillMessagesFromBlock(m_test_block.block, msgs, m_test_block.height, overhead);
+
+    // Feed the even chunks as tip chunks
+    for (size_t i = 0; i < msgs.size(); i += 2) {
+        msgs[i].header.msg_type |= TIP_BLOCK;
+        HandleBlockMessage(msgs[i]);
+    }
+
+    // The header and body FEC objects should not be ready/decodable yet, but
+    // both should be initialized already
+    auto partial_block = GetPartialBlockData(m_test_block.hash_peer_pair);
+    BOOST_CHECK(partial_block != nullptr);
+    BOOST_CHECK(!partial_block->is_header_processing);
+    BOOST_CHECK(!partial_block->is_decodeable);
+    BOOST_CHECK(partial_block->header_initialized);
+    BOOST_CHECK(partial_block->blk_initialized);
+
+    // Because the first chunk was a tip chunk, the partial block should be
+    // marked as a tip block
+    BOOST_CHECK(partial_block->tip_blk);
+
+    // Feed the odd chunks as non-tip chunks
+    for (size_t i = 1; i < msgs.size(); i += 2) {
+        HandleBlockMessage(msgs[i]);
+    }
+
+    // Now both header and body should be decodable
+    BOOST_CHECK(partial_block->is_header_processing);
+    BOOST_CHECK(partial_block->is_decodeable);
+
+    // And the block should still be treated as a tip block in the end
+    BOOST_CHECK(partial_block->tip_blk);
+
+    // ProcessBlock should ultimately add the block to the OOOB database
+    ProcessBlock(m_node.chainman.get(), m_test_block.hash_peer_pair, *partial_block);
+    BOOST_CHECK(CountOoOBlocks() > 0);
+}
+
+BOOST_FIXTURE_TEST_CASE(test_tip_and_non_tip_mixing2, UdpRelayTestingSetup)
+{
+    SetTestBlock413567();
+    FecOverhead overhead{10, 0};
+    std::vector<UDPMessage> msgs;
+    UDPFillMessagesFromBlock(m_test_block.block, msgs, m_test_block.height, overhead);
+
+    // Feed the header chunks as tip chunks
+    for (size_t i = 0; i < msgs.size(); i++) {
+        if (IS_BLOCK_HEADER_MSG(msgs[i])) {
+            msgs[i].header.msg_type |= TIP_BLOCK;
+            HandleBlockMessage(msgs[i]);
+        }
+    }
+
+    // Only the header should be decodable at this point
+    auto partial_block = GetPartialBlockData(m_test_block.hash_peer_pair);
+    BOOST_CHECK(partial_block != nullptr);
+    BOOST_CHECK(partial_block->is_header_processing);
+    BOOST_CHECK(!partial_block->is_decodeable);
+    BOOST_CHECK(!partial_block->blk_initialized);
+
+    // Because the first chunk was a tip chunk, the partial block should be
+    // marked as a tip block
+    BOOST_CHECK(partial_block->tip_blk);
+
+    // Feed the body chunks as non-tip chunks
+    for (size_t i = 0; i < msgs.size(); i++) {
+        if (IS_BLOCK_CONTENTS_MSG(msgs[i])) {
+            HandleBlockMessage(msgs[i]);
+        }
+    }
+
+    // Now both header and body should be decodable
+    BOOST_CHECK(partial_block->is_header_processing);
+    BOOST_CHECK(partial_block->is_decodeable);
+
+    // And the block should still be treated as a tip block in the end
+    BOOST_CHECK(partial_block->tip_blk);
+
+    // ProcessBlock should ultimately add the block to the OOOB database
+    ProcessBlock(m_node.chainman.get(), m_test_block.hash_peer_pair, *partial_block);
+    BOOST_CHECK(CountOoOBlocks() > 0);
+}
+
+BOOST_FIXTURE_TEST_CASE(test_tip_and_non_tip_mixing3, UdpRelayTestingSetup)
+{
+    SetTestBlock413567();
+    FecOverhead overhead{10, 0};
+    std::vector<UDPMessage> msgs;
+    UDPFillMessagesFromBlock(m_test_block.block, msgs, m_test_block.height, overhead);
+
+    // Feed the header chunks as non-tip chunks
+    for (size_t i = 0; i < msgs.size(); i++) {
+        if (IS_BLOCK_HEADER_MSG(msgs[i])) {
+            HandleBlockMessage(msgs[i]);
+        }
+    }
+
+    // Only the header should be decodable at this point
+    auto partial_block = GetPartialBlockData(m_test_block.hash_peer_pair);
+    BOOST_CHECK(partial_block != nullptr);
+    BOOST_CHECK(partial_block->is_header_processing);
+    BOOST_CHECK(!partial_block->is_decodeable);
+    BOOST_CHECK(!partial_block->blk_initialized);
+
+    // So far, the block appears to be a non-tip block
+    BOOST_CHECK(!partial_block->tip_blk);
+
+    // Feed the body chunks as tip chunks
+    for (size_t i = 0; i < msgs.size(); i++) {
+        if (IS_BLOCK_CONTENTS_MSG(msgs[i])) {
+            msgs[i].header.msg_type |= TIP_BLOCK;
+            HandleBlockMessage(msgs[i]);
+        }
+    }
+
+    // Now both header and body should be decodable
+    BOOST_CHECK(partial_block->is_header_processing);
+    BOOST_CHECK(partial_block->is_decodeable);
+
+    // In the end, the block should be marked as a tip block, despite having
+    // started from non-tip chunks. Any block with at least one tip-flagged
+    // chunk should be considered a tip block.
+    BOOST_CHECK(partial_block->tip_blk);
+
+    // ProcessBlock should ultimately add the block to the OOOB database
+    ProcessBlock(m_node.chainman.get(), m_test_block.hash_peer_pair, *partial_block);
+    BOOST_CHECK(CountOoOBlocks() > 0);
+}
+
+BOOST_FIXTURE_TEST_CASE(test_tip_and_non_tip_mixing4, UdpRelayTestingSetup)
+{
+    SetTestBlock413567();
+    FecOverhead overhead{10, 0};
+    std::vector<UDPMessage> msgs;
+    UDPFillMessagesFromBlock(m_test_block.block, msgs, m_test_block.height, overhead);
+
+    // Feed the header chunks as non-tip chunks
+    for (size_t i = 0; i < msgs.size(); i++) {
+        if (IS_BLOCK_HEADER_MSG(msgs[i])) {
+            HandleBlockMessage(msgs[i]);
+        }
+    }
+
+    // Feed one body chunk as a non-tip chunk
+    for (size_t i = 0; i < msgs.size(); i++) {
+        if (IS_BLOCK_CONTENTS_MSG(msgs[i])) {
+            HandleBlockMessage(msgs[i]);
+            break;
+        }
+    }
+
+    // Only the header should be decodable at this point, and the block should
+    // be considered a non-tip block so far.
+    auto partial_block = GetPartialBlockData(m_test_block.hash_peer_pair);
+    BOOST_CHECK(partial_block != nullptr);
+    BOOST_CHECK(partial_block->is_header_processing);
+    BOOST_CHECK(!partial_block->is_decodeable);
+    BOOST_CHECK(partial_block->blk_initialized); // a body chunk was provided
+    BOOST_CHECK(!partial_block->tip_blk);
+
+    // Feed all body chunks as tip chunks
+    for (size_t i = 0; i < msgs.size(); i++) {
+        if (IS_BLOCK_CONTENTS_MSG(msgs[i])) {
+            msgs[i].header.msg_type |= TIP_BLOCK;
+            HandleBlockMessage(msgs[i]);
+        }
+    }
+
+    // Now both header and body should be decodable
+    BOOST_CHECK(partial_block->is_header_processing);
+    BOOST_CHECK(partial_block->is_decodeable);
+
+    // In the end, the block should be marked as a tip block, despite having
+    // started from non-tip chunks. Any block with at least one tip-flagged
+    // chunk should be considered a tip block.
+    BOOST_CHECK(partial_block->tip_blk);
+
+    // ProcessBlock should ultimately add the block to the OOOB database
+    ProcessBlock(m_node.chainman.get(), m_test_block.hash_peer_pair, *partial_block);
+    BOOST_CHECK(CountOoOBlocks() > 0);
+}
+
 BOOST_AUTO_TEST_CASE(test_ischunkfilerecoverable)
 {
     ChunkFileNameParts cfp;
