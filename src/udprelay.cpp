@@ -1260,10 +1260,14 @@ void LoadPartialBlocks(CTxMemPool* mempool)
             // are decodable, in which case the full processing will take place.
             // Note all disk-recovered blocks are non-tip blocks, so the header
             // can only be fully processed when the body is decodable too.
-            assert(!block->tip_blk);
+            // Nevertheless, it is still possible for a recovered block to be
+            // mixed with tip-flagged chunks, in which case the block is
+            // ultimately considered a tip block and its header can be processed
+            // earlier. To cover this scenario, trigger the background
+            // processing also if the body is decodable and the header is
+            // already processed (in_header = false).
             if ((block->is_header_processing && (!block->chain_lookup || block->is_decodeable)) ||
-                (block->is_decodeable && !block->in_header)) // if for some reason we've processed the header of the non-tip block already
-            {
+                (block->is_decodeable && !block->in_header)) {
                 DoBackgroundBlockProcessing(std::make_pair(hash_peer_pair, block));
             }
         }
@@ -1300,7 +1304,7 @@ bool PartialBlockData::Init(const UDPMessage& msg)
     if (obj_length > MAX_BLOCK_SERIALIZED_SIZE * MAX_CHUNK_CODED_BLOCK_SIZE_FACTOR)
         return false;
 
-    tip_blk = IS_TIP_BLOCK(msg);
+    tip_blk |= IS_TIP_BLOCK(msg); // true if at least one msg flags true (see HandleBlockTxMessage)
     const bool is_blk_header_chunk = IS_BLOCK_HEADER_MSG(msg);
 
     // When receiving a block at the tip of the blockchain, load FEC chunks
@@ -1349,7 +1353,7 @@ PartialBlockData::PartialBlockData(const CService& peer, CTxMemPool* mempool, co
                                                                                                                                                                  is_decodeable(false), is_header_processing(false),
                                                                                                                                                                  packet_awaiting_lock(false), awaiting_processing(false),
                                                                                                                                                                  chain_lookup(false), currentlyProcessing(false), blk_len(0),
-                                                                                                                                                                 header_len(0), block_data(mempool)
+                                                                                                                                                                 header_len(0), block_data(mempool), tip_blk(false)
 {
 }
 
@@ -1692,6 +1696,16 @@ bool HandleBlockTxMessage(UDPMessage& msg, size_t length, const CService& node, 
             DoBackgroundBlockProcessing(*it); // Kick off mempool scan (waits on us to unlock block_lock)
         }
     }
+
+    // If the block was initialized as non-tip, but later we received a chunk
+    // marking the block as a tip block, treat it as a tip-of-the-chain block
+    // regardless. This will affect how soon the block is pushed to the block
+    // processing thread, or whether or not to run the block prefilling
+    // mechanism. However, it won't necessarily determine the memory mode used
+    // by the FECDecoder. The FECDecoder's memory mode may still be based on
+    // memory-mapped storage if the very first chunk passed to the Init function
+    // was not flagged as a tip block.
+    block.tip_blk |= IS_TIP_BLOCK(msg);
 
     FECDecoder& decoder = is_blk_header_chunk ? block.header_decoder : block.body_decoder;
 
