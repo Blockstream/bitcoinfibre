@@ -39,9 +39,8 @@ public:
      */
     MmapStorage(boost::filesystem::path const& file_path, bool create, size_t const chunk_data_size, size_t const chunk_count, T meta_init_val) : m_file_path(file_path),
                                                                                                                                                   m_chunk_data_size(chunk_data_size),
-                                                                                                                                                  m_chunk_meta_size(sizeof(T)),
                                                                                                                                                   m_chunk_count(chunk_count),
-                                                                                                                                                  m_file_size((m_chunk_data_size + m_chunk_meta_size) * chunk_count),
+                                                                                                                                                  m_file_size((m_chunk_data_size + sizeof(T)) * chunk_count),
                                                                                                                                                   m_meta_init_val(meta_init_val)
     {
         if (create) {
@@ -78,8 +77,7 @@ public:
                 }
 
                 for (size_t i = 0; i < m_chunk_count; i++) {
-                    auto const meta_dest_ptr = m_meta_storage + (i * m_chunk_meta_size);
-                    memcpy(meta_dest_ptr, &m_meta_init_val, m_chunk_meta_size);
+                    memcpy(m_meta_storage + (i * sizeof(T)), &m_meta_init_val, sizeof(T));
                 }
             }
         }
@@ -91,7 +89,6 @@ public:
 
     MmapStorage(MmapStorage&& ms) noexcept : m_file_path(std::move(ms.m_file_path)),
                                              m_chunk_data_size(ms.m_chunk_data_size),
-                                             m_chunk_meta_size(ms.m_chunk_meta_size),
                                              m_chunk_count(ms.m_chunk_count),
                                              m_file_size(ms.m_file_size),
                                              m_meta_init_val(std::move(ms.m_meta_init_val)),
@@ -112,10 +109,7 @@ public:
     void Insert(const unsigned char* chunk, T chunk_meta, size_t idx)
     {
         memcpy(GetChunk(idx), chunk, m_chunk_data_size);
-
-        // store chunk_meta at the end of the file
-        auto const meta_dest_ptr = m_meta_storage + (idx * m_chunk_meta_size);
-        memcpy(meta_dest_ptr, &chunk_meta, m_chunk_meta_size);
+        memcpy(m_meta_storage + (idx * sizeof(T)), &chunk_meta, sizeof(T));
     }
 
     /**
@@ -139,8 +133,8 @@ public:
     T GetChunkMeta(size_t idx) const
     {
         if (idx < m_chunk_count) {
-            uint32_t chunk_meta = 0;
-            memcpy(&chunk_meta, m_meta_storage + (idx * m_chunk_meta_size), m_chunk_meta_size);
+            T chunk_meta;
+            memcpy(&chunk_meta, m_meta_storage + (idx * sizeof(T)), sizeof(T));
             return chunk_meta;
         }
         throw std::runtime_error("Invalid chunk index: " + std::to_string(idx));
@@ -226,7 +220,6 @@ private:
 private:
     boost::filesystem::path m_file_path;
     size_t m_chunk_data_size = 0;
-    size_t m_chunk_meta_size = 0;
     size_t m_chunk_count = 0;
     size_t m_file_size = 0;
     T m_meta_init_val;
