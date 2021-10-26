@@ -9,6 +9,7 @@
 #include <clientversion.h>
 #include <compat/sanity.h>
 #include <crypto/sha256.h>
+#include <forkversion.h>
 #include <key.h>
 #include <logging.h>
 #include <node/ui_interface.h>
@@ -158,10 +159,11 @@ void LogPackageVersion()
 {
     std::string version_string = FormatFullVersion();
 #ifdef DEBUG
-    version_string += " (debug build)";
+    std::string build_string = "(debug build)";
 #else
-    version_string += " (release build)";
+    std::string build_string = "(release build)";
 #endif
-    LogPrintf(PACKAGE_NAME " version %s\n", version_string);
+    LogPrintf(PACKAGE_NAME " version %s %s\n", version_string, build_string);
+    LogPrintf(FORK_PACKAGE " version " FORK_VERSION " %s\n", build_string);
 }
 } // namespace init

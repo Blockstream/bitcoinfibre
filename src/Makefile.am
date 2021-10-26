@@ -169,6 +169,7 @@ BITCOIN_CORE_H = \
   flatfile.h \
   fs.h \
   fec.h \
+  forkversion.h \
   httprpc.h \
   httpserver.h \
   i2p.h \
