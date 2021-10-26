@@ -173,6 +173,7 @@ BITCOIN_CORE_H = \
   external_signer.h \
   fec.h \
   flatfile.h \
+  forkversion.h \
   headerssync.h \
   httprpc.h \
   httpserver.h \
