@@ -148,7 +148,7 @@ test:i686:
   timeout: 12h
   only:
     variables:
-      - $CI_COMMIT_TAG =~ /^v(\d+\.)(\d+\.)(\d+)-satellite(\d+\.)(\d+\.)(\d+)$/
+      - $CI_COMMIT_TAG =~ /^v(\d+\.)(\d+)-satellite(\d+\.)(\d+\.)(\d+)$/
 
 # Build Debian packages using pbuilder
 # Make sure to:
@@ -234,7 +234,7 @@ ubuntu-packages:
   dependencies: []
   only:
     variables:
-      - $CI_COMMIT_TAG =~ /^v(\d+\.)(\d+\.)(\d+)-satellite(\d+\.)(\d+\.)(\d+)-rc$/
+      - $CI_COMMIT_TAG =~ /^v(\d+\.)(\d+)-satellite(\d+\.)(\d+\.)(\d+)-rc$/
   timeout: 12h
   parallel:
     matrix:
@@ -267,7 +267,7 @@ ubuntu-packages:
   when: manual
   only:
     variables:
-      - $CI_COMMIT_TAG =~ /^v(\d+\.)(\d+\.)(\d+)-satellite(\d+\.)(\d+\.)(\d+)$/
+      - $CI_COMMIT_TAG =~ /^v(\d+\.)(\d+)-satellite(\d+\.)(\d+\.)(\d+)$/
 
 aptly:
   extends: .pkg-upload
