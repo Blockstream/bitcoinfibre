@@ -431,34 +431,44 @@ static bool InitializeUDPMulticast(std::vector<int>& udp_socks,
         } else {
             /* Multicast Rx mode */
 
-            /* Make receive buffer large enough to hold 10000 max-length packets */
-            const int rcvbuf = 10000 * PACKET_SIZE;
-            if (setsockopt(udp_socks.back(), SOL_SOCKET, SO_RCVBUF, &rcvbuf, sizeof(int)) != 0) {
-                LogPrintf("UDP: setsockopt(SO_RCVBUF) failed: %s\n", strerror(errno));
-                return false;
-            }
-
-            /* It is possible that the kernel does not set the size we asked
-             * for, so double check: */
+            // Check the current maximum socket receive buffer size in bytes
             int actual_rcvbuf;
             socklen_t optlen = sizeof(actual_rcvbuf);
             if (getsockopt(udp_socks.back(), SOL_SOCKET, SO_RCVBUF, &actual_rcvbuf, &optlen) != 0) {
                 LogPrintf("UDP: getsockopt(SO_RCVBUF) failed: %s\n", strerror(errno));
                 return false;
             }
+            actual_rcvbuf >>= 1; // getsockopt returns double the rcvbuf size
 
-            if (actual_rcvbuf < rcvbuf) {
-                LogPrintf("UDP: setsockopt(SO_RCVBUF) tried to set buffer size of %d bytes, but got %d bytes.\n"
-                          "Please check and configure the maximum receive buffer size allowed in the OS.\n",
-                          rcvbuf, actual_rcvbuf);
+            // Make the buffer large enough to hold 1000 max-length packets
+            const int min_rcvbuf = 1000 * PACKET_SIZE;
+            if (actual_rcvbuf < min_rcvbuf) {
+                if (setsockopt(udp_socks.back(), SOL_SOCKET, SO_RCVBUF, &min_rcvbuf, sizeof(int)) != 0) {
+                    LogPrintf("UDP: setsockopt(SO_RCVBUF) failed: %s\n", strerror(errno));
+                    return false;
+                }
+
+                /* The kernel may not set the size we asked for depending on the
+                 * rmem_max setting. Double check: */
+                socklen_t optlen = sizeof(actual_rcvbuf);
+                if (getsockopt(udp_socks.back(), SOL_SOCKET, SO_RCVBUF, &actual_rcvbuf, &optlen) != 0) {
+                    LogPrintf("UDP: getsockopt(SO_RCVBUF) failed: %s\n", strerror(errno));
+                    return false;
+                }
+                actual_rcvbuf >>= 1; // getsockopt returns double the rcvbuf size
+
+                if (actual_rcvbuf < min_rcvbuf) {
+                    LogPrintf("WARNING: failed to configure UDP receive buffer size of %d bytes.\n",
+                              min_rcvbuf);
+                    LogPrintf("Please configure the maximum receive buffer size allowed by the OS.\n");
 #ifdef __linux__
-                const int tgtbuf = (2 * rcvbuf) + 8;
-                LogPrintf("UDP: You can check by running:\n\n> sysctl net.core.rmem_max\n\n"
-                          "If the maximum is less than %d, you can increase it by running:\n\n"
-                          "> sysctl -w net.core.rmem_max=%d\n\n",
-                          tgtbuf, tgtbuf);
+                    LogPrintf("You can check the current setting by running:\n\n"
+                              "> sysctl net.core.rmem_max\n\n");
+                    LogPrintf("If the current maximum is less than %d, you can increase it by running:\n\n"
+                              "> sysctl -w net.core.rmem_max=%d\n\n",
+                              min_rcvbuf, min_rcvbuf);
 #endif
-                return false;
+                }
             }
 
             /* Join multicast group, but only allow multicast packets from a
