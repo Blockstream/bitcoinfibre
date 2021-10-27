@@ -172,16 +172,14 @@ deb-packages:
       - TARGET: [
         "bullseye-amd64",
         "bullseye-i386",
+        "bullseye-arm64",
+        "bullseye-armhf",
         "buster-amd64",
         "buster-i386",
         "buster-arm64",
         "buster-armhf",
-        "stretch-amd64",
-        "stretch-i386",
-        "stretch-arm64",
-        "stretch-armhf",
-        "raspbian-buster-armhf",
-        "raspbian-stretch-armhf"
+        "raspbian-bullseye-armhf",
+        "raspbian-buster-armhf"
         ]
   variables:
     PBUILDER_CACHE_DIR: $CI_PROJECT_DIR/cache/pbuilder
