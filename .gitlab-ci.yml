@@ -221,22 +221,31 @@ rpm-packages:
   script:
     - blocksat-build -p bitcoin-satellite $CI_COMMIT_TAG --mock --mock-target $TARGET
 
-# Manually build native (amd64) Ubuntu packages when desired for testing
-# purposes on release candidates. Append a "-rc" suffix to the usual tag name in
-# order to trigger this job.
+# The Debian binary packages built locally by the "deb-packages" job are shipped
+# directly to the Aptly server (see the "aptly" job). In contrast, the Ubuntu
+# binary packages are built remotely on Launchpad based on the source package.
+# Hence, it is not necessary to build the Ubuntu packages locally. Nevertheless,
+# for testing purposes, run the build and make sure it succeeds.
 ubuntu-packages:
-  stage: test
+  extends: .pkg-build
   tags:
     - deb-packer
   image: $DOCKER_REGISTRY/satellite/blocksat-packages/ubuntu-packer
-  dependencies: []
   only:
     variables:
+      - $CI_COMMIT_TAG =~ /^v(\d+\.)(\d+)-satellite(\d+\.)(\d+\.)(\d+)$/
       - $CI_COMMIT_TAG =~ /^v(\d+\.)(\d+)-satellite(\d+\.)(\d+\.)(\d+)-rc$/
-  timeout: 12h
   parallel:
     matrix:
-      - TARGET: ["focal-amd64", "bionic-amd64"]
+      - TARGET: [
+        "focal-amd64",
+        "focal-arm64",
+        "focal-armhf",
+        "bionic-amd64",
+        "bionic-i386",
+        "bionic-arm64",
+        "bionic-armhf"
+      ]
   variables:
     PBUILDER_CACHE_DIR: $CI_PROJECT_DIR/cache/pbuilder
     ARTIFACTS_DIR: $CI_PROJECT_DIR/artifacts/
