@@ -49,6 +49,7 @@
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
+#include <future>
 #include <thread>
 
 #ifndef WIN32
@@ -58,6 +59,7 @@
 #endif
 
 #define to_millis_double(t) (std::chrono::duration_cast<std::chrono::duration<double, std::chrono::milliseconds::period>>(t).count())
+#define DIV_CEIL(a, b) (((a) + (b)-1) / (b))
 
 template <typename Duration>
 double to_seconds(Duration d)
@@ -1356,6 +1358,96 @@ std::map<std::pair<uint16_t, uint16_t>, backfill_txn_window> txn_window_map;
 std::mutex block_window_map_mutex;
 std::mutex txn_window_map_mutex;
 
+typedef std::map<int, size_t> BlockProgressMap;
+typedef BlockProgressMap::const_iterator BlockProgressMapIt;
+
+static size_t AddBlocksFromProgressMapRange(BackfillBlockWindow* pblock_window,
+                                            BlockProgressMapIt first,
+                                            BlockProgressMapIt last,
+                                            const std::pair<uint16_t, uint16_t>& tx_idx,
+                                            const FecOverhead& overhead)
+{
+    const CBlockIndex* pindex;
+    size_t n_success = 0;
+    for (auto it = first; it != last; it++) {
+        if (send_messages_break)
+            break;
+        {
+            LOCK(cs_main);
+            pindex = g_node_context->chainman->ActiveChain()[it->first];
+        }
+        if (pindex == nullptr) {
+            LogPrintf("UDP: Multicast Tx %lu-%lu - Failed to restore block %d\n",
+                      tx_idx.first, tx_idx.second, it->first);
+            continue;
+        }
+        if (pblock_window->Add(pindex, overhead, it->second))
+            n_success++;
+    }
+    return n_success;
+}
+
+static void AddBlocksFromProgressMap(BackfillBlockWindow* pblock_window,
+                                     const BlockProgressMap& height_idx_map,
+                                     const std::pair<uint16_t, uint16_t>& tx_idx,
+                                     const FecOverhead& overhead)
+{
+    LogPrintf("UDP: Multicast Tx %lu-%lu - Restoring %lu blocks from the previous session\n",
+              tx_idx.first, tx_idx.second, height_idx_map.size());
+
+    // Divide the workload into parallel asynchronous workers
+    unsigned int n_cores = std::max(std::thread::hardware_concurrency(), 1u);
+    size_t n_elems_per_task = DIV_CEIL(height_idx_map.size(), n_cores);
+    BlockProgressMapIt it = height_idx_map.begin();
+    BlockProgressMapIt it_begin = it;
+    BlockProgressMapIt it_end;
+    std::vector<std::future<size_t>> futures;
+    size_t n_elems = 0;
+    while (true) {
+        if (n_elems == n_elems_per_task || it == height_idx_map.end()) {
+            it_end = it;
+            futures.push_back(std::async(std::launch::async,
+                                         AddBlocksFromProgressMapRange,
+                                         pblock_window,
+                                         it_begin,
+                                         it_end,
+                                         tx_idx,
+                                         overhead));
+            it_begin = it;
+            n_elems = 0;
+        }
+        if (it == height_idx_map.end())
+            break;
+        n_elems++;
+        it++;
+    }
+
+    size_t n_success = 0;
+    for (auto& future : futures) {
+        n_success += future.get();
+    }
+    LogPrintf("UDP: Multicast Tx %lu-%lu - Successfully restored %lu blocks\n",
+              tx_idx.first, tx_idx.second, n_success);
+}
+
+static void AdvanceBlockIndex(const CBlockIndex*& pindex, int backfill_depth)
+{
+    LOCK(cs_main);
+    int height = pindex->nHeight + 1;
+    const int chain_height = g_node_context->chainman->ActiveHeight();
+
+    if ((height < chain_height - backfill_depth + 1) && (backfill_depth > 0))
+        height = chain_height - backfill_depth + 1;
+    else if (height > chain_height) {
+        if (backfill_depth == 0)
+            height = 0;
+        else
+            height = chain_height - backfill_depth + 1;
+    }
+
+    pindex = g_node_context->chainman->ActiveChain()[height];
+}
+
 static void MulticastBackfillThread(const CService& mcastNode,
                                     const UDPMulticastInfo* info)
 {
@@ -1410,55 +1502,29 @@ static void MulticastBackfillThread(const CService& mcastNode,
     if (info->save_tx_state) {
         UdpMulticastTxDb mcast_tx_db(tx_idx_pair);
         const auto height_idx_map = mcast_tx_db.GetBlockProgressMap();
-        LogPrintf("UDP: Multicast Tx %lu-%lu - Restoring %lu blocks from the previous session\n",
-                  tx_idx_pair.first, tx_idx_pair.second, height_idx_map.size());
-        size_t n_success = 0;
-        for (const auto elem : height_idx_map) {
-            if (send_messages_break)
-                break;
-            {
-                LOCK(cs_main);
-                pindex = g_node_context->chainman->ActiveChain()[elem.first];
-            }
-            if (pindex == nullptr) {
-                LogPrintf("UDP: Multicast Tx %lu-%lu - Failed to restore block %d\n",
-                          tx_idx_pair.first, tx_idx_pair.second, elem.first);
-                continue;
-            }
-            pblock_window->Add(pindex, info->overhead_rep_blks, elem.second);
-            n_success++;
-        }
-        LogPrintf("UDP: Multicast Tx %lu-%lu - Successfully restored %lu blocks\n",
-                  tx_idx_pair.first, tx_idx_pair.second, n_success);
+        AddBlocksFromProgressMap(pblock_window.get(), height_idx_map, tx_idx_pair, info->overhead_rep_blks);
+
         // If the previous session did not terminate gracefully, some restored
         // blocks can be in fully transmitted state but not yet removed from the
         // Tx window. Clean up those blocks now.
         pblock_window->Cleanup();
+
+        // Override the starting CBlockIndex so that the main loop continues
+        // from the block following the highest recovered height
+        if (height_idx_map.size() > 0) {
+            LOCK(cs_main);
+            const auto last_height_idx_it = height_idx_map.rbegin();
+            pindex = g_node_context->chainman->ActiveChain()[last_height_idx_it->first];
+            AdvanceBlockIndex(pindex, backfill_depth);
+        }
     }
 
     /* Main loop */
     while (!send_messages_break) {
-        /* Fill FEC chunk interleaving window */
+        /* Fill blocks within the FEC chunk interleaving window */
         while ((pblock_window->Size() < info->interleave_len) && (!send_messages_break)) {
             pblock_window->Add(pindex, info->overhead_rep_blks);
-
-            /* Advance to the next block to be inserted in the block window */
-            {
-                LOCK(cs_main);
-                int height = pindex->nHeight + 1;
-                const int chain_height = g_node_context->chainman->ActiveHeight();
-
-                if ((height < chain_height - backfill_depth + 1) && (backfill_depth > 0))
-                    height = chain_height - backfill_depth + 1;
-                else if (height > chain_height) {
-                    if (backfill_depth == 0)
-                        height = 0;
-                    else
-                        height = chain_height - backfill_depth + 1;
-                }
-
-                pindex = g_node_context->chainman->ActiveChain()[height];
-            }
+            AdvanceBlockIndex(pindex, backfill_depth);
         }
 
         /* Send window of interleaved chunks */
