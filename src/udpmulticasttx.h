@@ -46,13 +46,15 @@ public:
      * @param pindex Pointer to block to be added to the Tx window.
      * @param overhead FEC overhead to add on transmission.
      * @param start_idx Starting message index for transmission.
+     * 
+     * @return bool Whether the block was successfully added.
      *
      * @note By default, start_idx=0, which means the full BackfillBlock::msgs
      * vector is transmitted. In contrast, when resuming the transmission
      * initiated on a previous session, start_idx should be set to the index
      * where the previous session stopped.
      */
-    void Add(const CBlockIndex* pindex, const FecOverhead& overhead, size_t start_idx = 0);
+    bool Add(const CBlockIndex* pindex, const FecOverhead& overhead, size_t start_idx = 0);
 
     /**
      * @brief Get the next message to be transmitted for a given block in the window.
