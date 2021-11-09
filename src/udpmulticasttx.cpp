@@ -9,7 +9,7 @@ BackfillBlockWindow::BackfillBlockWindow(std::pair<uint16_t, uint16_t> tx_idx,
                                                                m_save_progress(save_progress),
                                                                m_db(tx_idx){};
 
-void BackfillBlockWindow::Add(const CBlockIndex* pindex, const FecOverhead& overhead, size_t start_idx)
+bool BackfillBlockWindow::Add(const CBlockIndex* pindex, const FecOverhead& overhead, size_t start_idx)
 {
     // Add an empty backfill block object to the protected block window map
     std::unique_lock window_lock(m_mutex);
@@ -20,7 +20,7 @@ void BackfillBlockWindow::Add(const CBlockIndex* pindex, const FecOverhead& over
     // The given block height may already exist in the Tx window. for instance,
     // if the Tx loop is back on a block that is still in transmission.
     if (!res.second)
-        return;
+        return false;
 
     // If not, proceed to fill the contents of this block
     const auto it = res.first;
@@ -56,6 +56,8 @@ void BackfillBlockWindow::Add(const CBlockIndex* pindex, const FecOverhead& over
              block_hash.GetUint64(0),
              pindex->nHeight,
              it->second.msgs.size());
+
+    return true;
 }
 
 const UDPMessage& BackfillBlockWindow::GetNextMsg(int height, const BackfillBlock& block)
