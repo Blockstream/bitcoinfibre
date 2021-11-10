@@ -1,17 +1,28 @@
 Bitcoin Satellite
 =====================================
 
-This project is a fork from [FIBRE (Fast Internet Bitcoin Relay
-Engine)](https://github.com/bitcoinfibre/bitcoinfibre) and, consequently, also a
-fork of [Bitcoin Core](https://bitcoincore.org). It features a version of the
-bitcoind application with support for satellite-optimized one-way transport of
-blocks sent over UDP with multicast addressing. It is designed to be used by the
-transmitters and receivers of the Blockstream Satellite network.
+Bitcoin Satellite is a fork of [Bitcoin Core](https://bitcoincore.org) featuring
+support for satellite-optimized transport of blocks over UDP with multicast
+addressing. It is designed to be used by the transmitters and receivers of the
+[Blockstream Satellite](https://blockstream.com/satellite) network. It is also
+continuously updated to the latest versions of Bitcoin Core and preserves the
+full Core functionality while adding the UDP multicast transport features on
+top.
 
-https://blockstream.com/satellite
+A Bitcoin Satellite node can connect to the regular Bitcoin peer-to-peer network
+and UDP multicast transmitters, such as the transmitters feeding the Blockstream
+Satellite network. The UDP implementation leverages the error-resilient and
+low-latency one-way UDP transport mechanism first introduced by the [FIBRE (Fast
+Internet Bitcoin Relay Engine)](https://github.com/bitcoinfibre/bitcoinfibre)
+project.
 
-For an immediately usable, binary version of the Bitcoin Core software, see
-https://bitcoincore.org/en/download/.
+Please refer to the [Blockstream Satellite User
+Guide](https://blockstream.github.io/satellite/doc/bitcoin.html) for quick
+installation instructions.
+
+For detailed technical documentation, please refer to the
+[Wiki](https://github.com/Blockstream/bitcoinsatellite/wiki) or the [PDF
+article](https://github.com/Blockstream/bitcoinsatellite/wiki/doc/bitcoin-satellite.pdf).
 
 Further information about Bitcoin Core is available in the [doc folder](/doc).
 
