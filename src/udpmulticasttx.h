@@ -46,7 +46,7 @@ public:
      * @param pindex Pointer to block to be added to the Tx window.
      * @param overhead FEC overhead to add on transmission.
      * @param start_idx Starting message index for transmission.
-     * 
+     *
      * @return bool Whether the block was successfully added.
      *
      * @note By default, start_idx=0, which means the full BackfillBlock::msgs
@@ -112,6 +112,12 @@ public:
     {
         return m_map.size();
     }
+};
+
+
+struct BackfillTxnWindow {
+    std::mutex m_mutex;
+    uint64_t m_tx_count = 0;
 };
 
 #endif

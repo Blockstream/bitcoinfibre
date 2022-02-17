@@ -1381,13 +1381,8 @@ UniValue TxQueueInfoToJSON()
     return ret;
 }
 
-struct backfill_txn_window {
-    std::mutex mutex;
-    uint64_t tx_count = 0;
-};
-
 std::map<std::pair<uint16_t, uint16_t>, std::shared_ptr<BackfillBlockWindow>> block_window_map;
-std::map<std::pair<uint16_t, uint16_t>, backfill_txn_window> txn_window_map;
+std::map<std::pair<uint16_t, uint16_t>, BackfillTxnWindow> txn_window_map;
 
 std::mutex block_window_map_mutex;
 std::mutex txn_window_map_mutex;
@@ -1698,8 +1693,8 @@ static void MulticastTxnThread(const CService& mcastNode,
                 SendMessage(msg, msg_size, queue, queue.buffs[2], mcastNode, multicast_checksum_magic);
             }
 
-            std::unique_lock<std::mutex> lock(txn_window.mutex);
-            txn_window.tx_count++;
+            std::unique_lock<std::mutex> lock(txn_window.m_mutex);
+            txn_window.m_tx_count++;
         }
     }
 }
@@ -1712,8 +1707,8 @@ UniValue TxnTxInfoToJSON()
         const std::string key = std::to_string(w.first.first) + "-" +
                                 std::to_string(w.first.second);
         UniValue info(UniValue::VOBJ);
-        std::unique_lock<std::mutex> lock(w.second.mutex);
-        info.pushKV("tx_count", w.second.tx_count);
+        std::unique_lock<std::mutex> lock(w.second.m_mutex);
+        info.pushKV("tx_count", w.second.m_tx_count);
         ret.__pushKV(key, info);
     }
     return ret;
