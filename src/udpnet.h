@@ -31,14 +31,14 @@ enum UDPMessageType {
     MSG_TYPE_SYN = 0,
     MSG_TYPE_KEEPALIVE = 1, // aka SYN_ACK
     MSG_TYPE_DISCONNECT = 2,
-    MSG_TYPE_BLOCK_HEADER = 3,
+    MSG_TYPE_BLOCK_HEADER_AND_TXIDS = 3,
     MSG_TYPE_BLOCK_CONTENTS = 4,
     MSG_TYPE_PING = 5,
     MSG_TYPE_PONG = 6,
     MSG_TYPE_TX_CONTENTS = 7,
 };
 
-#define IS_BLOCK_HEADER_MSG(msg) ((msg.header.msg_type & UDP_MSG_TYPE_TYPE_MASK) == MSG_TYPE_BLOCK_HEADER)
+#define IS_BLOCK_HEADER_AND_TXIDS_MSG(msg) ((msg.header.msg_type & UDP_MSG_TYPE_TYPE_MASK) == MSG_TYPE_BLOCK_HEADER_AND_TXIDS)
 #define IS_BLOCK_CONTENTS_MSG(msg) ((msg.header.msg_type & UDP_MSG_TYPE_TYPE_MASK) == MSG_TYPE_BLOCK_CONTENTS)
 #define IS_TX_CONTENTS_MSG(msg) ((msg.header.msg_type & UDP_MSG_TYPE_TYPE_MASK) == MSG_TYPE_TX_CONTENTS)
 
@@ -48,7 +48,7 @@ static const uint8_t UDP_MSG_TYPE_TYPE_MASK = 0b00011111;
 struct __attribute__((packed)) UDPMessageHeader {
     uint64_t chk1 = 0;
     uint64_t chk2 = 0;
-    uint8_t msg_type; // A UDPMessageType + flags
+    uint8_t msg_type; // UDPMessageType + UDPBlockMessageFlags(s)
 };
 static_assert(sizeof(UDPMessageHeader) == 17, "__attribute__((packed)) must work");
 
@@ -65,7 +65,7 @@ enum UDPBlockMessageFlags { // Put in the msg_type
 #define IS_TIP_BLOCK(msg) (msg.header.msg_type & TIP_BLOCK)
 #define IS_EMPTY_BLOCK(msg) (msg.header.msg_type & EMPTY_BLOCK)
 
-struct __attribute__((packed)) UDPBlockMessage { // (also used for txn)
+struct __attribute__((packed)) UDPFecMessage {
     /**
      * First 8 bytes of blockhash, interpreted in LE (note that this will not include 0s, those are at the end).
      * For txn, first 8 bytes of tx, though this should change in the future.
@@ -77,16 +77,16 @@ struct __attribute__((packed)) UDPBlockMessage { // (also used for txn)
     uint32_t chunk_id : 24;
     unsigned char data[FEC_CHUNK_SIZE];
 };
-static_assert(sizeof(UDPBlockMessage) == MAX_UDP_MESSAGE_LENGTH, "Messages must be == MAX_UDP_MESSAGE_LENGTH");
-static const size_t udp_blk_msg_header_size = sizeof(UDPBlockMessage) - FEC_CHUNK_SIZE;
+static_assert(sizeof(UDPFecMessage) == MAX_UDP_MESSAGE_LENGTH, "FEC messages must be == MAX_UDP_MESSAGE_LENGTH");
+static const size_t udp_fec_msg_header_size = sizeof(UDPFecMessage) - FEC_CHUNK_SIZE;
 
 struct __attribute__((packed)) UDPMessage {
     UDPMessageHeader header;
     union __attribute__((packed)) {
         unsigned char message[MAX_UDP_MESSAGE_LENGTH + 1];
         uint64_t longint;
-        struct UDPBlockMessage block;
-    } msg;
+        struct UDPFecMessage fec;
+    } payload;
 };
 static_assert(sizeof(UDPMessage) == 1185, "__attribute__((packed)) must work");
 #define PACKET_SIZE (sizeof(UDPMessage) + 40 + 8)

@@ -891,7 +891,7 @@ static void read_socket_func(evutil_socket_t fd, short event, void* arg)
         }
         const UDPMulticastInfo& mcast_info = itm->second;
 
-        if (msg_type_masked == MSG_TYPE_BLOCK_HEADER ||
+        if (msg_type_masked == MSG_TYPE_BLOCK_HEADER_AND_TXIDS ||
             msg_type_masked == MSG_TYPE_BLOCK_CONTENTS ||
             msg_type_masked == MSG_TYPE_TX_CONTENTS) {
             if (!HandleBlockTxMessage(msg, sizeof(UDPMessage) - 1, it->first, it->second, start, g_node_context))
@@ -912,7 +912,7 @@ static void read_socket_func(evutil_socket_t fd, short event, void* arg)
             return;
         }
 
-        state.protocolVersion = le64toh(msg.msg.longint);
+        state.protocolVersion = le64toh(msg.payload.longint);
         if (PROTOCOL_VERSION_MIN(state.protocolVersion) > PROTOCOL_VERSION_CUR(UDP_PROTOCOL_VERSION)) {
             LogPrintf("UDP: Got min protocol version we didnt understand (%u:%u) from %s\n", PROTOCOL_VERSION_MIN(state.protocolVersion), PROTOCOL_VERSION_CUR(state.protocolVersion), it->first.ToString());
             send_and_disconnect(it);
@@ -942,7 +942,7 @@ static void read_socket_func(evutil_socket_t fd, short event, void* arg)
     if (!(state.state & STATE_INIT_COMPLETE))
         return;
 
-    if (msg_type_masked == MSG_TYPE_BLOCK_HEADER || msg_type_masked == MSG_TYPE_BLOCK_CONTENTS) {
+    if (msg_type_masked == MSG_TYPE_BLOCK_HEADER_AND_TXIDS || msg_type_masked == MSG_TYPE_BLOCK_CONTENTS) {
         if (!HandleBlockTxMessage(msg, res, it->first, it->second, start, g_node_context)) {
             send_and_disconnect(it);
             return;
@@ -968,7 +968,7 @@ static void read_socket_func(evutil_socket_t fd, short event, void* arg)
             return;
         }
 
-        uint64_t nonce = le64toh(msg.msg.longint);
+        uint64_t nonce = le64toh(msg.payload.longint);
         std::map<uint64_t, int64_t>::iterator nonceit = state.ping_times.find(nonce);
         if (nonceit == state.ping_times.end()) // Possibly duplicated packet
             LogPrintf("UDP: Got PONG message without PING from %s\n", it->first.ToString());
@@ -1025,7 +1025,7 @@ static void timer_func(evutil_socket_t fd, short event, void* arg)
 
         if (!(state.state & STATE_GOT_SYN_ACK) && origLastSendTime < now - 1000) {
             msg.header.msg_type = MSG_TYPE_SYN;
-            msg.msg.longint = htole64(UDP_PROTOCOL_VERSION);
+            msg.payload.longint = htole64(UDP_PROTOCOL_VERSION);
             SendMessage(msg, sizeof(UDPMessageHeader) + 8, false, *it);
             state.lastSendTime = now;
         }
@@ -1039,7 +1039,7 @@ static void timer_func(evutil_socket_t fd, short event, void* arg)
         if ((state.state & STATE_INIT_COMPLETE) == STATE_INIT_COMPLETE && state.lastPingTime < now - 1000 * 60 * 15) {
             uint64_t pingnonce = GetRand(std::numeric_limits<uint64_t>::max());
             msg.header.msg_type = MSG_TYPE_PING;
-            msg.msg.longint = htole64(pingnonce);
+            msg.payload.longint = htole64(pingnonce);
             SendMessage(msg, sizeof(UDPMessageHeader) + 8, false, *it);
             state.ping_times[pingnonce] = GetTimeMicros();
             state.lastPingTime = now;
@@ -1225,7 +1225,7 @@ static void do_send_messages()
                 // Set the checksum and scramble the data
                 if (next_tx->msg.header.chk1 == 0 && next_tx->msg.header.chk2 == 0) {
                     if (queue.multicast) {
-                        assert(IS_BLOCK_HEADER_MSG(next_tx->msg) ||
+                        assert(IS_BLOCK_HEADER_AND_TXIDS_MSG(next_tx->msg) ||
                                IS_BLOCK_CONTENTS_MSG(next_tx->msg) ||
                                IS_TX_CONTENTS_MSG(next_tx->msg));
                     }
@@ -1792,7 +1792,7 @@ void MulticastTxBlock(const int height, codec_version_t codec_version)
         for (const auto& msg : msgs) {
             SendMessage(
                 msg,
-                sizeof(UDPMessageHeader) + sizeof(UDPBlockMessage),
+                sizeof(UDPMessageHeader) + sizeof(UDPFecMessage),
                 false /* low priority */,
                 std::get<0>(node.first),
                 multicast_checksum_magic,
