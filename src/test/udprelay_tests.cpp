@@ -152,7 +152,7 @@ BOOST_FIXTURE_TEST_CASE(test_non_tip_ooob_decoding, UdpRelayTestingSetup)
     int n_header_msgs = 0;
     int n_body_msgs = 0;
     for (size_t i = 0; i < msgs.size(); i++) {
-        if (IS_BLOCK_HEADER_MSG(msgs[i]))
+        if (IS_BLOCK_HEADER_AND_TXIDS_MSG(msgs[i]))
             n_header_msgs++;
         else
             n_body_msgs++;
@@ -163,7 +163,7 @@ BOOST_FIXTURE_TEST_CASE(test_non_tip_ooob_decoding, UdpRelayTestingSetup)
     // Feed the header messages first so that the header object becomes
     // decodable while the body object remains pending.
     for (size_t i = 0; i < msgs.size(); i++) {
-        if (IS_BLOCK_HEADER_MSG(msgs[i])) {
+        if (IS_BLOCK_HEADER_AND_TXIDS_MSG(msgs[i])) {
             HandleBlockMessage(msgs[i]);
         }
     }
@@ -242,7 +242,7 @@ BOOST_FIXTURE_TEST_CASE(test_tip_ooob_decoding, UdpRelayTestingSetup)
 
     // Feed the header messages so that the header FEC object becomes decodable
     for (size_t i = 0; i < msgs.size(); i++) {
-        if (IS_BLOCK_HEADER_MSG(msgs[i])) {
+        if (IS_BLOCK_HEADER_AND_TXIDS_MSG(msgs[i])) {
             HandleBlockMessage(msgs[i]);
         }
     }
@@ -363,7 +363,7 @@ BOOST_FIXTURE_TEST_CASE(test_non_tip_ooob_body_first, UdpRelayTestingSetup)
 
     // Next, feed the header messages
     for (size_t i = 0; i < msgs.size(); i++) {
-        if (IS_BLOCK_HEADER_MSG(msgs[i])) {
+        if (IS_BLOCK_HEADER_AND_TXIDS_MSG(msgs[i])) {
             HandleBlockMessage(msgs[i]);
         }
     }
@@ -479,7 +479,7 @@ BOOST_FIXTURE_TEST_CASE(test_tip_and_non_tip_mixing2, UdpRelayTestingSetup)
 
     // Feed the header chunks as tip chunks
     for (size_t i = 0; i < msgs.size(); i++) {
-        if (IS_BLOCK_HEADER_MSG(msgs[i])) {
+        if (IS_BLOCK_HEADER_AND_TXIDS_MSG(msgs[i])) {
             msgs[i].header.msg_type |= TIP_BLOCK;
             HandleBlockMessage(msgs[i]);
         }
@@ -524,7 +524,7 @@ BOOST_FIXTURE_TEST_CASE(test_tip_and_non_tip_mixing3, UdpRelayTestingSetup)
 
     // Feed the header chunks as non-tip chunks
     for (size_t i = 0; i < msgs.size(); i++) {
-        if (IS_BLOCK_HEADER_MSG(msgs[i])) {
+        if (IS_BLOCK_HEADER_AND_TXIDS_MSG(msgs[i])) {
             HandleBlockMessage(msgs[i]);
         }
     }
@@ -570,7 +570,7 @@ BOOST_FIXTURE_TEST_CASE(test_tip_and_non_tip_mixing4, UdpRelayTestingSetup)
 
     // Feed the header chunks as non-tip chunks
     for (size_t i = 0; i < msgs.size(); i++) {
-        if (IS_BLOCK_HEADER_MSG(msgs[i])) {
+        if (IS_BLOCK_HEADER_AND_TXIDS_MSG(msgs[i])) {
             HandleBlockMessage(msgs[i]);
         }
     }
@@ -728,7 +728,7 @@ BOOST_FIXTURE_TEST_CASE(test_recovery_of_decodable_header_state, UdpRelayTesting
     std::vector<UDPMessage> msgs;
     UDPFillMessagesFromBlock(m_test_block.block, msgs, m_test_block.height, overhead);
     for (size_t i = 0; i < msgs.size(); i++) {
-        if (IS_BLOCK_HEADER_MSG(msgs[i])) {
+        if (IS_BLOCK_HEADER_AND_TXIDS_MSG(msgs[i])) {
             HandleBlockMessage(msgs[i]);
         }
     }

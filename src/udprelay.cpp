@@ -109,8 +109,8 @@ static inline void SendMessageToNode(const UDPMessage& msg, unsigned int length,
         return;
 
     const bool is_blk_content_chunk = (msg.header.msg_type & UDP_MSG_TYPE_TYPE_MASK) == MSG_TYPE_BLOCK_CONTENTS;
-    const size_t n_chunks = DIV_CEIL(le32toh(msg.msg.block.obj_length), sizeof(UDPBlockMessage::data));
-    const uint32_t chunk_id = le32toh(msg.msg.block.chunk_id);
+    const size_t n_chunks = DIV_CEIL(le32toh(msg.payload.fec.obj_length), sizeof(UDPFecMessage::data));
+    const uint32_t chunk_id = le32toh(msg.payload.fec.chunk_id);
 
     const auto chunks_avail_it = it->second.chunks_avail.find(hash_prefix);
     bool use_chunks_avail = chunks_avail_it != it->second.chunks_avail.end();
@@ -138,13 +138,13 @@ static void SendMessageToAllNodes(const UDPMessage& msg, unsigned int length, bo
 
 static size_t CopyMessageData(UDPMessage& msg, const std::vector<unsigned char>& data, size_t msg_chunks, uint16_t chunk_id)
 {
-    msg.msg.block.chunk_id = htole16(chunk_id);
+    msg.payload.fec.chunk_id = htole16(chunk_id);
 
-    size_t msg_size = (chunk_id == msg_chunks - 1) ? (data.size() % FEC_CHUNK_SIZE) : sizeof(msg.msg.block.data);
+    size_t msg_size = (chunk_id == msg_chunks - 1) ? (data.size() % FEC_CHUNK_SIZE) : sizeof(msg.payload.fec.data);
     if (msg_size == 0) msg_size = FEC_CHUNK_SIZE;
-    memcpy(msg.msg.block.data, &data[chunk_id * FEC_CHUNK_SIZE], msg_size);
-    if (msg_size != sizeof(msg.msg.block.data))
-        memset(&msg.msg.block.data[msg_size], 0, sizeof(msg.msg.block.data) - msg_size);
+    memcpy(msg.payload.fec.data, &data[chunk_id * FEC_CHUNK_SIZE], msg_size);
+    if (msg_size != sizeof(msg.payload.fec.data))
+        memset(&msg.payload.fec.data[msg_size], 0, sizeof(msg.payload.fec.data) - msg_size);
     return msg_size;
 }
 
@@ -166,13 +166,13 @@ static void RelayUncodedChunks(UDPMessage& msg, const std::vector<unsigned char>
 
         for (auto it = mapUDPNodes.begin(); it != mapUDPNodes.end(); it++) {
             if (it->second.connection.udp_mode == udp_mode_t::unicast)
-                SendMessageToNode(msg, sizeof(UDPMessageHeader) + sizeof(UDPBlockMessage), high_prio, hash_prefix, it);
+                SendMessageToNode(msg, sizeof(UDPMessageHeader) + sizeof(UDPFecMessage), high_prio, hash_prefix, it);
         }
 
         for (const auto& node : multicast_nodes()) {
             if (node.second.tx && node.second.relay_new_blks) {
                 SendMessage(msg,
-                            sizeof(UDPMessageHeader) + sizeof(UDPBlockMessage),
+                            sizeof(UDPMessageHeader) + sizeof(UDPFecMessage),
                             high_prio, std::get<0>(node.first),
                             multicast_checksum_magic, node.second.group);
             }
@@ -207,8 +207,8 @@ static void CopyFECData(UDPMessage& msg, DataFECer& fec, size_t array_idx, bool 
     // TODO: Handle errors?
     assert(ret);
     assert(fec.fec_data.second[array_idx] < (1 << 24));
-    msg.msg.block.chunk_id = htole32(fec.fec_data.second[array_idx]);
-    memcpy(msg.msg.block.data, &fec.fec_data.first[array_idx], FEC_CHUNK_SIZE);
+    msg.payload.fec.chunk_id = htole32(fec.fec_data.second[array_idx]);
+    memcpy(msg.payload.fec.data, &fec.fec_data.first[array_idx], FEC_CHUNK_SIZE);
 }
 
 /**
@@ -231,7 +231,7 @@ static void RelayFECedChunks(UDPMessage& msg, DataFECer& fec, const size_t high_
         for (auto it = mapUDPNodes.begin(); it != mapUDPNodes.end(); it++) {
             if (it->second.connection.udp_mode == udp_mode_t::unicast) {
                 CopyFECData(msg, fec, i, true /*regenerate chunk on index i*/);
-                SendMessageToNode(msg, sizeof(UDPMessageHeader) + sizeof(UDPBlockMessage), high_prio, hash_prefix, it);
+                SendMessageToNode(msg, sizeof(UDPMessageHeader) + sizeof(UDPFecMessage), high_prio, hash_prefix, it);
             }
         }
 
@@ -240,7 +240,7 @@ static void RelayFECedChunks(UDPMessage& msg, DataFECer& fec, const size_t high_
             if (node.second.tx && node.second.relay_new_blks) {
                 CopyFECData(msg, fec, i, true /*regenerate chunk on index i*/);
                 SendMessage(msg,
-                            sizeof(UDPMessageHeader) + sizeof(UDPBlockMessage),
+                            sizeof(UDPMessageHeader) + sizeof(UDPFecMessage),
                             high_prio, std::get<0>(node.first),
                             multicast_checksum_magic, node.second.group);
             }
@@ -253,8 +253,8 @@ static inline void FillCommonMessageHeader(UDPMessage& msg, const uint64_t hash_
     msg.header.chk1 = 0;
     msg.header.chk2 = 0;
     msg.header.msg_type = type;
-    msg.msg.block.hash_prefix = htole64(hash_prefix);
-    msg.msg.block.obj_length = htole32(obj_size);
+    msg.payload.fec.hash_prefix = htole64(hash_prefix);
+    msg.payload.fec.obj_length = htole32(obj_size);
 }
 
 static inline void FillBlockMessageHeader(UDPMessage& msg, const uint64_t hash_prefix, UDPMessageType type, const size_t obj_size, uint8_t flags = HAVE_BLOCK)
@@ -284,7 +284,7 @@ static void RelayChunks(const uint256& blockhash, UDPMessageType type, const std
     // For header messages, the actual data is more useful.
     // For block contents, the probably generated most chunks from the header + mempool.
     // We send in usefulness-first order
-    if (type == MSG_TYPE_BLOCK_HEADER) {
+    if (type == MSG_TYPE_BLOCK_HEADER_AND_TXIDS) {
         // Block headers are all high priority for the data itself,
         // and 3 packets of high priority for the FEC, after that if
         // we have block data available it should be sent.
@@ -312,7 +312,7 @@ static void RelayChunks(const uint256& blockhash, UDPMessageType type, const std
     if (fBench) {
         const size_t msg_chunks = DIV_CEIL(data.size(), FEC_CHUNK_SIZE);
 
-        if (type == MSG_TYPE_BLOCK_HEADER) {
+        if (type == MSG_TYPE_BLOCK_HEADER_AND_TXIDS) {
             LogPrintf("UDP: %s: Finished queuing of %lu header chunks for tx - took %lf ms\n",
                       __func__, (msg_chunks + fec.fec_chunks),
                       to_millis_double(t_coded - t_start));
@@ -482,7 +482,7 @@ void UDPRelayBlock(const CBlock& block, int nHeight)
         if (setBlocksRelayed.count(hash_prefix))
             return;
 
-        RelayChunks(hashBlock, MSG_TYPE_BLOCK_HEADER, header_data, header_fecer);
+        RelayChunks(hashBlock, MSG_TYPE_BLOCK_HEADER_AND_TXIDS, header_data, header_fecer);
 
         std::chrono::steady_clock::time_point header_sent;
         if (fBench)
@@ -576,7 +576,7 @@ void UDPFillMessagesFromTx(const CTransaction& tx, std::vector<std::pair<UDPMess
     for (size_t i = 0; i < data_chunks; i++) {
         FillCommonMessageHeader(msgs[i].first, hash_prefix, MSG_TYPE_TX_CONTENTS, data.size());
         const size_t chunk_size = CopyMessageData(msgs[i].first, data, data_chunks, i);
-        msgs[i].second = sizeof(UDPMessageHeader) + udp_blk_msg_header_size + chunk_size;
+        msgs[i].second = sizeof(UDPMessageHeader) + udp_fec_msg_header_size + chunk_size;
     }
 }
 
@@ -680,7 +680,7 @@ void UDPFillMessagesFromBlock(const CBlock& block, std::vector<UDPMessage>& msgs
     int offset = msgs.size();
     msgs.resize(offset + n_header_chunks);
     for (size_t i = 0; i < n_header_chunks; i++) {
-        FillBlockMessageHeader(msgs[offset + i], hash_prefix, MSG_TYPE_BLOCK_HEADER, header_data.size(), flags);
+        FillBlockMessageHeader(msgs[offset + i], hash_prefix, MSG_TYPE_BLOCK_HEADER_AND_TXIDS, header_data.size(), flags);
         CopyFECData(msgs[offset + i], header_fecer, i);
     }
 
@@ -691,7 +691,7 @@ void UDPFillMessagesFromBlock(const CBlock& block, std::vector<UDPMessage>& msgs
         offset = msgs.size();
         msgs.resize(offset + header_overhead);
         for (size_t i = 0; i < header_overhead; i++) {
-            FillBlockMessageHeader(msgs[offset + i], hash_prefix, MSG_TYPE_BLOCK_HEADER, header_data.size(), flags);
+            FillBlockMessageHeader(msgs[offset + i], hash_prefix, MSG_TYPE_BLOCK_HEADER_AND_TXIDS, header_data.size(), flags);
             CopyFECData(msgs[offset + i], header_fecer, n_header_chunks + i);
         }
         return;
@@ -722,7 +722,7 @@ void UDPFillMessagesFromBlock(const CBlock& block, std::vector<UDPMessage>& msgs
     offset = msgs.size();
     msgs.resize(offset + header_overhead);
     for (size_t i = 0; i < header_overhead; i++) {
-        FillBlockMessageHeader(msgs[offset + i], hash_prefix, MSG_TYPE_BLOCK_HEADER, header_data.size(), flags);
+        FillBlockMessageHeader(msgs[offset + i], hash_prefix, MSG_TYPE_BLOCK_HEADER_AND_TXIDS, header_data.size(), flags);
         CopyFECData(msgs[offset + i], header_fecer, n_header_chunks + i);
     }
 
@@ -739,7 +739,7 @@ void UDPFillMessagesFromBlock(const CBlock& block, std::vector<UDPMessage>& msgs
 
 static std::mutex block_process_mutex;
 static std::condition_variable block_process_cv;
-static std::atomic_bool block_process_shutdown(false);
+static std::atomic_bool process_thread_shutdown(false);
 static std::queue<std::pair<std::pair<uint64_t, CService>, std::shared_ptr<PartialBlockData>>> block_process_queue;
 static size_t queue_size_warn = 10; // Print queue size when it exceeds this
 
@@ -766,10 +766,10 @@ static void ProcessBlockThread(ChainstateManager* chainman)
 {
     while (true) {
         std::unique_lock<std::mutex> process_lock(block_process_mutex);
-        while (block_process_queue.empty() && !block_process_shutdown)
+        while (block_process_queue.empty() && !process_thread_shutdown)
             block_process_cv.wait(process_lock);
 
-        if (block_process_shutdown)
+        if (process_thread_shutdown)
             return;
 
         auto process_block = block_process_queue.front();
@@ -1161,7 +1161,7 @@ void BlockRecvInit(ChainstateManager* chainman)
 void BlockRecvShutdown()
 {
     if (process_block_thread) {
-        block_process_shutdown = true;
+        process_thread_shutdown = true;
         block_process_cv.notify_all();
         process_block_thread->join();
         process_block_thread.reset();
@@ -1309,13 +1309,13 @@ static std::string GetChunkFilePrefix(const CService& peer, uint64_t hash_prefix
 
 bool PartialBlockData::Init(const UDPMessage& msg)
 {
-    assert(IS_BLOCK_HEADER_MSG(msg) || IS_BLOCK_CONTENTS_MSG(msg));
-    const uint32_t obj_length = msg.msg.block.obj_length;
+    assert(IS_BLOCK_HEADER_AND_TXIDS_MSG(msg) || IS_BLOCK_CONTENTS_MSG(msg));
+    const uint32_t obj_length = msg.payload.fec.obj_length;
     if (obj_length > MAX_BLOCK_SERIALIZED_SIZE * MAX_CHUNK_CODED_BLOCK_SIZE_FACTOR)
         return false;
 
     tip_blk |= IS_TIP_BLOCK(msg); // true if at least one msg flags true (see HandleBlockTxMessage)
-    const bool is_blk_header_chunk = IS_BLOCK_HEADER_MSG(msg);
+    const bool is_blk_header_chunk = IS_BLOCK_HEADER_AND_TXIDS_MSG(msg);
 
     // When receiving a block at the tip of the blockchain, load FEC chunks
     // directly in memory. They are expected to remain there only briefly until
@@ -1329,7 +1329,7 @@ bool PartialBlockData::Init(const UDPMessage& msg)
     // across bitcoind sessions. The name includes the two unique identifiers
     // used to map partial blocks in mapPartialBlocks: the peer (potentially a
     // "trusted peer") and the block hash prefix.
-    std::string chunk_file_prefix = GetChunkFilePrefix(peer, msg.msg.block.hash_prefix);
+    std::string chunk_file_prefix = GetChunkFilePrefix(peer, msg.payload.fec.hash_prefix);
 
     if (is_blk_header_chunk && !header_initialized) {
         header_decoder = FECDecoder(
@@ -1422,11 +1422,11 @@ void PartialBlockData::ReconstructBlockFromDecoder()
 {
     assert(body_decoder.DecodeReady());
 
-    for (uint32_t i = 0; i < DIV_CEIL(blk_len, sizeof(UDPBlockMessage::data)); i++) {
+    for (uint32_t i = 0; i < DIV_CEIL(blk_len, sizeof(UDPFecMessage::data)); i++) {
         if (!block_data.IsChunkAvailable(i)) {
             const void* data_ptr = body_decoder.GetDataPtr(i);
             assert(data_ptr);
-            memcpy(block_data.GetChunk(i), data_ptr, sizeof(UDPBlockMessage::data));
+            memcpy(block_data.GetChunk(i), data_ptr, sizeof(UDPFecMessage::data));
             block_data.MarkChunkAvailable(i);
         }
     }
@@ -1464,38 +1464,38 @@ std::string PartialBlockData::GetSenders()
 
 static void BlockMsgHToLE(UDPMessage& msg)
 {
-    msg.msg.block.hash_prefix = htole64(msg.msg.block.hash_prefix);
-    msg.msg.block.obj_length = htole32(msg.msg.block.obj_length);
-    msg.msg.block.chunk_id = htole32(msg.msg.block.chunk_id);
+    msg.payload.fec.hash_prefix = htole64(msg.payload.fec.hash_prefix);
+    msg.payload.fec.obj_length = htole32(msg.payload.fec.obj_length);
+    msg.payload.fec.chunk_id = htole32(msg.payload.fec.chunk_id);
 }
 
-static bool HandleTx(UDPMessage& msg, size_t length, const CService& node, UDPConnectionState& state, const node::NodeContext* const node_context)
+static bool HandleTx(UDPMessage& msg, const CService& node, UDPConnectionState& state, const node::NodeContext* const node_context)
 {
-    if (msg.msg.block.obj_length > 400000) {
-        LogPrintf("UDP: Got massive tx obj_length of %u\n", msg.msg.block.obj_length);
+    if (msg.payload.fec.obj_length > 400000) {
+        LogPrintf("UDP: Got massive tx obj_length of %u\n", msg.payload.fec.obj_length);
         return false;
     }
 
-    if (state.tx_in_flight_hash_prefix != msg.msg.block.hash_prefix) {
-        state.tx_in_flight_hash_prefix = msg.msg.block.hash_prefix;
-        state.tx_in_flight_msg_size = msg.msg.block.obj_length;
-        state.tx_in_flight.reset(new FECDecoder(msg.msg.block.obj_length, MemoryUsageMode::USE_MEMORY));
+    if (state.tx_in_flight_hash_prefix != msg.payload.fec.hash_prefix) {
+        state.tx_in_flight_hash_prefix = msg.payload.fec.hash_prefix;
+        state.tx_in_flight_msg_size = msg.payload.fec.obj_length;
+        state.tx_in_flight.reset(new FECDecoder(msg.payload.fec.obj_length, MemoryUsageMode::USE_MEMORY));
         // NOTE: always place txn chunks directly in memory instead of disk. The
         // FEC decoding is expected to be quick in this case.
     }
 
     if (!state.tx_in_flight) return true; // Already finished decode
 
-    if (state.tx_in_flight_msg_size != msg.msg.block.obj_length) {
-        LogPrintf("UDP: Got inconsistent object length for tx %lu\n", msg.msg.block.hash_prefix);
+    if (state.tx_in_flight_msg_size != msg.payload.fec.obj_length) {
+        LogPrintf("UDP: Got inconsistent object length for tx %lu\n", msg.payload.fec.hash_prefix);
         return true;
     }
 
     assert(!state.tx_in_flight->DecodeReady());
 
-    if (!state.tx_in_flight->ProvideChunk(msg.msg.block.data, msg.msg.block.chunk_id)) {
+    if (!state.tx_in_flight->ProvideChunk(msg.payload.fec.data, msg.payload.fec.chunk_id)) {
         // Bad chunk id, maybe FEC is upset? Don't disconnect in case it can be random
-        LogPrintf("UDP: FEC chunk decode failed for chunk %d from tx %lu from %s\n", msg.msg.block.chunk_id, msg.msg.block.hash_prefix, node.ToString());
+        LogPrintf("UDP: FEC chunk decode failed for chunk %d from tx %lu from %s\n", msg.payload.fec.chunk_id, msg.payload.fec.hash_prefix, node.ToString());
         return true;
     }
 
@@ -1515,7 +1515,7 @@ static bool HandleTx(UDPMessage& msg, size_t length, const CService& node, UDPCo
                 node_context->peerman->RelayTransaction(tx->GetHash(), tx->GetWitnessHash());
             }
         } catch (std::exception& e) {
-            LogPrintf("UDP: Tx decode failed for tx %lu from %s: %s\n", msg.msg.block.hash_prefix, node.ToString(), e.what());
+            LogPrintf("UDP: Tx decode failed for tx %lu from %s: %s\n", msg.payload.fec.hash_prefix, node.ToString(), e.what());
         }
 
         state.tx_in_flight.reset();
@@ -1532,41 +1532,41 @@ bool HandleBlockTxMessage(UDPMessage& msg, size_t length, const CService& node, 
     if (fBench)
         start = std::chrono::steady_clock::now();
 
-    assert(IS_BLOCK_HEADER_MSG(msg) || IS_BLOCK_CONTENTS_MSG(msg) || IS_TX_CONTENTS_MSG(msg));
+    assert(IS_BLOCK_HEADER_AND_TXIDS_MSG(msg) || IS_BLOCK_CONTENTS_MSG(msg) || IS_TX_CONTENTS_MSG(msg));
 
-    if (length != sizeof(UDPMessageHeader) + sizeof(UDPBlockMessage)) {
+    if (length != sizeof(UDPMessageHeader) + sizeof(UDPFecMessage)) {
         LogPrintf("UDP: Got invalidly-sized (%d bytes) message from %s\n", length, node.ToString());
         return false;
     }
 
-    msg.msg.block.hash_prefix = le64toh(msg.msg.block.hash_prefix);
-    msg.msg.block.obj_length = le32toh(msg.msg.block.obj_length);
-    msg.msg.block.chunk_id = le32toh(msg.msg.block.chunk_id);
+    msg.payload.fec.hash_prefix = le64toh(msg.payload.fec.hash_prefix);
+    msg.payload.fec.obj_length = le32toh(msg.payload.fec.obj_length);
+    msg.payload.fec.chunk_id = le32toh(msg.payload.fec.chunk_id);
 
     if ((msg.header.msg_type & UDP_MSG_TYPE_TYPE_MASK) == MSG_TYPE_TX_CONTENTS)
-        return HandleTx(msg, length, node, state, node_context);
+        return HandleTx(msg, node, state, node_context);
 
-    const bool is_blk_header_chunk = IS_BLOCK_HEADER_MSG(msg);
+    const bool is_blk_header_chunk = IS_BLOCK_HEADER_AND_TXIDS_MSG(msg);
     const bool is_blk_content_chunk = IS_BLOCK_CONTENTS_MSG(msg);
     const bool they_have_block = msg.header.msg_type & HAVE_BLOCK;
     const bool empty_block = IS_EMPTY_BLOCK(msg); // a block that comes entirely through the header
 
-    const uint64_t hash_prefix = msg.msg.block.hash_prefix; // Need a reference in a few places, but its packed, so we can't have one directly
+    const uint64_t hash_prefix = msg.payload.fec.hash_prefix; // Need a reference in a few places, but its packed, so we can't have one directly
     CService peer = state.connection.fTrusted ? TRUSTED_PEER_DUMMY : node;
     const std::pair<uint64_t, CService> hash_peer_pair = std::make_pair(hash_prefix, peer);
 
-    if (msg.msg.block.obj_length > MAX_BLOCK_SERIALIZED_SIZE * MAX_CHUNK_CODED_BLOCK_SIZE_FACTOR) {
-        LogPrintf("UDP: Got massive obj_length of %u\n", msg.msg.block.obj_length);
+    if (msg.payload.fec.obj_length > MAX_BLOCK_SERIALIZED_SIZE * MAX_CHUNK_CODED_BLOCK_SIZE_FACTOR) {
+        LogPrintf("UDP: Got massive obj_length of %u\n", msg.payload.fec.obj_length);
         return false;
     }
 
     // Number of chunks that the data object (before FEC enconding) would occupy
-    const size_t n_chunks = DIV_CEIL(msg.msg.block.obj_length, sizeof(UDPBlockMessage::data));
+    const size_t n_chunks = DIV_CEIL(msg.payload.fec.obj_length, sizeof(UDPFecMessage::data));
 
-    if (setBlocksRelayed.count(msg.msg.block.hash_prefix) || setBlocksReceived.count(hash_peer_pair))
+    if (setBlocksRelayed.count(msg.payload.fec.hash_prefix) || setBlocksReceived.count(hash_peer_pair))
         return true;
 
-    std::map<uint64_t, ChunksAvailableSet>::iterator chunks_avail_it = state.chunks_avail.find(msg.msg.block.hash_prefix);
+    std::map<uint64_t, ChunksAvailableSet>::iterator chunks_avail_it = state.chunks_avail.find(msg.payload.fec.hash_prefix);
 
     if (chunks_avail_it == state.chunks_avail.end()) {
         if (is_blk_header_chunk) {
@@ -1614,7 +1614,7 @@ bool HandleBlockTxMessage(UDPMessage& msg, size_t length, const CService& node, 
         // SetHeaderDataAndFECChunkCount call, we will miss the first block packet we
         // receive and re-send that in UDPRelayBlock...this is OK because we'll save
         // more by doing this before the during-process relay below
-        chunks_avail_it->second.SetChunkAvailable(msg.msg.block.chunk_id, n_chunks, is_blk_content_chunk);
+        chunks_avail_it->second.SetChunkAvailable(msg.payload.fec.chunk_id, n_chunks, is_blk_content_chunk);
     }
 
     bool new_block = false;
@@ -1687,7 +1687,7 @@ bool HandleBlockTxMessage(UDPMessage& msg, size_t length, const CService& node, 
     if ((is_blk_content_chunk && !block.blk_initialized) ||
         (is_blk_header_chunk && !block.header_initialized)) {
         if (!block.Init(msg)) {
-            LogPrintf("UDP: Got block contents that couldn't match header for block id %lu\n", msg.msg.block.hash_prefix);
+            LogPrintf("UDP: Got block contents that couldn't match header for block id %lu\n", msg.payload.fec.hash_prefix);
             return true;
         }
 
@@ -1719,14 +1719,14 @@ bool HandleBlockTxMessage(UDPMessage& msg, size_t length, const CService& node, 
 
     FECDecoder& decoder = is_blk_header_chunk ? block.header_decoder : block.body_decoder;
 
-    if ((is_blk_header_chunk && (msg.msg.block.obj_length != block.header_len)) ||
-        (is_blk_content_chunk && (msg.msg.block.obj_length != block.blk_len))) {
+    if ((is_blk_header_chunk && (msg.payload.fec.obj_length != block.header_len)) ||
+        (is_blk_content_chunk && (msg.payload.fec.obj_length != block.blk_len))) {
         // Duplicate hash_prefix or bad trusted peer
-        LogPrintf("UDP: Got wrong obj_length/chunsk_sent for block id %lu from peer %s! Check your trusted peers are behaving well\n", msg.msg.block.hash_prefix, node.ToString());
+        LogPrintf("UDP: Got wrong obj_length/chunsk_sent for block id %lu from peer %s! Check your trusted peers are behaving well\n", msg.payload.fec.hash_prefix, node.ToString());
         return true;
     }
 
-    if (decoder.HasChunk(msg.msg.block.chunk_id)) {
+    if (decoder.HasChunk(msg.payload.fec.chunk_id)) {
         /* We are probably receiving a repeated chunk while the block is not
          * decodable yet. This is typical (and acceptable) when receiving from
          * multiple peers, especially for the initial uncoded chunks that are
@@ -1734,7 +1734,7 @@ bool HandleBlockTxMessage(UDPMessage& msg, size_t length, const CService& node, 
         return true;
     }
 
-    if (is_blk_content_chunk && !block.in_header && msg.msg.block.chunk_id < block.block_data.GetChunkCount()) {
+    if (is_blk_content_chunk && !block.in_header && msg.payload.fec.chunk_id < block.block_data.GetChunkCount()) {
         /* If in_header is true, ProvideHeaderData has not be called yet, which
          * means PartiallyDownloadedChunkBlock::InitData also has not been
          * called yet and, hence, chunksAvailable has not been resized. So
@@ -1744,14 +1744,14 @@ bool HandleBlockTxMessage(UDPMessage& msg, size_t length, const CService& node, 
          * FEC-coded chunks (chunk ids exceeding GetChunkCount()) are not
          * affected by this, as they are not marked as available.
          */
-        assert(!block.block_data.IsChunkAvailable(msg.msg.block.chunk_id)); // HasChunk should have returned false, then
-        memcpy(block.block_data.GetChunk(msg.msg.block.chunk_id), msg.msg.block.data, sizeof(UDPBlockMessage::data));
-        block.block_data.MarkChunkAvailable(msg.msg.block.chunk_id);
+        assert(!block.block_data.IsChunkAvailable(msg.payload.fec.chunk_id)); // HasChunk should have returned false, then
+        memcpy(block.block_data.GetChunk(msg.payload.fec.chunk_id), msg.payload.fec.data, sizeof(UDPFecMessage::data));
+        block.block_data.MarkChunkAvailable(msg.payload.fec.chunk_id);
     }
 
-    if (!decoder.ProvideChunk(msg.msg.block.data, msg.msg.block.chunk_id)) {
+    if (!decoder.ProvideChunk(msg.payload.fec.data, msg.payload.fec.chunk_id)) {
         // Bad chunk id, maybe FEC is upset? Don't disconnect in case it can be random
-        LogPrintf("UDP: FEC chunk decode failed for chunk %d from block %lu from %s\n", msg.msg.block.chunk_id, msg.msg.block.hash_prefix, node.ToString());
+        LogPrintf("UDP: FEC chunk decode failed for chunk %d from block %lu from %s\n", msg.payload.fec.chunk_id, msg.payload.fec.hash_prefix, node.ToString());
         return true;
     }
 
