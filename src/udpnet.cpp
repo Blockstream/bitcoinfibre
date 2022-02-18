@@ -108,7 +108,7 @@ uint64_t const multicast_magic = Hash(multicast_pass).GetUint64(0);
 } // namespace
 uint64_t const multicast_checksum_magic = htole64(multicast_magic);
 
-//TODO: The checksum stuff is not endian-safe (esp the poly impl):
+// TODO: The checksum stuff is not endian-safe (esp the poly impl):
 static void FillChecksum(uint64_t magic, UDPMessage& msg, const unsigned int length)
 {
     assert(length <= sizeof(UDPMessage));

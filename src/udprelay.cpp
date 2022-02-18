@@ -441,7 +441,7 @@ void UDPRelayBlock(const CBlock& block, int nHeight)
                 chunk_coded_block = &codedBlock->GetCodedBlock();
             }
             if (!chunk_coded_block->empty()) {
-                data_fec_chunks = DIV_CEIL(chunk_coded_block->size(), FEC_CHUNK_SIZE) + 10; //TODO: Pick something different?
+                data_fec_chunks = DIV_CEIL(chunk_coded_block->size(), FEC_CHUNK_SIZE) + 10; // TODO: Pick something different?
                 if (skipEncode) {
                     // If we get here, we are currently in the processing thread
                     // and have partial_block_ptr set. Additionally, because
@@ -502,7 +502,7 @@ void UDPRelayBlock(const CBlock& block, int nHeight)
             // is important we get the first block packet out to peers ASAP. Thus,
             // we go ahead and send the first few non-FEC block packets here.
             if (!chunk_coded_block->empty()) {
-                data_fec_chunks = DIV_CEIL(chunk_coded_block->size(), FEC_CHUNK_SIZE) + 10; //TODO: Pick something different?
+                data_fec_chunks = DIV_CEIL(chunk_coded_block->size(), FEC_CHUNK_SIZE) + 10; // TODO: Pick something different?
                 SendLimitedDataChunks(hashBlock, MSG_TYPE_BLOCK_CONTENTS, *chunk_coded_block);
             }
         }
@@ -1526,7 +1526,7 @@ static bool HandleTx(UDPMessage& msg, const CService& node, UDPConnectionState& 
 
 bool HandleBlockTxMessage(UDPMessage& msg, size_t length, const CService& node, UDPConnectionState& state, const std::chrono::steady_clock::time_point& packet_process_start, const node::NodeContext* const node_context)
 {
-    //TODO: There are way too many damn tree lookups here...either cut them down or increase parallelism
+    // TODO: There are way too many damn tree lookups here...either cut them down or increase parallelism
     const bool fBench = LogAcceptCategory(BCLog::BENCH);
     std::chrono::steady_clock::time_point start;
     if (fBench)
@@ -1862,7 +1862,7 @@ void ProcessDownloadTimerEvents()
             it++;
         }
     }
-    //TODO: Prune setBlocksRelayed and setBlocksReceived to keep lookups fast?
+    // TODO: Prune setBlocksRelayed and setBlocksReceived to keep lookups fast?
 }
 
 struct BlkChunkStats {
