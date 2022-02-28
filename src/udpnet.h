@@ -271,6 +271,7 @@ struct UDPMulticastInfo {
     bool relay_new_blks = true;  /** Whether this stream should relay new (i.e., recently mined) blocks */
     bool save_tx_state = false;  /** Whether the Tx state should be saved on the UDP Multicast Tx DB */
     size_t ringbuff_depth = 512; /** Depth of ring buffer used for transmission */
+    bool lossy_exit = true;      /** When set to false, all buffered messages must be transmitted before exiting the Tx loop */
 
     FecOverhead overhead_rep_blks = {60, 0.05}; /** Overhead applied when FEC-encoding repeated (historic) blocks */
 };

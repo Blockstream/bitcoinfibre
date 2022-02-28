@@ -202,16 +202,17 @@ struct PerGroupMessageQueue {
 
     uint64_t bw;
     bool multicast;
-    bool unlimited; // when non rate-limited (limited by a blocking socket instead)
+    bool unlimited;  // when non rate-limited (limited by a blocking socket instead)
+    bool lossy_exit; // whether the Tx loop can exit while the ring buffers are non-empty
     Throttle ratelimiter;
     std::chrono::steady_clock::time_point next_send;
-    PerGroupMessageQueue() : buff_id(-1), bw(0), multicast(false), unlimited(0), ratelimiter(0) {}
-    PerGroupMessageQueue(size_t buff_depth) : buffs{
-                                                  {UdpMsgRingBuffer(buff_depth),
-                                                   UdpMsgRingBuffer(buff_depth),
-                                                   UdpMsgRingBuffer(buff_depth),
-                                                   UdpMsgRingBuffer(buff_depth)}},
-                                              buff_id(-1), bw(0), multicast(false), unlimited(0), ratelimiter(0) {}
+    PerGroupMessageQueue() : buff_id(-1), bw(0), multicast(false), unlimited(false), lossy_exit(false), ratelimiter(0) {}
+    PerGroupMessageQueue(size_t buff_depth, bool lossy_exit) : buffs{
+                                                                   {UdpMsgRingBuffer(buff_depth),
+                                                                    UdpMsgRingBuffer(buff_depth),
+                                                                    UdpMsgRingBuffer(buff_depth),
+                                                                    UdpMsgRingBuffer(buff_depth)}},
+                                                               buff_id(-1), bw(0), multicast(false), unlimited(false), lossy_exit(lossy_exit), ratelimiter(0) {}
     PerGroupMessageQueue(PerGroupMessageQueue&& q) = delete;
 };
 static std::map<size_t, PerGroupMessageQueue> mapTxQueues;
@@ -347,7 +348,8 @@ static void DumpUdpMulticastTxConfig(const UDPMulticastInfo& info)
               "    - rep_blks: %s\n"
               "    - relay_blks: %s\n"
               "    - overhead_rep_blks: %d + %.2f%%\n"
-              "    - ringbuff_depth: %u\n",
+              "    - ringbuff_depth: %u\n"
+              "    - lossy_exit: %u\n",
               info.physical_idx,
               info.logical_idx,
               info.mcast_ip,
@@ -362,7 +364,8 @@ static void DumpUdpMulticastTxConfig(const UDPMulticastInfo& info)
               info.relay_new_blks ? "true" : "false",
               info.overhead_rep_blks.fixed,
               (100 * info.overhead_rep_blks.variable),
-              info.ringbuff_depth);
+              info.ringbuff_depth,
+              info.lossy_exit);
 }
 
 /**
@@ -1336,12 +1339,20 @@ static void do_send_messages()
             t_next_tx = std::min(t_next_tx, queue.next_send);
         }
 
-        // Make sure all messages are transmitted before terminating this loop.
-        // This is especially useful to ensure the transmission progress saved
-        // on the UDP Multicast Tx db corresponds to the chunks actually
-        // transmitted by this loop (i.e., no chunks were skipped).
-        if (send_messages_break && maybe_all_empty)
-            return;
+        // Make sure all messages are transmitted before terminating this loop,
+        // unless a lossy exit is allowed for this queue. For instance, a
+        // lossless exit ensures the transmission progress saved on the UDP
+        // Multicast Tx db corresponds to the chunks actually transmitted by
+        // this loop, i.e., no chunks skipped on program termination.
+        if (send_messages_break) {
+            if (maybe_all_empty)
+                return;
+            if (std::all_of(
+                    mapTxQueues.cbegin(),
+                    mapTxQueues.cend(),
+                    [](const auto& q) { return q.second.buff_id == -1 || q.second.lossy_exit; }))
+                return;
+        }
 
         // Wait until at least one socket is writable
         if (maybe_all_full) {
@@ -1843,7 +1854,8 @@ static std::map<size_t, PerGroupMessageQueue> InitTxQueues(const std::vector<std
             LogPrintf("UDP: Set bw for group %zu: %d bps\n", info.group, info.bw);
             auto res = mapQueues.emplace(std::piecewise_construct,
                                          std::forward_as_tuple(info.group),
-                                         std::forward_as_tuple(info.ringbuff_depth));
+                                         std::forward_as_tuple(info.ringbuff_depth,
+                                                               info.lossy_exit));
             assert(res.second);
             res.first->second.bw = info.bw; // in bps
             res.first->second.multicast = true;
@@ -1929,6 +1941,8 @@ static bool ParseUDPMulticastTxOpt(UDPMulticastInfo& info,
         info.ringbuff_depth = LocaleIndependentAtoi<uint32_t>(value);
         if (info.ringbuff_depth < MIN_BUFF_DEPTH || info.ringbuff_depth > MAX_BUFF_DEPTH)
             error = tfm::format("ringbuff_depth must be >= %d and <= %d", MIN_BUFF_DEPTH, MAX_BUFF_DEPTH);
+    } else if (opt == "lossy_exit") {
+        info.lossy_exit = (value == "true" || value == "1");
     } else {
         error = "unknown option";
     }
