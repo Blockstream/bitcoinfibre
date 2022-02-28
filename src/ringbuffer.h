@@ -6,7 +6,8 @@
 #include <condition_variable>
 #include <mutex>
 
-static const size_t BUFF_DEPTH = 512;
+static const size_t MIN_BUFF_DEPTH = 8;
+static const size_t MAX_BUFF_DEPTH = 512;
 
 
 /**
@@ -80,7 +81,8 @@ private:
     size_t m_read_ptr = 0;  //!< read from the tail
     size_t m_write_ptr = 0; //!< write to the head
     size_t m_occupancy = 0; //!< current buffer occupancy
-    T m_buffer[BUFF_DEPTH];
+    size_t m_depth;         //!< buffer depth
+    T m_buffer[MAX_BUFF_DEPTH];
 
     std::mutex m_mutex;
     std::condition_variable m_cv_nonfull;
@@ -95,10 +97,21 @@ private:
      */
     bool HasSpaceForWrite()
     {
-        return m_occupancy < BUFF_DEPTH;
+        return m_occupancy < m_depth;
     }
 
 public:
+    /**
+     * @brief Construct a new Ring Buffer object.
+     *
+     * @param depth Buffer depth.
+     */
+    RingBuffer(size_t depth = MAX_BUFF_DEPTH) : m_depth(depth)
+    {
+        if (m_depth > MAX_BUFF_DEPTH || m_depth < MIN_BUFF_DEPTH)
+            throw std::runtime_error("Invalid buffer depth");
+    };
+
     /**
      * @brief Write to the next free element in the buffer.
      * @param Callback function used to write into the buffer element.
@@ -121,7 +134,7 @@ public:
         }
 
         f(m_buffer[m_write_ptr]);
-        m_write_ptr = (m_write_ptr + 1) % BUFF_DEPTH;
+        m_write_ptr = (m_write_ptr + 1) % m_depth;
         m_occupancy++;
         return true;
     }
@@ -197,7 +210,7 @@ public:
     {
         const bool was_full = !HasSpaceForWrite();
 
-        m_read_ptr = (m_read_ptr + 1) % BUFF_DEPTH;
+        m_read_ptr = (m_read_ptr + 1) % m_depth;
         m_occupancy--;
 
         // Update the read counters

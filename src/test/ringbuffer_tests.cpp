@@ -30,13 +30,14 @@ BOOST_AUTO_TEST_CASE(test_ringbuffer_write)
     BOOST_CHECK(buffer.IsEmpty());
 }
 
-BOOST_AUTO_TEST_CASE(test_ringbuffer_overflow_ctrl)
+
+void OverflowControlTest(size_t depth)
 {
-    RingBuffer<int> buffer;
+    RingBuffer<int> buffer(depth);
 
     // Write until the buffer is full, and then try to write one more element
     std::thread t1([&] {
-        for (size_t i = 0; i < (BUFF_DEPTH + 1); i++) {
+        for (size_t i = 0; i < (depth + 1); i++) {
             int new_val = std::rand();
             buffer.WriteElement([&](int& elem) {
                 elem = new_val;
@@ -62,6 +63,13 @@ BOOST_AUTO_TEST_CASE(test_ringbuffer_overflow_ctrl)
 
     t1.join();
     t2.join();
+}
+
+BOOST_AUTO_TEST_CASE(test_ringbuffer_overflow_ctrl)
+{
+    OverflowControlTest(MAX_BUFF_DEPTH);
+    OverflowControlTest(16);
+    OverflowControlTest(128);
 }
 
 BOOST_AUTO_TEST_CASE(test_ringbuffer_read_abort)
@@ -133,7 +141,7 @@ BOOST_AUTO_TEST_CASE(test_ringbuffer_write_abort)
     // On a thread, try to write more elements than the buffer can hold
     std::thread t1([&] {
         bool wr_success;
-        for (size_t i = 0; i < (BUFF_DEPTH + 1); i++) {
+        for (size_t i = 0; i < (MAX_BUFF_DEPTH + 1); i++) {
             int new_val = std::rand();
             wr_success = buffer.WriteElement([&](int& elem) {
                 elem = new_val;
@@ -176,6 +184,25 @@ BOOST_AUTO_TEST_CASE(test_ringbuffer_stats)
 
     BOOST_CHECK(stats.rd_bytes == (n_elem * sizeof(int)));
     BOOST_CHECK(stats.rd_count == n_elem);
+}
+
+BOOST_AUTO_TEST_CASE(test_ringbuffer_invalid_depths)
+{
+    size_t depth = 513;
+    BOOST_CHECK_THROW({ RingBuffer<int> buffer(depth); }, std::runtime_error);
+
+    depth = 7;
+    BOOST_CHECK_THROW({ RingBuffer<int> buffer(depth); }, std::runtime_error);
+
+    depth = 512;
+    {
+        RingBuffer<int> buffer(depth);
+    }
+
+    depth = 8;
+    {
+        RingBuffer<int> buffer(depth);
+    }
 }
 
 BOOST_AUTO_TEST_SUITE_END()
