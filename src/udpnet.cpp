@@ -172,8 +172,10 @@ struct RingBufferElement {
     uint64_t magic;
 };
 
+typedef RingBuffer<RingBufferElement> UdpMsgRingBuffer;
+
 struct PerGroupMessageQueue {
-    std::array<RingBuffer<RingBufferElement>, 4> buffs;
+    std::array<UdpMsgRingBuffer, 4> buffs;
     ssize_t buff_id; // active buffer
     /* Three message queues (buffers) per group:
      * 0) high priority
@@ -203,8 +205,13 @@ struct PerGroupMessageQueue {
     bool unlimited; // when non rate-limited (limited by a blocking socket instead)
     Throttle ratelimiter;
     std::chrono::steady_clock::time_point next_send;
-    PerGroupMessageQueue() : buff_id(-1), bw(0), multicast(false), unlimited(0),
-                             ratelimiter(0) {}
+    PerGroupMessageQueue() : buff_id(-1), bw(0), multicast(false), unlimited(0), ratelimiter(0) {}
+    PerGroupMessageQueue(size_t buff_depth) : buffs{
+                                                  {UdpMsgRingBuffer(buff_depth),
+                                                   UdpMsgRingBuffer(buff_depth),
+                                                   UdpMsgRingBuffer(buff_depth),
+                                                   UdpMsgRingBuffer(buff_depth)}},
+                                              buff_id(-1), bw(0), multicast(false), unlimited(0), ratelimiter(0) {}
     PerGroupMessageQueue(PerGroupMessageQueue&& q) = delete;
 };
 static std::map<size_t, PerGroupMessageQueue> mapTxQueues;
@@ -212,8 +219,8 @@ static std::map<size_t, PerGroupMessageQueue> mapTxQueues;
 static void ThreadRunReadEventLoop() { event_base_dispatch(event_base_read); }
 static void do_send_messages();
 static void send_messages_flush_and_break();
-static std::map<size_t, PerGroupMessageQueue> init_tx_queues(const std::vector<std::pair<unsigned short, uint64_t>>& group_list,
-                                                             const std::vector<UDPMulticastInfo>& multicast_list);
+static std::map<size_t, PerGroupMessageQueue> InitTxQueues(const std::vector<std::pair<unsigned short, uint64_t>>& group_list,
+                                                           const std::vector<UDPMulticastInfo>& multicast_list);
 static void ThreadRunWriteEventLoop() { do_send_messages(); }
 
 static void read_socket_func(evutil_socket_t fd, short event, void* arg);
@@ -324,6 +331,38 @@ static struct in_addr GetIfIpAddr(const char* const ifname)
     }
 
     return res_sin_addr;
+}
+
+static void DumpUdpMulticastTxConfig(const UDPMulticastInfo& info)
+{
+    LogPrintf("UDP: multicast tx %lu-%lu:\n"
+              "    - multiaddr: %s\n"
+              "    - interface: %s\n"
+              "    - ttl: %d\n"
+              "    - dscp: %u\n"
+              "    - depth: %d\n"
+              "    - offset: %d\n"
+              "    - interleave: %u\n"
+              "    - txn_per_sec: %u\n"
+              "    - rep_blks: %s\n"
+              "    - relay_blks: %s\n"
+              "    - overhead_rep_blks: %d + %.2f%%\n"
+              "    - ringbuff_depth: %u\n",
+              info.physical_idx,
+              info.logical_idx,
+              info.mcast_ip,
+              info.ifname,
+              info.ttl,
+              info.dscp,
+              info.depth,
+              info.offset,
+              info.interleave_len,
+              info.txn_per_sec,
+              info.send_rep_blks ? "true" : "false",
+              info.relay_new_blks ? "true" : "false",
+              info.overhead_rep_blks.fixed,
+              (100 * info.overhead_rep_blks.variable),
+              info.ringbuff_depth);
 }
 
 /**
@@ -524,32 +563,7 @@ static bool InitializeUDPMulticast(std::vector<int>& udp_socks,
             mcast_info.physical_idx = physical_idx_map[addr_ifindex_pair];
             mcast_info.logical_idx = logical_idx_map[addr_ifindex_pair];
 
-            LogPrintf("UDP: multicast tx %lu-%lu:\n"
-                      "    - multiaddr: %s\n"
-                      "    - interface: %s\n"
-                      "    - ttl: %d\n"
-                      "    - dscp: %u\n"
-                      "    - depth: %d\n"
-                      "    - offset: %d\n"
-                      "    - interleave: %u\n"
-                      "    - txn_per_sec: %u\n"
-                      "    - rep_blks: %s\n"
-                      "    - relay_blks: %s\n"
-                      "    - overhead_rep_blks: %d + %.2f%%\n",
-                      mcast_info.physical_idx,
-                      mcast_info.logical_idx,
-                      mcast_info.mcast_ip,
-                      mcast_info.ifname,
-                      mcast_info.ttl,
-                      mcast_info.dscp,
-                      mcast_info.depth,
-                      mcast_info.offset,
-                      mcast_info.interleave_len,
-                      mcast_info.txn_per_sec,
-                      mcast_info.send_rep_blks ? "true" : "false",
-                      mcast_info.relay_new_blks ? "true" : "false",
-                      mcast_info.overhead_rep_blks.fixed,
-                      (100 * mcast_info.overhead_rep_blks.variable));
+            DumpUdpMulticastTxConfig(mcast_info);
         }
 
         /* Index based on multicast "addr", ifindex and logical index
@@ -703,7 +717,7 @@ bool InitializeUDPConnections(node::NodeContext* const node_context)
     evtimer_add(timer_event, &timer_interval);
 
     /* Initialize Tx message queues */
-    mapTxQueues = init_tx_queues(group_list, multicast_list);
+    mapTxQueues = InitTxQueues(group_list, multicast_list);
 
     udp_write_threads.emplace_back(&util::TraceThread, "udpwrite", &ThreadRunWriteEventLoop);
 
@@ -1070,7 +1084,7 @@ static void timer_func(evutil_socket_t fd, short event, void* arg)
     }
 }
 
-static inline void SendMessage(const UDPMessage& msg, const unsigned int length, PerGroupMessageQueue& queue, RingBuffer<RingBufferElement>& buff, const CService& service, const uint64_t magic)
+static inline void SendMessage(const UDPMessage& msg, const unsigned int length, PerGroupMessageQueue& queue, UdpMsgRingBuffer& buff, const CService& service, const uint64_t magic)
 {
     std::unique_lock<std::mutex> lock(non_empty_queues_cv_mutex);
     const bool was_empty = buff.IsEmpty();
@@ -1092,7 +1106,7 @@ void SendMessage(const UDPMessage& msg, const unsigned int length, bool high_pri
     assert(length <= sizeof(UDPMessage));
     assert(mapTxQueues.count(group));
     PerGroupMessageQueue& queue = mapTxQueues[group];
-    RingBuffer<RingBufferElement>& buff = high_prio ? queue.buffs[0] : queue.buffs[1];
+    UdpMsgRingBuffer& buff = high_prio ? queue.buffs[0] : queue.buffs[1];
     SendMessage(msg, length, queue, buff, service, magic);
 }
 
@@ -1210,7 +1224,7 @@ static void do_send_messages()
             }
 
             // Read from the ring buffer and send over the network
-            RingBuffer<RingBufferElement>* buff = &queue.buffs[queue.buff_id];
+            UdpMsgRingBuffer* buff = &queue.buffs[queue.buff_id];
 
             int consecutive_tx = 0; // packets tx'ed consecutively from this queue
             bool wouldblock = false;
@@ -1801,8 +1815,8 @@ void MulticastTxBlock(const int height, codec_version_t codec_version)
     }
 }
 
-static std::map<size_t, PerGroupMessageQueue> init_tx_queues(const std::vector<std::pair<unsigned short, uint64_t>>& group_list,
-                                                             const std::vector<UDPMulticastInfo>& multicast_list)
+static std::map<size_t, PerGroupMessageQueue> InitTxQueues(const std::vector<std::pair<unsigned short, uint64_t>>& group_list,
+                                                           const std::vector<UDPMulticastInfo>& multicast_list)
 {
     std::map<size_t, PerGroupMessageQueue> mapQueues; // map group number to group queue
 
@@ -1829,7 +1843,7 @@ static std::map<size_t, PerGroupMessageQueue> init_tx_queues(const std::vector<s
             LogPrintf("UDP: Set bw for group %zu: %d bps\n", info.group, info.bw);
             auto res = mapQueues.emplace(std::piecewise_construct,
                                          std::forward_as_tuple(info.group),
-                                         std::forward_as_tuple());
+                                         std::forward_as_tuple(info.ringbuff_depth));
             assert(res.second);
             res.first->second.bw = info.bw; // in bps
             res.first->second.multicast = true;
@@ -1911,6 +1925,10 @@ static bool ParseUDPMulticastTxOpt(UDPMulticastInfo& info,
         }
     } else if (opt == "save_tx_state") {
         info.save_tx_state = (value == "true" || value == "1");
+    } else if (opt == "ringbuff_depth") {
+        info.ringbuff_depth = LocaleIndependentAtoi<uint32_t>(value);
+        if (info.ringbuff_depth < MIN_BUFF_DEPTH || info.ringbuff_depth > MAX_BUFF_DEPTH)
+            error = tfm::format("ringbuff_depth must be >= %d and <= %d", MIN_BUFF_DEPTH, MAX_BUFF_DEPTH);
     } else {
         error = "unknown option";
     }
