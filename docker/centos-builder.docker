@@ -1,5 +1,10 @@
 FROM centos:8
 
+# Fix mirror URL
+RUN find /etc/yum.repos.d/ -type f -exec sed -i 's/mirrorlist=/#mirrorlist=/g' {} +
+RUN find /etc/yum.repos.d/ -type f -exec sed -i 's/#baseurl=/baseurl=/g' {} +
+RUN find /etc/yum.repos.d/ -type f -exec sed -i 's/mirror.centos.org/vault.centos.org/g' {} +
+
 # Add the powertools repo for qrencode-devel
 RUN dnf install -y dnf-plugins-core
 RUN dnf config-manager --set-enabled powertools
