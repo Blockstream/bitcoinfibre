@@ -11,7 +11,7 @@ builders:
   tags:
     - k8s-docker
   services:
-    - docker:19-dind
+    - docker:20.10.12-dind
   before_script:
     - echo "$CI_BUILD_TOKEN" | docker login -u gitlab-ci-token --password-stdin $DOCKER_REGISTRY
   parallel:
