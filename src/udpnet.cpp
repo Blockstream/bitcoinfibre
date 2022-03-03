@@ -336,36 +336,38 @@ static struct in_addr GetIfIpAddr(const char* const ifname)
 
 static void DumpUdpMulticastTxConfig(const UDPMulticastInfo& info)
 {
-    LogPrintf("UDP: multicast tx %lu-%lu:\n"
-              "    - multiaddr: %s\n"
-              "    - interface: %s\n"
-              "    - ttl: %d\n"
-              "    - dscp: %u\n"
-              "    - depth: %d\n"
-              "    - offset: %d\n"
-              "    - interleave: %u\n"
-              "    - txn_per_sec: %u\n"
-              "    - rep_blks: %s\n"
-              "    - relay_blks: %s\n"
-              "    - overhead_rep_blks: %d + %.2f%%\n"
-              "    - ringbuff_depth: %u\n"
-              "    - lossy_exit: %u\n",
-              info.physical_idx,
-              info.logical_idx,
-              info.mcast_ip,
-              info.ifname,
-              info.ttl,
-              info.dscp,
-              info.depth,
-              info.offset,
-              info.interleave_len,
-              info.txn_per_sec,
-              info.send_rep_blks ? "true" : "false",
-              info.relay_new_blks ? "true" : "false",
-              info.overhead_rep_blks.fixed,
-              (100 * info.overhead_rep_blks.variable),
-              info.ringbuff_depth,
-              info.lossy_exit);
+    std::ostringstream out;
+
+    out << "Multicast tx " << info.physical_idx << "-" << info.logical_idx << "\n"
+        << "[Networking]\n"
+        << " - Multicast address: " << info.mcast_ip << "\n"
+        << " - Interface: " << info.ifname << "\n"
+        << " - Bandwidth: " << ((info.bw == 0) ? "unlimited" : tfm::format("%u bps", info.bw)) << "\n"
+        << " - TTL: " << info.ttl << "\n"
+        << " - DSCP: " << info.dscp << "\n"
+        << "[Streams]\n"
+        << tfm::format(" - New blocks: %s\n", info.relay_new_blks ? "true" : "false")
+        << tfm::format(" - Historic blocks: %s\n", info.send_rep_blks ? "true" : "false")
+        << tfm::format(" - Mempool txns: %s\n", info.txn_per_sec > 0 ? "true" : "false")
+        << "[Tx Ring Buffers]\n"
+        << " - Depth: " << info.ringbuff_depth << "\n"
+        << tfm::format(" - Lossy exit: %s\n", info.lossy_exit ? "true" : "false");
+
+    if (info.send_rep_blks) {
+        out << "[Historic Blocks]\n"
+            << " - Depth: " << info.depth << "\n"
+            << " - Offset: " << info.offset << "\n"
+            << " - Interleave: " << info.interleave_len << "\n"
+            << tfm::format(" - Overhead: %d + %.2f%%\n", info.overhead_rep_blks.fixed,
+                           (100 * info.overhead_rep_blks.variable));
+    }
+
+    if (info.txn_per_sec > 0) {
+        out << "[Mempool Txns]\n"
+            << " - Txns/sec: " << info.txn_per_sec << "\n";
+    }
+
+    LogPrintf("UDP: %s", out.str());
 }
 
 /**
