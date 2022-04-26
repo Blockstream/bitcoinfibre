@@ -117,7 +117,7 @@ public:
     // recovering the chunk storage from a pre-existing file, it is possible to
     // know the chunks that were previously populated by checking whether the
     // chunk id is a valid one.
-    FecMmapStorage(boost::filesystem::path const& p, int const c, bool create = false) : MmapStorage<uint32_t>(p, create, FEC_CHUNK_SIZE, c, (FEC_CHUNK_COUNT_MAX + 1))
+    FecMmapStorage(fs::path const& p, int const c, bool create = false) : MmapStorage<uint32_t>(p, create, FEC_CHUNK_SIZE, c, (FEC_CHUNK_COUNT_MAX + 1))
     {
     }
 

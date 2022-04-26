@@ -1228,9 +1228,9 @@ void LoadPartialBlocks(CTxMemPool* mempool)
             if (load_partial_blocks_stop)
                 break;
 
-            boost::filesystem::path chunk_file_path(entry);
+            fs::path chunk_file_path(entry);
             ChunkFileNameParts cfp;
-            if (!IsChunkFileRecoverable(chunk_file_path.filename().string(), cfp)) {
+            if (!IsChunkFileRecoverable(fs::PathToString(chunk_file_path.filename()), cfp)) {
                 fs::remove(chunk_file_path);
                 n_removed++;
                 continue;
