@@ -5,6 +5,7 @@
 #include <boost/filesystem.hpp>
 #include <fcntl.h>
 #include <sys/mman.h>
+#include <util/fs.h>
 
 /**
  * @brief Handler for chunked-data storage on memory-mapped file
@@ -37,11 +38,11 @@ public:
      * infer when the mmapped file has pre-existing (already initialized)
      * data. See "Recoverable()".
      */
-    MmapStorage(boost::filesystem::path const& file_path, bool create, size_t const chunk_data_size, size_t const chunk_count, T meta_init_val) : m_file_path(file_path),
-                                                                                                                                                  m_chunk_data_size(chunk_data_size),
-                                                                                                                                                  m_chunk_count(chunk_count),
-                                                                                                                                                  m_file_size((m_chunk_data_size + sizeof(T)) * chunk_count),
-                                                                                                                                                  m_meta_init_val(meta_init_val)
+    MmapStorage(fs::path const& file_path, bool create, size_t const chunk_data_size, size_t const chunk_count, T meta_init_val) : m_file_path(file_path),
+                                                                                                                                   m_chunk_data_size(chunk_data_size),
+                                                                                                                                   m_chunk_count(chunk_count),
+                                                                                                                                   m_file_size((m_chunk_data_size + sizeof(T)) * chunk_count),
+                                                                                                                                   m_meta_init_val(meta_init_val)
     {
         if (create) {
             fs::create_directories(m_file_path.parent_path());
@@ -50,7 +51,7 @@ public:
         const int flags = create ? (O_RDWR | O_CREAT) : O_RDWR;
         const int chunk_file = ::open(m_file_path.c_str(), flags, 0755);
         if (chunk_file == -1) {
-            throw std::runtime_error("failed to open file: " + m_file_path.string() + " " + ::strerror(errno));
+            throw std::runtime_error("failed to open file: " + fs::PathToString(m_file_path) + " " + ::strerror(errno));
         }
 
         // Convention: data chunks are stored first, while the metadata is
@@ -59,7 +60,7 @@ public:
                                                    PROT_READ | PROT_WRITE, MAP_SHARED, chunk_file, 0));
         if (m_data_storage == MAP_FAILED) {
             ::close(chunk_file);
-            throw std::runtime_error("mmap failed " + m_file_path.string() + " " + ::strerror(errno));
+            throw std::runtime_error("mmap failed " + fs::PathToString(m_file_path) + " " + ::strerror(errno));
         }
         m_meta_storage = m_data_storage + (m_chunk_count * m_chunk_data_size);
 
@@ -73,7 +74,7 @@ public:
                 int const ret = ::ftruncate(chunk_file, m_file_size);
                 if (ret != 0) {
                     ::unlink(m_file_path.c_str());
-                    throw std::runtime_error("ftruncate failed " + m_file_path.string() + " " + ::strerror(errno));
+                    throw std::runtime_error("ftruncate failed " + fs::PathToString(m_file_path) + " " + ::strerror(errno));
                 }
 
                 for (size_t i = 0; i < m_chunk_count; i++) {
@@ -218,7 +219,7 @@ private:
 
 
 private:
-    boost::filesystem::path m_file_path;
+    fs::path m_file_path;
     size_t m_chunk_data_size = 0;
     size_t m_chunk_count = 0;
     size_t m_file_size = 0;
