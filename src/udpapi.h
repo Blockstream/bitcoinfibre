@@ -16,7 +16,7 @@
 class CBlock;
 
 std::vector<std::pair<unsigned short, uint64_t>> GetUDPInboundPorts(); // port, outbound bandwidth for group
-bool InitializeUDPConnections(NodeContext* const node);
+bool InitializeUDPConnections(node::NodeContext* const node);
 void StopUDPConnections();
 
 enum UDPConnectionType {

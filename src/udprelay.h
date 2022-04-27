@@ -26,7 +26,7 @@ void StopLoadPartialBlocks();
 bool IsChunkFileRecoverable(const std::string& filename, ChunkFileNameParts& cfp);
 
 void ProcessBlock(ChainstateManager* chainman, const std::pair<uint64_t, CService>& hash_peer_pair, PartialBlockData& block);
-bool HandleBlockTxMessage(UDPMessage& msg, size_t length, const CService& node, UDPConnectionState& state, const std::chrono::steady_clock::time_point& packet_process_start, const NodeContext* const context);
+bool HandleBlockTxMessage(UDPMessage& msg, size_t length, const CService& node, UDPConnectionState& state, const std::chrono::steady_clock::time_point& packet_process_start, const node::NodeContext* const context);
 
 void ProcessDownloadTimerEvents();
 
