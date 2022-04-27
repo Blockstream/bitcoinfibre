@@ -89,7 +89,7 @@ bool maybe_have_write_nodes;
 static std::map<int64_t, std::tuple<CService, uint64_t, size_t>> nodesToRepeatDisconnect;
 static std::map<CService, UDPConnectionInfo> mapPersistentNodes;
 
-static int g_mcast_log_interval = 10;
+static uint32_t g_mcast_log_interval = 10;
 
 static node::NodeContext* g_node_context; // Initialized by InitializeUDPConnections
 
@@ -264,7 +264,7 @@ static void AddConnectionFromString(const std::string& node, bool fTrust)
     size_t group = 0;
     if (remote_pass_end != std::string::npos) {
         std::string group_str(node.substr(remote_pass_end + 1));
-        group = atoi64(group_str);
+        group = LocaleIndependentAtoi<int>(group_str);
     }
 
     OpenPersistentUDPConnectionTo(addr, local_magic, remote_magic, fTrust, UDP_CONNECTION_TYPE_NORMAL, group, udp_mode_t::unicast);
@@ -402,8 +402,7 @@ static bool InitializeUDPMulticast(std::vector<int>& udp_socks,
             }
 
             /* Set TTL of multicast messages */
-            int ttl = mcast_info.ttl;
-            if (setsockopt(udp_socks.back(), IPPROTO_IP, IP_MULTICAST_TTL, &ttl, sizeof(ttl)) != 0) {
+            if (setsockopt(udp_socks.back(), IPPROTO_IP, IP_MULTICAST_TTL, &mcast_info.ttl, sizeof(mcast_info.ttl)) != 0) {
                 LogPrintf("UDP: setsockopt(IP_MULTICAST_TTL) failed: %s\n", strerror(errno));
                 return false;
             }
@@ -422,8 +421,7 @@ static bool InitializeUDPMulticast(std::vector<int>& udp_socks,
             }
 
             /* DSCP */
-            char dscp = mcast_info.dscp; //IPTOS_THROUGHPUT;
-            if (setsockopt(udp_socks.back(), IPPROTO_IP, IP_TOS, &dscp, sizeof(dscp)) != 0) {
+            if (setsockopt(udp_socks.back(), IPPROTO_IP, IP_TOS, &mcast_info.dscp, sizeof(mcast_info.dscp)) != 0) {
                 LogPrintf("UDP: setsockopt failed: %s\n", strerror(errno));
                 return false;
             }
@@ -638,8 +636,8 @@ bool InitializeUDPConnections(node::NodeContext* const node_context)
         return false;
     }
 
-    if (gArgs.IsArgSet("-udpmulticastloginterval") && (atoi(gArgs.GetArg("-udpmulticastloginterval", "")) > 0))
-        g_mcast_log_interval = atoi(gArgs.GetArg("-udpmulticastloginterval", ""));
+    if (gArgs.IsArgSet("-udpmulticastloginterval"))
+        g_mcast_log_interval = LocaleIndependentAtoi<uint32_t>(gArgs.GetArg("-udpmulticastloginterval", ""));
 
     const std::vector<std::pair<unsigned short, uint64_t>> group_list(GetUDPInboundPorts());
     for (std::pair<unsigned short, uint64_t> port : group_list) {
@@ -1888,25 +1886,19 @@ static bool ParseUDPMulticastTxOpt(UDPMulticastInfo& info,
             info.port = port;
         }
     } else if (opt == "bw") {
-        info.bw = atoi64(value);
+        info.bw = LocaleIndependentAtoi<uint64_t>(value);
     } else if (opt == "txn_per_sec") {
-        info.txn_per_sec = atoi(value);
+        info.txn_per_sec = LocaleIndependentAtoi<uint32_t>(value);
     } else if (opt == "ttl") {
-        info.ttl = atoi(value);
+        info.ttl = LocaleIndependentAtoi<uint8_t>(value);
     } else if (opt == "depth") {
-        info.depth = atoi(value);
-        if (info.depth < 0)
-            error = "depth must be >= 0";
+        info.depth = LocaleIndependentAtoi<uint32_t>(value);
     } else if (opt == "offset") {
-        info.offset = atoi(value);
-        if (info.offset < 0)
-            error = "offset must be >= 0\n";
+        info.offset = LocaleIndependentAtoi<uint32_t>(value);
     } else if (opt == "dscp") {
-        info.dscp = atoi(value);
+        info.dscp = LocaleIndependentAtoi<uint8_t>(value);
     } else if (opt == "interleave_len") {
-        info.interleave_len = atoi(value);
-        if (info.interleave_len < 1)
-            error = "interleave_len must be >= 1";
+        info.interleave_len = LocaleIndependentAtoi<uint32_t>(value);
     } else if (opt == "send_rep_blks") {
         info.send_rep_blks = (value == "true" || value == "1");
     } else if (opt == "relay_new_blks") {
@@ -1919,8 +1911,8 @@ static bool ParseUDPMulticastTxOpt(UDPMulticastInfo& info,
             // Assume the fixed overhead is given as an integer number, and that
             // the variable overhead is in "parts per thousand". With that,
             // avoid the locale dependent conversion provided by atof().
-            info.overhead_rep_blks.fixed = atoi(value.substr(0, pos));
-            info.overhead_rep_blks.variable = atoi(value.substr(pos + 1)) / 1000.0;
+            info.overhead_rep_blks.fixed = LocaleIndependentAtoi<uint32_t>(value.substr(0, pos));
+            info.overhead_rep_blks.variable = LocaleIndependentAtoi<uint32_t>(value.substr(pos + 1)) / 1000.0;
         }
     } else if (opt == "save_tx_state") {
         info.save_tx_state = (value == "true" || value == "1");
@@ -2031,9 +2023,9 @@ static bool ParseUDPMulticastInfo(const std::string& s, UDPMulticastInfo& info)
     const size_t trusted_end = s.find(',', tx_ip_end + 1);
 
     if (trusted_end == std::string::npos)
-        info.trusted = (bool)atoi64(s.substr(tx_ip_end + 1));
+        info.trusted = (bool)LocaleIndependentAtoi<uint8_t>(s.substr(tx_ip_end + 1));
     else {
-        info.trusted = (bool)atoi64(s.substr(tx_ip_end + 1, trusted_end - tx_ip_end - 1));
+        info.trusted = (bool)LocaleIndependentAtoi<uint8_t>(s.substr(tx_ip_end + 1, trusted_end - tx_ip_end - 1));
         info.groupname = s.substr(trusted_end + 1);
     }
 
@@ -2088,13 +2080,13 @@ std::vector<std::pair<unsigned short, uint64_t>> GetUDPInboundPorts()
             return std::vector<std::pair<unsigned short, uint64_t>>();
         }
 
-        int64_t port = atoi64(s.substr(0, port_end));
+        int64_t port = LocaleIndependentAtoi<int64_t>(s.substr(0, port_end));
         if (port != (unsigned short)port || port == 0) {
             LogPrintf("Failed to parse -udpport option, not starting Bitcoin Satellite\n");
             return std::vector<std::pair<unsigned short, uint64_t>>();
         }
 
-        int64_t group = atoi64(s.substr(port_end + 1, group_end - port_end - 1));
+        int64_t group = LocaleIndependentAtoi<int64_t>(s.substr(port_end + 1, group_end - port_end - 1));
         if (group < 0 || res.count(group)) {
             LogPrintf("Failed to parse -udpport option, not starting Bitcoin Satellite\n");
             return std::vector<std::pair<unsigned short, uint64_t>>();
@@ -2102,7 +2094,7 @@ std::vector<std::pair<unsigned short, uint64_t>> GetUDPInboundPorts()
 
         int64_t bw = 1024;
         if (group_end != std::string::npos) {
-            bw = atoi64(s.substr(group_end + 1));
+            bw = LocaleIndependentAtoi<int64_t>(s.substr(group_end + 1));
             if (bw < 0) {
                 LogPrintf("Failed to parse -udpport option, not starting Bitcoin Satellite\n");
                 return std::vector<std::pair<unsigned short, uint64_t>>();
