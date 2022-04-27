@@ -706,7 +706,7 @@ void test_script_roundtrip(CScript const s)
 {
     auto const ret = encode_push_only(s);
     BOOST_CHECK(ret.first);
-    auto const script = decode_push_only(MakeSpan(ret.second));
+    auto const script = decode_push_only(Span{ret.second});
     BOOST_CHECK(s == script);
 }
 
@@ -743,19 +743,19 @@ BOOST_AUTO_TEST_CASE(right_align_copy)
     BOOST_CHECK(dest == (r{0,0,0,0,0,0,0,0,0,0}));
 
     // dest is larger than src
-    right_align(MakeSpan(r{1, 2, 3, 4, 5}), MakeSpan(dest));
+    right_align(Span{r{1, 2, 3, 4, 5}}, Span{dest});
     BOOST_CHECK(dest == (r{0, 0, 0, 0, 0, 1, 2, 3, 4, 5}));
 
     dest = zero;
 
     // src is larger than dest
-    right_align(MakeSpan(r{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11}), MakeSpan(dest));
+    right_align(Span{r{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11}}, Span{dest});
     BOOST_CHECK(dest == (r{2, 3, 4, 5, 6, 7, 8, 9, 10, 11}));
 
     dest = zero;
 
     // src same size as dest
-    right_align(MakeSpan(r{1, 2, 3, 4, 5, 6, 7, 8, 9, 10}), MakeSpan(dest));
+    right_align(Span{r{1, 2, 3, 4, 5, 6, 7, 8, 9, 10}}, Span{dest});
     BOOST_CHECK(dest == (r{1, 2, 3, 4, 5, 6, 7, 8, 9, 10}));
 }
 
@@ -812,10 +812,10 @@ BOOST_AUTO_TEST_CASE(pad_sig)
     auto const padded3 = r{0x30, 11, 0x02, 3, 10, 11, 12, 0x02, 4, 13, 14, 15, 16, 3};
 
     // if sighashall is true, the flags *must* be 1
-    BOOST_CHECK(PadSig(MakeSpan(StripSig(padded0, false)), false) == padded0);
-    BOOST_CHECK(PadSig(MakeSpan(StripSig(padded1, false)), false) == padded1);
-    BOOST_CHECK(PadSig(MakeSpan(StripSig(padded3, false)), false) == padded3);
-    BOOST_CHECK(PadSig(MakeSpan(StripSig(padded1, true)), true) == padded1);
+    BOOST_CHECK(PadSig(Span{StripSig(padded0, false)}, false) == padded0);
+    BOOST_CHECK(PadSig(Span{StripSig(padded1, false)}, false) == padded1);
+    BOOST_CHECK(PadSig(Span{StripSig(padded3, false)}, false) == padded3);
+    BOOST_CHECK(PadSig(Span{StripSig(padded1, true)}, true) == padded1);
 
     {
     auto const padded = r{0x30, 40
@@ -823,7 +823,7 @@ BOOST_AUTO_TEST_CASE(pad_sig)
         , 0x02, 33, 0 // S
         , 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff
         , 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0};
-    BOOST_CHECK(PadSig(MakeSpan(StripSig(padded, false)), false) == padded);
+    BOOST_CHECK(PadSig(Span{StripSig(padded, false)}, false) == padded);
     }
 
     {
@@ -833,7 +833,7 @@ BOOST_AUTO_TEST_CASE(pad_sig)
         , 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff
         , 0x02, 3, 10, 11, 12
         , 0};
-    BOOST_CHECK(PadSig(MakeSpan(StripSig(padded, false)), false) == padded);
+    BOOST_CHECK(PadSig(Span{StripSig(padded, false)}, false) == padded);
     }
 
     {
@@ -843,7 +843,7 @@ BOOST_AUTO_TEST_CASE(pad_sig)
         , 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff
         , 0x02, 3, 10, 11, 12
         , 1};
-    BOOST_CHECK(PadSig(MakeSpan(StripSig(padded, true)), true) == padded);
+    BOOST_CHECK(PadSig(Span{StripSig(padded, true)}, true) == padded);
     }
 }
 
@@ -949,7 +949,7 @@ BOOST_AUTO_TEST_CASE(strip_pubkey)
     // it here, and pass it in as a separate argument.
     uint8_t const template_type = stripped[0];
     stripped.erase(stripped.begin());
-    valtype const result = PadPubKey(MakeSpan(stripped), template_type);
+    valtype const result = PadPubKey(Span{stripped}, template_type);
     BOOST_CHECK(result == pubkey);
     }
 }

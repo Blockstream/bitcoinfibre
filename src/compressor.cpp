@@ -295,8 +295,8 @@ void decompressTransaction(Stream& s, CMutableTransaction& tx)
                 if (txin.scriptWitness.stack.empty()) {
                     throw std::runtime_error("invalid compressed transaction. empty scriptwitness stack");
                 }
-                std::vector<valtype> const scriptsigstack{ PadHash(MakeSpan(txin.scriptWitness.stack.back()), iswitnesshash) };
-                txin.scriptSig = decode_push_only(MakeSpan(scriptsigstack));
+                std::vector<valtype> const scriptsigstack{ PadHash(Span{txin.scriptWitness.stack.back()}, iswitnesshash) };
+                txin.scriptSig = decode_push_only(Span{scriptsigstack});
             }
             break;
         case scriptSigTemplate::NONWIT_OTHER:
@@ -309,16 +309,16 @@ void decompressTransaction(Stream& s, CMutableTransaction& tx)
         case scriptSigTemplate::P2PK: {
             valtype SmallScriptSig;
             s >> SmallScriptSig;
-            std::vector<valtype> scriptsigstack { PadSig(MakeSpan(SmallScriptSig), TemplateCode % 2 == 0) };
-            txin.scriptSig = decode_push_only(MakeSpan(scriptsigstack));
+            std::vector<valtype> scriptsigstack { PadSig(Span{SmallScriptSig}, TemplateCode % 2 == 0) };
+            txin.scriptSig = decode_push_only(Span{scriptsigstack});
             break;
         }
         case scriptSigTemplate::P2PKH: {
             valtype SmallScriptSig;
             s >> SmallScriptSig;
-            std::vector<valtype> scriptsigstack = PadSingleKeyStack(MakeSpan(SmallScriptSig),
+            std::vector<valtype> scriptsigstack = PadSingleKeyStack(Span{SmallScriptSig},
                 TemplateCode / 2, TemplateType, sighashall);
-            txin.scriptSig = decode_push_only(MakeSpan(scriptsigstack));
+            txin.scriptSig = decode_push_only(Span{scriptsigstack});
             break;
         }
         case scriptSigTemplate::P2WPKH:
@@ -326,7 +326,7 @@ void decompressTransaction(Stream& s, CMutableTransaction& tx)
         case scriptSigTemplate::P2SH_P2WSH_P2PKH: {
             valtype SmallScriptSig;
             s >> SmallScriptSig;
-            std::vector<valtype> scriptsigstack = PadSingleKeyStack(MakeSpan(SmallScriptSig),
+            std::vector<valtype> scriptsigstack = PadSingleKeyStack(Span{SmallScriptSig},
                 TemplateCode / 2, TemplateType, sighashall);
 
             valtype temp;
@@ -339,7 +339,7 @@ void decompressTransaction(Stream& s, CMutableTransaction& tx)
                 txin.scriptWitness.stack = scriptsigstack;
                 scriptsigstack.clear();
                 scriptsigstack.push_back(temp);
-                txin.scriptSig = decode_push_only(MakeSpan(scriptsigstack));
+                txin.scriptSig = decode_push_only(Span{scriptsigstack});
             }
             else if (TemplateType == scriptSigTemplate::P2SH_P2WPKH) {
                 if (scriptsigstack.empty()) {
@@ -350,7 +350,7 @@ void decompressTransaction(Stream& s, CMutableTransaction& tx)
                 CScript const h = GetScriptForDestination(WitnessV0KeyHash(CPubKey(scriptsigstack[1]).GetID()));
                 scriptsigstack.clear();
                 scriptsigstack.push_back(valtype(h.begin(), h.end()));
-                txin.scriptSig = decode_push_only(MakeSpan(scriptsigstack));
+                txin.scriptSig = decode_push_only(Span{scriptsigstack});
             }
             else {
                 txin.scriptWitness.stack = scriptsigstack;
@@ -366,15 +366,15 @@ void decompressTransaction(Stream& s, CMutableTransaction& tx)
             std::vector<valtype> scriptsigstack = PadMultisig(SmallScriptSig, TemplateType, TemplateCode);
             if (TemplateType == scriptSigTemplate::MS
                 || TemplateType == scriptSigTemplate::P2SH_MS) {
-                txin.scriptSig = decode_push_only(MakeSpan(scriptsigstack));
+                txin.scriptSig = decode_push_only(Span{scriptsigstack});
             } else {
                 txin.scriptWitness.stack = scriptsigstack;
                 if (TemplateType == scriptSigTemplate::P2SH_P2WSH_MS) {
                     if (txin.scriptWitness.stack.empty()) {
                         throw std::runtime_error("invalid compressed transaction. empty scriptwitness stack");
                     }
-                    scriptsigstack.push_back(PadHash(MakeSpan(txin.scriptWitness.stack.back()), iswitnesshash));
-                    txin.scriptSig = decode_push_only(MakeSpan(scriptsigstack));
+                    scriptsigstack.push_back(PadHash(Span{txin.scriptWitness.stack.back()}, iswitnesshash));
+                    txin.scriptSig = decode_push_only(Span{scriptsigstack});
                 }
             }
             break;
@@ -408,7 +408,7 @@ void decompressTransaction(Stream& s, CMutableTransaction& tx)
             txout.scriptPubKey.resize(20);
         }
 
-        s >> MakeSpan(txout.scriptPubKey);
+        s >> Span{txout.scriptPubKey};
 
         if (TxOutCode < 24)
             PadScriptPubKey(TxOutCode, txout.scriptPubKey);
@@ -497,7 +497,7 @@ void compressTransaction(Stream& s, CTransaction const& tx)
             s << (uint8_t)txoutscriptdata.size();
         }
 
-        s << MakeSpan(txoutscriptdata);
+        s << Span{txoutscriptdata};
         uint64_t const amount = CompressAmount(tx.vout[i].nValue);
         s << VARINT(amount);
     }
@@ -663,7 +663,7 @@ bool IsFromEmbeddedMultisig(Span<valtype const> stack, stattype statistic)
     if (redeemscript.size() < 1 || redeemscript.back() != OP_CHECKMULTISIG) return false;
     redeemscript.pop_back();
     std::array<uint64_t, 3> multisigcache = {0, 0, 0};
-    if (IsFromMultisig(solostack, MakeSpan(multisigcache))) {
+    if (IsFromMultisig(solostack, Span{multisigcache})) {
         unsigned int const sigcount = (solostack.size() - 1);
 
         std::vector<valtype> redeemstack;
@@ -820,19 +820,19 @@ scriptSigTemplate AnalyzeScriptSig(size_t const txinindex, CTxIn const& in, stat
     std::tie(push_only, stack) = encode_push_only(in.scriptSig);
 
     if (push_only) {
-        if (IsFromPubKeyHash(MakeSpan(stack), witness, statistic)) return t::P2PKH;
-        else if (IsFromScriptHashMultisig(MakeSpan(stack), witness, statistic)) return t::P2SH_MS;
-        else if (IsFromScriptHashWitnessPubKeyHash(MakeSpan(stack), witness, statistic)) return t::P2SH_P2WPKH;
-        else if (IsFromScriptHashWitnessScriptHashMultisig(MakeSpan(stack), witness, statistic)) return t::P2SH_P2WSH_MS;
-        else if (IsFromWitnessPubKeyHash(MakeSpan(stack), witness, statistic)) return t::P2WPKH;
-        else if (IsFromPubKey(MakeSpan(stack), witness, statistic)) return t::P2PK;
-        else if (IsFromWitnessScriptHashMultisig(MakeSpan(stack), witness, statistic)) return t::P2WSH_MS;
-        else if (IsFromRawMultisig(MakeSpan(stack), witness, statistic)) return t::MS;
-        else if (IsFromScriptHashWitnessScriptHashPubKeyHash(MakeSpan(stack), witness, statistic)) return t::P2SH_P2WSH_P2PKH;
-        else if (IsFromScriptHashWitnessScriptHashOther(MakeSpan(stack), witness, statistic)) return t::P2SH_P2WSH_OTHER;
+        if (IsFromPubKeyHash(Span{stack}, witness, statistic)) return t::P2PKH;
+        else if (IsFromScriptHashMultisig(Span{stack}, witness, statistic)) return t::P2SH_MS;
+        else if (IsFromScriptHashWitnessPubKeyHash(Span{stack}, witness, statistic)) return t::P2SH_P2WPKH;
+        else if (IsFromScriptHashWitnessScriptHashMultisig(Span{stack}, witness, statistic)) return t::P2SH_P2WSH_MS;
+        else if (IsFromWitnessPubKeyHash(Span{stack}, witness, statistic)) return t::P2WPKH;
+        else if (IsFromPubKey(Span{stack}, witness, statistic)) return t::P2PK;
+        else if (IsFromWitnessScriptHashMultisig(Span{stack}, witness, statistic)) return t::P2WSH_MS;
+        else if (IsFromRawMultisig(Span{stack}, witness, statistic)) return t::MS;
+        else if (IsFromScriptHashWitnessScriptHashPubKeyHash(Span{stack}, witness, statistic)) return t::P2SH_P2WSH_P2PKH;
+        else if (IsFromScriptHashWitnessScriptHashOther(Span{stack}, witness, statistic)) return t::P2SH_P2WSH_OTHER;
     }
-    if (IsFromNonWitnessOther(MakeSpan(stack), witness, statistic)) return t::NONWIT_OTHER;
-    else if (IsFromWitnessOther(MakeSpan(stack), witness, statistic)) return t::WIT_OTHER;
+    if (IsFromNonWitnessOther(Span{stack}, witness, statistic)) return t::NONWIT_OTHER;
+    else if (IsFromWitnessOther(Span{stack}, witness, statistic)) return t::WIT_OTHER;
     else {
         statistic[0] += witness.size();
         statistic[1]++;
@@ -864,13 +864,13 @@ valtype StripSig(const valtype &sig, bool const sighashall)
     // if r_len < 32, it means it's a smaller value, we need to pad it with leading zeroes
 
     std::ptrdiff_t offset = 4;
-    right_align(Span<const uint8_t>(sig.data() + offset, r_len), MakeSpan(ret).subspan(0, 32));
+    right_align(Span<const uint8_t>(sig.data() + offset, r_len), Span{ret}.subspan(0, 32));
 
     offset += r_len + 1;
     const std::ptrdiff_t s_len = sig[offset];
     offset += 1;
 
-    right_align(Span<const uint8_t>(sig.data() + offset, s_len), MakeSpan(ret).subspan(32, 32));
+    right_align(Span<const uint8_t>(sig.data() + offset, s_len), Span{ret}.subspan(32, 32));
     if (!sighashall) {
         assert((long int) sig.size() == offset + s_len + 1);
         ret.push_back(sig.back());
@@ -982,7 +982,7 @@ std::pair<uint16_t, valtype> GenerateScriptSigHeader(size_t const txinindex, CTx
         witnessstack = in.scriptWitness.stack;
     }
     bool sighashall = true;
-    scriptSigTemplate const templateType = AnalyzeScriptSig(txinindex, in, MakeSpan(statistic));
+    scriptSigTemplate const templateType = AnalyzeScriptSig(txinindex, in, Span{statistic});
     if (statistic[0] != 0)
         sighashall = false;
 
@@ -1009,13 +1009,13 @@ std::pair<uint16_t, valtype> GenerateScriptSigHeader(size_t const txinindex, CTx
         if (templateType == scriptSigTemplate::P2PKH) {
             uint8_t head;
             valtype ret;
-            std::tie(head, ret) = StripSigPubKey(MakeSpan(stack), sighashall);
+            std::tie(head, ret) = StripSigPubKey(Span{stack}, sighashall);
             ScriptSigHeader += head;
             return { ScriptSigHeader, std::move(ret) };
         } else {
             uint8_t head;
             valtype ret;
-            std::tie(head, ret) = StripSigPubKey(MakeSpan(witnessstack), sighashall);
+            std::tie(head, ret) = StripSigPubKey(Span{witnessstack}, sighashall);
             ScriptSigHeader += head;
             return { ScriptSigHeader, std::move(ret) };
         }
@@ -1024,7 +1024,7 @@ std::pair<uint16_t, valtype> GenerateScriptSigHeader(size_t const txinindex, CTx
     case scriptSigTemplate::MS:
         ScriptSigHeader += 38;
         ScriptSigHeader += (statistic[2] - 1);
-        SmallScriptSig = StripAllSigs(MakeSpan(stack), sighashall);
+        SmallScriptSig = StripAllSigs(Span{stack}, sighashall);
         break;
     default:
         ScriptSigHeader += 38 + (static_cast<uint8_t>(templateType) - 9);
@@ -1039,8 +1039,8 @@ std::pair<uint16_t, valtype> GenerateScriptSigHeader(size_t const txinindex, CTx
         sigstack.pop_back();
         pkstack.erase(pkstack.begin());
         pkstack.pop_back();
-        SmallScriptSig = StripAllSigs(MakeSpan(sigstack), sighashall);
-        valtype const strippedpubkeys = StripAllPubKeys(MakeSpan(pkstack));
+        SmallScriptSig = StripAllSigs(Span{sigstack}, sighashall);
+        valtype const strippedpubkeys = StripAllPubKeys(Span{pkstack});
         SmallScriptSig.insert(SmallScriptSig.end(), strippedpubkeys.begin(), strippedpubkeys.end());
         break;
     }
@@ -1338,7 +1338,7 @@ std::vector<valtype> PadSingleKeyStack(Span<unsigned char const> const strippeds
             ret.resize(2);
             ret.emplace_back(pubkeyhash.begin(), pubkeyhash.end());
         }
-        ret.push_back(PadHash(MakeSpan(ret.back()), iswitnesshash));
+        ret.push_back(PadHash(Span{ret.back()}, iswitnesshash));
         break;
     }
     default: break;
@@ -1391,7 +1391,7 @@ void PadAllPubkeys(valtype &strippedstack, std::vector<valtype>& paddedstack, ui
         uint8_t const groupsize = std::min(4, remainingkeys);
         for (int j = 0; j < groupsize; ++i, ++j) {
             valtype temp(strippedstack.begin(), strippedstack.begin() + 32);
-            temp = PadPubKey(MakeSpan(temp), pubkeyprefixes[i]);
+            temp = PadPubKey(Span{temp}, pubkeyprefixes[i]);
             paddedstack.push_back(temp);
             strippedstack.erase(strippedstack.begin(), strippedstack.begin()+32);
         }
@@ -1415,7 +1415,7 @@ std::vector<valtype> PadMultisig(valtype strippedstack, scriptSigTemplate const 
     uint8_t const offset = 64 + sighashnotall;
     for (int i = 0; i < k; ++i) {
         valtype tmp(strippedstack.begin(), strippedstack.begin()+offset);
-        ret[i+1] = PadSig(MakeSpan(tmp), TemplateCode % 2 == 0);
+        ret[i+1] = PadSig(Span{tmp}, TemplateCode % 2 == 0);
         strippedstack.erase(strippedstack.begin(), strippedstack.begin()+offset);
     }
     if (TemplateType != scriptSigTemplate::MS) {
@@ -1425,7 +1425,7 @@ std::vector<valtype> PadMultisig(valtype strippedstack, scriptSigTemplate const 
         PadAllPubkeys(strippedstack, redeemstack, n);
         redeemstack.push_back({n});
         redeemstack.push_back({OP_CHECKMULTISIG});
-        redeemscript = decode_push_only(MakeSpan(redeemstack));
+        redeemscript = decode_push_only(Span{redeemstack});
         ret.emplace_back(redeemscript.begin(), redeemscript.end());
     }
     return ret;
