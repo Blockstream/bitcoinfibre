@@ -885,7 +885,7 @@ void blockAnalyzer(const CBlock& block, std::vector<std::array<uint64_t, 3>>& st
     {
         for (size_t j = 0; j < block.vtx[i]->vin.size(); ++j)
         {
-            auto const scriptSigType = AnalyzeScriptSig(j, block.vtx[i]->vin[j], MakeSpan(statistic));
+            auto const scriptSigType = AnalyzeScriptSig(j, block.vtx[i]->vin[j], Span{statistic});
             auto const idx = static_cast<uint8_t>(scriptSigType);
             statistics[idx][0] += statistic[0];
             statistics[idx][1] += statistic[1];
@@ -954,7 +954,7 @@ RPCHelpMan getblockanalysis()
         if (!ReadBlockFromDisk(block, chainman.ActiveChain()[index], Params().GetConsensus()))
             throw JSONRPCError(RPC_MISC_ERROR, "Block not found on disk.");
 
-        blockAnalyzer(block, finalstatistics, MakeSpan(finalmultisigstats));
+        blockAnalyzer(block, finalstatistics, Span{finalmultisigstats});
     }
 
     uint64_t finaltotal = 0;
