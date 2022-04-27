@@ -40,7 +40,7 @@ static int ExtractHeightFromBlock(const Consensus::Params& consensusParams, cons
     }
 }
 
-static const char DB_SUBSEQUENT_BLOCK = 'S';
+static const unsigned char DB_SUBSEQUENT_BLOCK = 'S';
 
 static RecursiveMutex cs_ooob;
 static std::unique_ptr<CDBWrapper> ooob_db;
@@ -130,7 +130,7 @@ void CheckForOoOBlocks(ChainstateManager& chainman, const CChainParams& chainpar
 
         LOCK(cs_main);
         for (pcursor->Seek(std::make_pair(DB_SUBSEQUENT_BLOCK, uint256())); pcursor->Valid(); pcursor->Next()) {
-            std::pair<char, uint256> key;
+            std::pair<unsigned char, uint256> key;
             if (!(pcursor->GetKey(key) && key.first == DB_SUBSEQUENT_BLOCK)) break;
 
             const uint256& prev_block_hash = key.second;
@@ -168,7 +168,7 @@ std::map<uint256, std::vector<uint256>> GetOoOBlockMap()
         std::unique_ptr<CDBIterator> pcursor(ooob_db->NewIterator());
 
         for (pcursor->SeekToFirst(); pcursor->Valid(); pcursor->Next()) {
-            std::pair<char, uint256> key;
+            std::pair<unsigned char, uint256> key;
             std::map<uint256, FlatFilePos> successors;
             if (!pcursor->GetKey(key)) {
                 LogPrintf("Warning: failed to read key from out-of-order block database\n");
