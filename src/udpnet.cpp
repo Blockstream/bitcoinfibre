@@ -14,8 +14,8 @@
 #include <udpnet.h>
 #include <udprelay.h>
 
-#include <bloom.h>
 #include <chainparams.h>
+#include <common/bloom.h>
 #include <compat/endian.h>
 #include <consensus/validation.h>
 #include <crypto/poly1305.h>
