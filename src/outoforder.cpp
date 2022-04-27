@@ -58,7 +58,7 @@ void ResetOoOBlockDb()
     ooob_db.reset();
 }
 
-bool StoreOoOBlock(const ChainstateManager& chainman, const CChainParams& chainparams, const std::shared_ptr<const CBlock> pblock, const bool force, const int in_height)
+bool StoreOoOBlock(ChainstateManager& chainman, const CChainParams& chainparams, const std::shared_ptr<const CBlock> pblock, const bool force, const int in_height)
 {
     LOCK(cs_ooob);
     LOCK(cs_main);
@@ -81,7 +81,7 @@ bool StoreOoOBlock(const ChainstateManager& chainman, const CChainParams& chainp
     if (!force && (height > int(chainman.ActiveHeight() + MIN_BLOCKS_TO_KEEP))) return false;
 
     LogPrintf("Adding block %s (height %u) to out-of-order disk cache\n", pblock->GetHash().GetHex(), height);
-    const FlatFilePos diskpos = SaveBlockToDisk(*pblock, height, chainman.ActiveChain(), chainparams, nullptr);
+    const FlatFilePos diskpos = chainman.m_blockman.SaveBlockToDisk(*pblock, height, chainman.ActiveChain(), chainparams, nullptr);
     successors.emplace(pblock->GetHash(), diskpos);
     if (!ooob_db->Write(key, successors)) {
         LogPrintf("ERROR adding block %s to out-of-order disk cache\n", pblock->GetHash().GetHex());
