@@ -326,7 +326,7 @@ public:
     template <typename Stream>
     inline void Serialize(Stream& s) const {
         if (encodedForm.size() && s.GetVersion() == PROTOCOL_VERSION)
-            s.write((const char*)&encodedForm[0], encodedForm.size());
+            s.write(MakeByteSpan(encodedForm));
         else
             SerializeTransaction(*this, s);
     }
