@@ -2,7 +2,7 @@
 #include <boost/test/unit_test.hpp>
 #include <chainparams.h>
 #include <fec.h>
-#include <miner.h>
+#include <node/miner.h>
 #include <outoforder.h>
 #include <pow.h>
 #include <test/util/setup_common.h>
@@ -54,7 +54,7 @@ struct UdpRelayTestingSetup : public RegTestingSetup {
         CScript script_pubkey;
         script_pubkey << 1 << OP_TRUE;
         const CChainParams& chainparams = Params();
-        auto pblocktemplate = BlockAssembler(m_node.chainman->ActiveChainstate(), *m_node.mempool, chainparams).CreateNewBlock(script_pubkey);
+        auto pblocktemplate = node::BlockAssembler(m_node.chainman->ActiveChainstate(), *m_node.mempool, chainparams).CreateNewBlock(script_pubkey);
         CBlock& block = pblocktemplate->block;
         block.hashPrevBlock = prev->GetBlockHash();
         block.nTime = prev->nTime + 1;
@@ -62,7 +62,7 @@ struct UdpRelayTestingSetup : public RegTestingSetup {
 
         // IncrementExtraNonce creates a valid coinbase and merkleRoot
         unsigned int extraNonce = 0;
-        IncrementExtraNonce(&block, prev, extraNonce);
+        node::IncrementExtraNonce(&block, prev, extraNonce);
 
         while (!CheckProofOfWork(block.GetHash(), block.nBits, chainparams.GetConsensus()))
             ++block.nNonce;

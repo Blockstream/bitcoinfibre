@@ -29,7 +29,7 @@ bool BackfillBlockWindow::Add(const CBlockIndex* pindex, const FecOverhead& over
     // from disk may take long)
     window_lock.unlock();
     CBlock block;
-    assert(ReadBlockFromDisk(block, pindex, Params().GetConsensus()));
+    assert(node::ReadBlockFromDisk(block, pindex, Params().GetConsensus()));
     const uint256 block_hash(block.GetHash());
 
     // Fill the FEC messages on the backfill block

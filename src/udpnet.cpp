@@ -91,7 +91,7 @@ static std::map<CService, UDPConnectionInfo> mapPersistentNodes;
 
 static int g_mcast_log_interval = 10;
 
-static NodeContext* g_node_context; // Initialized by InitializeUDPConnections
+static node::NodeContext* g_node_context; // Initialized by InitializeUDPConnections
 
 /*
  * UDP multicast service
@@ -629,7 +629,7 @@ UniValue UdpMulticastRxInfoToJson()
     return ret;
 }
 
-bool InitializeUDPConnections(NodeContext* const node_context)
+bool InitializeUDPConnections(node::NodeContext* const node_context)
 {
     assert(udp_write_threads.empty() && !udp_read_thread);
     g_node_context = node_context;
@@ -1781,7 +1781,7 @@ void MulticastTxBlock(const int height, codec_version_t codec_version)
     }
 
     CBlock block;
-    assert(ReadBlockFromDisk(block, pindex, Params().GetConsensus()));
+    assert(node::ReadBlockFromDisk(block, pindex, Params().GetConsensus()));
 
     for (const auto& node : multicast_nodes()) {
         // Send over the multicasttx instances enabled for block relaying

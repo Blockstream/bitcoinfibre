@@ -1469,7 +1469,7 @@ static void BlockMsgHToLE(UDPMessage& msg)
     msg.msg.block.chunk_id = htole32(msg.msg.block.chunk_id);
 }
 
-static bool HandleTx(UDPMessage& msg, size_t length, const CService& node, UDPConnectionState& state, const NodeContext* const node_context)
+static bool HandleTx(UDPMessage& msg, size_t length, const CService& node, UDPConnectionState& state, const node::NodeContext* const node_context)
 {
     if (msg.msg.block.obj_length > 400000) {
         LogPrintf("UDP: Got massive tx obj_length of %u\n", msg.msg.block.obj_length);
@@ -1524,7 +1524,7 @@ static bool HandleTx(UDPMessage& msg, size_t length, const CService& node, UDPCo
     return true;
 }
 
-bool HandleBlockTxMessage(UDPMessage& msg, size_t length, const CService& node, UDPConnectionState& state, const std::chrono::steady_clock::time_point& packet_process_start, const NodeContext* const node_context)
+bool HandleBlockTxMessage(UDPMessage& msg, size_t length, const CService& node, UDPConnectionState& state, const std::chrono::steady_clock::time_point& packet_process_start, const node::NodeContext* const node_context)
 {
     //TODO: There are way too many damn tree lookups here...either cut them down or increase parallelism
     const bool fBench = LogAcceptCategory(BCLog::BENCH);

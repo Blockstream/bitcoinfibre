@@ -108,7 +108,7 @@ void ProcessSuccessorOoOBlocks(ChainstateManager& chainman, const CChainParams& 
         for (const auto& successor : successors) {
             std::shared_ptr<CBlock> pblock = std::make_shared<CBlock>();
             CBlock& block = *pblock;
-            if (!ReadBlockFromDisk(block, successor.second, chainparams.GetConsensus())) {
+            if (!node::ReadBlockFromDisk(block, successor.second, chainparams.GetConsensus())) {
                 continue;
             }
             LogPrintf("Accepting deferred block %s from out-of-order disk cache\n", block.GetHash().GetHex());
