@@ -490,10 +490,10 @@ public:
         return *this;
     }
 
-    VectorOutputStream& write(const char* pch, size_t nSize) {
-        resize_v(nSize);
-        memcpy(&(*v)[nPos], pch, nSize);
-        nPos += nSize;
+    VectorOutputStream& write(Span<const std::byte> src) {
+        resize_v(src.size());
+        memcpy(&(*v)[nPos], src.data(), src.size());
+        nPos += src.size();
         return *this;
     }
 
@@ -527,12 +527,12 @@ public:
         return *this;
     }
 
-    VectorInputStream& read(char* pch, size_t nSize) {
+    VectorInputStream& read(Span<std::byte> dst) {
         // Read from the beginning of the buffer
-        unsigned int nReadPosNext = nReadPos + nSize;
+        unsigned int nReadPosNext = nReadPos + dst.size();
         if (nReadPosNext > v->size())
             throw std::ios_base::failure("CVectorStream::read(): end of data");
-        memcpy(pch, &(*v)[nReadPos], nSize);
+        memcpy(dst.data(), &(*v)[nReadPos], dst.size());
         nReadPos = nReadPosNext;
         return (*this);
     }
