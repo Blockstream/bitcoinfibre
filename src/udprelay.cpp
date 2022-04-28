@@ -1510,7 +1510,7 @@ static bool HandleTx(UDPMessage& msg, size_t length, const CService& node, UDPCo
             stream >> CTxCompressor(tx, codec_version);
             LOCK(cs_main);
             TxValidationState state;
-            const MempoolAcceptResult result = AcceptToMemoryPool(node_context->chainman->ActiveChainstate(), *node_context->mempool.get(), tx, false);
+            const MempoolAcceptResult result = AcceptToMemoryPool(node_context->chainman->ActiveChainstate(), tx, GetTime(), /*bypass_limits=*/false, /*test_accept=*/false);
             if (result.m_result_type == MempoolAcceptResult::ResultType::VALID) {
                 node_context->peerman->RelayTransaction(tx->GetHash(), tx->GetWitnessHash());
             }
