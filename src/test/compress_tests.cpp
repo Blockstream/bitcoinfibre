@@ -387,12 +387,12 @@ bool round_trip_compress_transaction(CMutableTransaction& tx)
     stream >> CTxCompressor(ret, codec_version_t::v1);
 
     stream << tx;
-    SerializeData original;
+    std::vector<unsigned char> original;
     stream >> original;
     stream.clear();
 
     stream << ret;
-    SerializeData round_tripped;
+    std::vector<unsigned char> round_tripped;
     stream >> round_tripped;
     stream.clear();
 

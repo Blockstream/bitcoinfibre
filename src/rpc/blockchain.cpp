@@ -49,6 +49,7 @@
 #include <warnings.h>
 
 #include <stdint.h>
+#include <fstream>
 
 #include <boost/algorithm/string.hpp>
 #include <compressor.h>
@@ -1090,7 +1091,7 @@ RPCHelpMan testcompression()
             std::array<char, 50> name;
             snprintf(name.data(), name.size(), "./test-tx/tx-%05d", txcount);
             {
-                SerializeData data;
+                std::vector<unsigned char> data;
                 str >> data;
                 std::ofstream f(name.data());
                 f.write((char *)data.data(), data.size());
