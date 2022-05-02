@@ -37,7 +37,6 @@
 
 #include <event2/event.h>
 
-#include <boost/thread.hpp>
 #include <poll.h>
 
 #include <boost/optional.hpp>
@@ -49,6 +48,7 @@
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
+#include <fstream>
 #include <future>
 #include <thread>
 

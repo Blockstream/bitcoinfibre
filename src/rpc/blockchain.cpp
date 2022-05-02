@@ -54,8 +54,6 @@
 #include <boost/algorithm/string.hpp>
 #include <compressor.h>
 
-#include <boost/thread/thread.hpp> // boost::thread::interrupt
-
 #include <condition_variable>
 #include <memory>
 #include <mutex>
