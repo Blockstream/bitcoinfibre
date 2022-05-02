@@ -15,7 +15,7 @@
 #include <span.h>
 #include <hash.h>
 #include <array>
-#include <boost/variant.hpp>
+#include <variant>
 
 using valtype = std::vector<unsigned char>;
 using stattype = Span<uint64_t>;
@@ -235,22 +235,22 @@ struct CTxCompressor
     template<typename Stream>
     void Serialize(Stream& s) const {
         if (codec_version == codec_version_t::none) {
-            if (boost::get<CTransactionRef*>(&tx) != nullptr) {
-                s << **boost::get<CTransactionRef*>(tx);
+            if (std::holds_alternative<CTransactionRef*>(tx)) {
+                s << **std::get<CTransactionRef*>(tx);
             }
-            else if (boost::get<CTransaction const*>(&tx) != nullptr) {
-                s << *boost::get<CTransaction const*>(tx);
+            else if (std::holds_alternative<CTransaction const*>(tx)) {
+                s << *std::get<CTransaction const*>(tx);
             }
             else {
                 throw std::runtime_error("cannot serialize CMutableTransaction");
             }
         }
         else if (codec_version == codec_version_t::v1) {
-            if (boost::get<CTransactionRef*>(&tx) != nullptr) {
-                compressTransaction(s, **boost::get<CTransactionRef*>(tx));
+            if (std::holds_alternative<CTransactionRef*>(tx)) {
+                compressTransaction(s, **std::get<CTransactionRef*>(tx));
             }
-            else if (boost::get<CTransaction const*>(&tx) != nullptr) {
-                compressTransaction(s, *boost::get<CTransaction const*>(tx));
+            else if (std::holds_alternative<CTransaction const*>(tx)) {
+                compressTransaction(s, *std::get<CTransaction const*>(tx));
             }
             else {
                 throw std::runtime_error("cannot serialize CMutableTransaction");
@@ -264,24 +264,24 @@ struct CTxCompressor
     template<typename Stream>
     void Unserialize(Stream& s) {
         if (codec_version == codec_version_t::none) {
-            if (boost::get<CTransactionRef*>(&tx) != nullptr) {
-                s >> *boost::get<CTransactionRef*>(tx);
+            if (std::holds_alternative<CTransactionRef*>(tx)) {
+                s >> *std::get<CTransactionRef*>(tx);
             }
-            else if (boost::get<CMutableTransaction*>(&tx) != nullptr) {
-                s >> *boost::get<CMutableTransaction*>(tx);
+            else if (std::holds_alternative<CMutableTransaction*>(tx)) {
+                s >> *std::get<CMutableTransaction*>(tx);
             }
             else {
                 throw std::runtime_error("cannot un-serialize into CTransaction");
            }
         }
         else if (codec_version == codec_version_t::v1) {
-            if (boost::get<CTransactionRef*>(&tx) != nullptr) {
+            if (std::holds_alternative<CTransactionRef*>(tx)) {
                 CMutableTransaction local_tx;
                 decompressTransaction(s, local_tx);
-                *boost::get<CTransactionRef*>(tx) = MakeTransactionRef(std::move(local_tx));
+                *std::get<CTransactionRef*>(tx) = MakeTransactionRef(std::move(local_tx));
             }
-            else if (boost::get<CMutableTransaction*>(&tx) != nullptr) {
-                decompressTransaction(s, *boost::get<CMutableTransaction*>(tx));
+            else if (std::holds_alternative<CMutableTransaction*>(tx)) {
+                decompressTransaction(s, *std::get<CMutableTransaction*>(tx));
             }
             else {
                 throw std::runtime_error("cannot un-serialize into CTransaction");
@@ -292,7 +292,7 @@ struct CTxCompressor
         }
     }
 private:
-    boost::variant<CMutableTransaction*, CTransaction const*, CTransactionRef*> tx;
+    std::variant<CMutableTransaction*, CTransaction const*, CTransactionRef*> tx;
     codec_version_t codec_version = codec_version_t::v1;
 };
 
