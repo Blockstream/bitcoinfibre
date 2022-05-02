@@ -1,4 +1,4 @@
-FROM fedora:33
+FROM fedora:35
 
 # Add blockstream/satellite copr repo to fetch libdb4
 RUN dnf install -y dnf-plugins-core
