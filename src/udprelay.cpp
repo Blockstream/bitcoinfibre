@@ -28,8 +28,6 @@
 #include <boost/utility/in_place_factory.hpp> // for boost::in_place
 #endif
 
-#include <boost/thread.hpp>
-
 #define to_millis_double(t) (std::chrono::duration_cast<std::chrono::duration<double, std::chrono::milliseconds::period>>(t).count())
 #define DIV_CEIL(a, b) (((a) + (b)-1) / (b))
 

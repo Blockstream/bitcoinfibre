@@ -2,9 +2,9 @@
 #define BITCOIN_MMAP_STORAGE_H
 
 #include "exchange.h"
-#include <boost/filesystem.hpp>
 #include <fcntl.h>
 #include <sys/mman.h>
+#include <unistd.h>
 
 /**
  * @brief Handler for chunked-data storage on memory-mapped file
