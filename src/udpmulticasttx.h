@@ -2,6 +2,7 @@
 #ifndef BITCOIN_UDPMULTICASTTX_H
 #define BITCOIN_UDPMULTICASTTX_H
 
+#include <sync.h>
 #include <udpmulticasttxdb.h>
 #include <udpnet.h>
 
@@ -21,7 +22,7 @@ class BackfillBlockWindow
 {
 private:
     BackfillBlockWindowMap m_map; // window of backfill blocks
-    std::mutex m_mutex;           // protects m_map
+    Mutex m_mutex;                // protects m_map
     uint64_t m_bytes_in_window = 0;
     std::pair<uint16_t, uint16_t> m_tx_idx; // Tx physical/logical index
     const bool m_save_progress;
