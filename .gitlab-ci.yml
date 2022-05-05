@@ -145,7 +145,7 @@ test:i686:
 
 .pkg-build:
   stage: build
-  timeout: 12h
+  timeout: 36h
   only:
     variables:
       - $CI_COMMIT_TAG =~ /^v(\d+\.)(\d+)-satellite(\d+\.)(\d+\.)(\d+)$/
