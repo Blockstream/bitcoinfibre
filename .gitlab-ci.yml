@@ -212,7 +212,7 @@ rpm-packages:
   parallel:
     matrix:
       - TARGET: [
-        "epel-8-x86_64",
+        "alma+epel-8-x86_64",
         "fedora-34-x86_64",
         "fedora-34-i386",
         "fedora-35-x86_64",
