@@ -390,13 +390,13 @@ static bool InitializeUDPMulticast(std::vector<int>& udp_socks,
 
         int opt = 1;
         if (setsockopt(udp_socks.back(), SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt)) != 0) {
-            LogPrintf("UDP: setsockopt failed: %s\n", strerror(errno));
+            LogPrintf("UDP: setsockopt failed: %s\n", NetworkErrorString(errno));
             return false;
         }
 
         opt = 0;
         if (setsockopt(udp_socks.back(), IPPROTO_IPV6, IPV6_V6ONLY, &opt, sizeof(opt)) != 0) {
-            LogPrintf("UDP: setsockopt failed: %s\n", strerror(errno));
+            LogPrintf("UDP: setsockopt failed: %s\n", NetworkErrorString(errno));
             return false;
         }
 
@@ -412,7 +412,7 @@ static bool InitializeUDPMulticast(std::vector<int>& udp_socks,
         wildcard.sin6_port = htons(multicast_port);
 
         if (bind(udp_socks.back(), (sockaddr*)&wildcard, sizeof(wildcard))) {
-            LogPrintf("UDP: bind failed: %s\n", strerror(errno));
+            LogPrintf("UDP: bind failed: %s\n", NetworkErrorString(errno));
             return false;
         }
 
@@ -420,7 +420,7 @@ static bool InitializeUDPMulticast(std::vector<int>& udp_socks,
         const int ifindex = if_nametoindex(mcast_info.ifname);
         if (ifindex == 0) {
             LogPrintf("Error: couldn't find an index for interface %s: %s\n",
-                      mcast_info.ifname, strerror(errno));
+                      mcast_info.ifname, NetworkErrorString(errno));
             return false;
         }
 
@@ -441,13 +441,13 @@ static bool InitializeUDPMulticast(std::vector<int>& udp_socks,
             /* Don't loop messages that we send back to us */
             int no_loop = 0;
             if (setsockopt(udp_socks.back(), IPPROTO_IP, IP_MULTICAST_LOOP, &no_loop, sizeof(no_loop)) != 0) {
-                LogPrintf("UDP: setsockopt(IP_MULTICAST_LOOP) failed: %s\n", strerror(errno));
+                LogPrintf("UDP: setsockopt(IP_MULTICAST_LOOP) failed: %s\n", NetworkErrorString(errno));
                 return false;
             }
 
             /* Set TTL of multicast messages */
             if (setsockopt(udp_socks.back(), IPPROTO_IP, IP_MULTICAST_TTL, &mcast_info.ttl, sizeof(mcast_info.ttl)) != 0) {
-                LogPrintf("UDP: setsockopt(IP_MULTICAST_TTL) failed: %s\n", strerror(errno));
+                LogPrintf("UDP: setsockopt(IP_MULTICAST_TTL) failed: %s\n", NetworkErrorString(errno));
                 return false;
             }
 
@@ -460,13 +460,13 @@ static bool InitializeUDPMulticast(std::vector<int>& udp_socks,
             memset(&req, 0, sizeof(req));
             req.imr_ifindex = ifindex;
             if (setsockopt(udp_socks.back(), IPPROTO_IP, IP_MULTICAST_IF, &req, sizeof(req)) != 0) {
-                LogPrintf("UDP: setsockopt(IP_MULTICAST_IF) failed: %s\n", strerror(errno));
+                LogPrintf("UDP: setsockopt(IP_MULTICAST_IF) failed: %s\n", NetworkErrorString(errno));
                 return false;
             }
 
             /* DSCP */
             if (setsockopt(udp_socks.back(), IPPROTO_IP, IP_TOS, &mcast_info.dscp, sizeof(mcast_info.dscp)) != 0) {
-                LogPrintf("UDP: setsockopt failed: %s\n", strerror(errno));
+                LogPrintf("UDP: setsockopt failed: %s\n", NetworkErrorString(errno));
                 return false;
             }
 
@@ -479,7 +479,7 @@ static bool InitializeUDPMulticast(std::vector<int>& udp_socks,
             int actual_rcvbuf;
             socklen_t optlen = sizeof(actual_rcvbuf);
             if (getsockopt(udp_socks.back(), SOL_SOCKET, SO_RCVBUF, &actual_rcvbuf, &optlen) != 0) {
-                LogPrintf("UDP: getsockopt(SO_RCVBUF) failed: %s\n", strerror(errno));
+                LogPrintf("UDP: getsockopt(SO_RCVBUF) failed: %s\n", NetworkErrorString(errno));
                 return false;
             }
             actual_rcvbuf >>= 1; // getsockopt returns double the rcvbuf size
@@ -488,7 +488,7 @@ static bool InitializeUDPMulticast(std::vector<int>& udp_socks,
             const int min_rcvbuf = 1000 * PACKET_SIZE;
             if (actual_rcvbuf < min_rcvbuf) {
                 if (setsockopt(udp_socks.back(), SOL_SOCKET, SO_RCVBUF, &min_rcvbuf, sizeof(int)) != 0) {
-                    LogPrintf("UDP: setsockopt(SO_RCVBUF) failed: %s\n", strerror(errno));
+                    LogPrintf("UDP: setsockopt(SO_RCVBUF) failed: %s\n", NetworkErrorString(errno));
                     return false;
                 }
 
@@ -496,7 +496,7 @@ static bool InitializeUDPMulticast(std::vector<int>& udp_socks,
                  * rmem_max setting. Double check: */
                 socklen_t optlen = sizeof(actual_rcvbuf);
                 if (getsockopt(udp_socks.back(), SOL_SOCKET, SO_RCVBUF, &actual_rcvbuf, &optlen) != 0) {
-                    LogPrintf("UDP: getsockopt(SO_RCVBUF) failed: %s\n", strerror(errno));
+                    LogPrintf("UDP: getsockopt(SO_RCVBUF) failed: %s\n", NetworkErrorString(errno));
                     return false;
                 }
                 actual_rcvbuf >>= 1; // getsockopt returns double the rcvbuf size
@@ -524,7 +524,7 @@ static bool InitializeUDPMulticast(std::vector<int>& udp_socks,
             inet_pton(AF_INET, mcast_info.tx_ip, &(req.imr_sourceaddr));
 
             if (setsockopt(udp_socks.back(), IPPROTO_IP, IP_ADD_SOURCE_MEMBERSHIP, &req, sizeof(req)) != 0) {
-                LogPrintf("UDP: setsockopt(IP_ADD_SOURCE_MEMBERSHIP) failed: %s\n", strerror(errno));
+                LogPrintf("UDP: setsockopt(IP_ADD_SOURCE_MEMBERSHIP) failed: %s\n", NetworkErrorString(errno));
                 return false;
             }
 
@@ -857,7 +857,7 @@ static void read_socket_func(evutil_socket_t fd, short event, void* arg)
     ssize_t res = recvfrom(fd, &msg, sizeof(msg), MSG_DONTWAIT, (sockaddr*)&remoteaddr, &remoteaddrlen);
     if (res < 0) {
         int err = errno;
-        LogPrintf("UDP: Error reading from socket: %d (%s)!\n", err, strerror(err));
+        LogPrintf("UDP: Error reading from socket: %d (%s)!\n", err, NetworkErrorString(err));
         return;
     }
     assert(remoteaddrlen == sizeof(remoteaddr));
@@ -1277,7 +1277,7 @@ static void do_send_messages()
                         wouldblock = true;
                     } else {
                         LogPrintf("UDP: sendto to group %zu failed: %s\n",
-                                  group, strerror(errno));
+                                  group, NetworkErrorString(errno));
                     }
                     break;
                 }
@@ -1367,7 +1367,7 @@ static void do_send_messages()
             if (n_ready == 0) {
                 LogPrintf("UDP: unexpected poll timeout\n");
             } else if (n_ready < 0) {
-                LogPrintf("UDP: unexpected poll error: %s\n", strerror(errno));
+                LogPrintf("UDP: unexpected poll error: %s\n", NetworkErrorString(errno));
             }
         }
 
