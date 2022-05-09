@@ -3,6 +3,6 @@
 #define BITCOIN_FORKVERSION_H
 
 #define FORK_PACKAGE "Bitcoin Satellite"
-#define FORK_VERSION "v0.2.3"
+#define FORK_VERSION "v0.2.4"
 
 #endif
