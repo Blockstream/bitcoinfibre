@@ -2,6 +2,7 @@
 #define BITCOIN_MMAP_STORAGE_H
 
 #include "exchange.h"
+#include <cstring>
 #include <fcntl.h>
 #include <sys/mman.h>
 #include <unistd.h>
