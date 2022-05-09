@@ -177,9 +177,7 @@ deb-packages:
         "buster-amd64",
         "buster-i386",
         "buster-arm64",
-        "buster-armhf",
-        "raspbian-bullseye-armhf",
-        "raspbian-buster-armhf"
+        "raspbian-bullseye-armhf"
         ]
   variables:
     PBUILDER_CACHE_DIR: $CI_PROJECT_DIR/cache/pbuilder
