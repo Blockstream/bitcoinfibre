@@ -113,7 +113,7 @@ void ProcessSuccessorOoOBlocks(ChainstateManager& chainman, const CChainParams& 
                 continue;
             }
             LogPrintf("Accepting deferred block %s from out-of-order disk cache\n", block.GetHash().GetHex());
-            chainman.ProcessNewBlock(chainparams, pblock, force, /*is new block?=*/nullptr, &successor.second, /*do_ooob=*/false);
+            chainman.ProcessNewBlock(pblock, force, /*min_pow_checked=*/true, /*is new block?=*/nullptr, &successor.second, /*do_ooob=*/false);
             queue.push_back(pblock->GetHash());
         }
 

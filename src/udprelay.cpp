@@ -1019,7 +1019,7 @@ void ProcessBlock(ChainstateManager* chainman, const std::pair<uint64_t, CServic
                 const bool force_requested = (node == TRUSTED_PEER_DUMMY);
 
                 bool fNewBlock;
-                if (!chainman->ProcessNewBlock(Params(), pdecoded_block, force_requested, &fNewBlock)) {
+                if (!chainman->ProcessNewBlock(pdecoded_block, force_requested, /*min_pow_checked=*/true, &fNewBlock)) {
                     bool have_prev, outoforder_and_valid;
                     {
                         LOCK(cs_main);
