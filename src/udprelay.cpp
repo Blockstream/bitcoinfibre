@@ -810,7 +810,7 @@ void ProcessBlock(ChainstateManager* chainman, const std::pair<uint64_t, CServic
                 std::stringstream stream;
                 stream << std::hex << hash_peer_pair.first;
                 std::string hex_hash_prefix(stream.str());
-                LogPrintf("UDP: Failed to decode block %lu from %s: %s\n", hex_hash_prefix, node.ToString(), e.what());
+                LogPrintf("UDP: Failed to decode block %lu from %s: %s\n", hex_hash_prefix, node.ToStringAddrPort(), e.what());
                 break;
             }
 
@@ -828,7 +828,7 @@ void ProcessBlock(ChainstateManager* chainman, const std::pair<uint64_t, CServic
                 if (node == TRUSTED_PEER_DUMMY)
                     LogPrintf("UDP: Failed to decode received header and short txids from trusted peer(s), check your trusted peers are behaving well.\n");
                 else {
-                    LogPrintf("UDP: Failed to decode received header and short txids from %s, disconnecting\n", node.ToString());
+                    LogPrintf("UDP: Failed to decode received header and short txids from %s, disconnecting\n", node.ToStringAddrPort());
                     const auto it = mapUDPNodes.find(node);
                     if (it != mapUDPNodes.end())
                         DisconnectNode(it);
@@ -880,7 +880,7 @@ void ProcessBlock(ChainstateManager* chainman, const std::pair<uint64_t, CServic
                     if (node == TRUSTED_PEER_DUMMY)
                         LogPrintf("UDP: Got invalid header and short txids from trusted peer(s), check your trusted peers are behaving well.\n");
                     else {
-                        LogPrintf("UDP: Got invalid header and short txids from %s, disconnecting\n", node.ToString());
+                        LogPrintf("UDP: Got invalid header and short txids from %s, disconnecting\n", node.ToStringAddrPort());
                         const auto it = mapUDPNodes.find(node);
                         if (it != mapUDPNodes.end())
                             DisconnectNode(it);
@@ -1005,7 +1005,7 @@ void ProcessBlock(ChainstateManager* chainman, const std::pair<uint64_t, CServic
                     // after the block is decoded.
                     LogPrintf("UDP: Block %s reconstructed with %u chunks in %lf ms (%u recvd from %u peers)\n", decoded_block.GetHash().ToString(), total_chunks_used, to_millis_double(std::chrono::steady_clock::now() - block.t_created), total_chunks_recvd, chunksProvidedByNode.size());
                     for (const auto& provider : chunksProvidedByNode)
-                        LogPrintf("UDP:    %u/%u used from %s\n", provider.second.first, provider.second.second, provider.first.ToString());
+                        LogPrintf("UDP:    %u/%u used from %s\n", provider.second.first, provider.second.second, provider.first.ToStringAddrPort());
                 }
 
                 lock.unlock();
@@ -1099,7 +1099,7 @@ void ProcessBlock(ChainstateManager* chainman, const std::pair<uint64_t, CServic
                         if (node == TRUSTED_PEER_DUMMY)
                             LogPrintf("UDP: Unable to process mempool for block %s from trusted peer(s), check your trusted peers are behaving well.\n", blockHash.ToString());
                         else {
-                            LogPrintf("UDP: Unable to process mempool for block %s from %s, disconnecting\n", blockHash.ToString(), node.ToString());
+                            LogPrintf("UDP: Unable to process mempool for block %s from %s, disconnecting\n", blockHash.ToString(), node.ToStringAddrPort());
                             const auto it = mapUDPNodes.find(node);
                             if (it != mapUDPNodes.end())
                                 DisconnectNode(it);
@@ -1303,7 +1303,7 @@ ReadStatus PartialBlockData::ProvideHeaderData(const CBlockHeaderAndLengthShortT
 
 static std::string GetChunkFilePrefix(const CService& peer, uint64_t hash_prefix)
 {
-    return peer.ToStringIP() + "_" + peer.ToStringPort() + "_" + std::to_string(hash_prefix);
+    return peer.ToStringAddr() + "_" + std::to_string(peer.GetPort()) + "_" + std::to_string(hash_prefix);
 }
 
 bool PartialBlockData::Init(const UDPMessage& msg)
@@ -1447,14 +1447,14 @@ std::string PartialBlockData::GetSenders()
 {
     if (peer != TRUSTED_PEER_DUMMY) {
         assert(perNodeChunkCount.size() == 1);
-        return peer.ToString();
+        return peer.ToStringAddrPort();
     }
 
     std::string senders;
     const size_t n_nodes = perNodeChunkCount.size();
     size_t i_node = 1;
     for (const auto& node : perNodeChunkCount) {
-        senders += node.first.ToString();
+        senders += node.first.ToStringAddrPort();
         if (i_node++ < n_nodes)
             senders += ", ";
     }
@@ -1494,7 +1494,7 @@ static bool HandleTx(UDPMessage& msg, const CService& node, UDPConnectionState& 
 
     if (!state.tx_in_flight->ProvideChunk(msg.payload.fec.data, msg.payload.fec.chunk_id)) {
         // Bad chunk id, maybe FEC is upset? Don't disconnect in case it can be random
-        LogPrintf("UDP: FEC chunk decode failed for chunk %d from tx %lu from %s\n", msg.payload.fec.chunk_id, msg.payload.fec.hash_prefix, node.ToString());
+        LogPrintf("UDP: FEC chunk decode failed for chunk %d from tx %lu from %s\n", msg.payload.fec.chunk_id, msg.payload.fec.hash_prefix, node.ToStringAddrPort());
         return true;
     }
 
@@ -1514,7 +1514,7 @@ static bool HandleTx(UDPMessage& msg, const CService& node, UDPConnectionState& 
                 node_context->peerman->RelayTransaction(tx->GetHash(), tx->GetWitnessHash());
             }
         } catch (std::exception& e) {
-            LogPrintf("UDP: Tx decode failed for tx %lu from %s: %s\n", msg.payload.fec.hash_prefix, node.ToString(), e.what());
+            LogPrintf("UDP: Tx decode failed for tx %lu from %s: %s\n", msg.payload.fec.hash_prefix, node.ToStringAddrPort(), e.what());
         }
 
         state.tx_in_flight.reset();
@@ -1534,7 +1534,7 @@ bool HandleBlockTxMessage(UDPMessage& msg, size_t length, const CService& node, 
     assert(IS_BLOCK_HEADER_AND_TXIDS_MSG(msg) || IS_BLOCK_CONTENTS_MSG(msg) || IS_TX_CONTENTS_MSG(msg));
 
     if (length != sizeof(UDPMessageHeader) + sizeof(UDPFecMessage)) {
-        LogPrintf("UDP: Got invalidly-sized (%d bytes) message from %s\n", length, node.ToString());
+        LogPrintf("UDP: Got invalidly-sized (%d bytes) message from %s\n", length, node.ToStringAddrPort());
         return false;
     }
 
@@ -1721,7 +1721,7 @@ bool HandleBlockTxMessage(UDPMessage& msg, size_t length, const CService& node, 
     if ((is_blk_header_chunk && (msg.payload.fec.obj_length != block.header_len)) ||
         (is_blk_content_chunk && (msg.payload.fec.obj_length != block.blk_len))) {
         // Duplicate hash_prefix or bad trusted peer
-        LogPrintf("UDP: Got wrong obj_length/chunsk_sent for block id %lu from peer %s! Check your trusted peers are behaving well\n", msg.payload.fec.hash_prefix, node.ToString());
+        LogPrintf("UDP: Got wrong obj_length/chunsk_sent for block id %lu from peer %s! Check your trusted peers are behaving well\n", msg.payload.fec.hash_prefix, node.ToStringAddrPort());
         return true;
     }
 
@@ -1750,7 +1750,7 @@ bool HandleBlockTxMessage(UDPMessage& msg, size_t length, const CService& node, 
 
     if (!decoder.ProvideChunk(msg.payload.fec.data, msg.payload.fec.chunk_id)) {
         // Bad chunk id, maybe FEC is upset? Don't disconnect in case it can be random
-        LogPrintf("UDP: FEC chunk decode failed for chunk %d from block %lu from %s\n", msg.payload.fec.chunk_id, msg.payload.fec.hash_prefix, node.ToString());
+        LogPrintf("UDP: FEC chunk decode failed for chunk %d from block %lu from %s\n", msg.payload.fec.chunk_id, msg.payload.fec.hash_prefix, node.ToStringAddrPort());
         return true;
     }
 
@@ -2008,7 +2008,7 @@ UniValue FecHitRatioToJson()
             UniValue info(UniValue::VOBJ);
             info.pushKV("txn_ratio", it->second.last_txn_hit_ratio);
             info.pushKV("chunk_ratio", it->second.last_chunk_hit_ratio);
-            ret.__pushKV(it->first.ToString(), info);
+            ret.__pushKV(it->first.ToStringAddrPort(), info);
         }
     }
     return ret;

@@ -677,7 +677,7 @@ BOOST_FIXTURE_TEST_CASE(test_recovery_handles_body_and_header, BasicTestingSetup
     // the other for body data. Persist the chunk files in disk.
     size_t n_body_chunks = 5;
     size_t n_header_chunks = 2;
-    std::string chunk_file_prefix = peer.ToStringIP() + "_" + peer.ToStringPort() + "_" + std::to_string(hash_prefix);
+    std::string chunk_file_prefix = peer.ToStringAddr() + "_" + std::to_string(peer.GetPort()) + "_" + std::to_string(hash_prefix);
     std::string obj_id1 = chunk_file_prefix + "_body";
     std::string obj_id2 = chunk_file_prefix + "_header";
     {
@@ -840,7 +840,7 @@ BOOST_FIXTURE_TEST_CASE(test_recovery_multiple_blocks, BasicTestingSetup)
         BOOST_CHECK(!partial_block->header_initialized);
         BOOST_CHECK(partial_block->header_len == 0);
         BOOST_CHECK(partial_block->blk_len == FEC_CHUNK_SIZE * n_body_chunks);
-        std::string obj_id = peer.ToStringIP() + "_" + peer.ToStringPort() + "_" + std::to_string(hash_prefixes[i]) + "_body";
+        std::string obj_id = peer.ToStringAddr() + "_" + std::to_string(peer.GetPort()) + "_" + std::to_string(hash_prefixes[i]) + "_body";
         BOOST_CHECK(partial_block->body_decoder.GetFileName().filename().c_str() == obj_id + "_" + std::to_string(FEC_CHUNK_SIZE * n_body_chunks));
         BOOST_CHECK(partial_block->body_decoder.GetChunkCount() == n_body_chunks);
     }

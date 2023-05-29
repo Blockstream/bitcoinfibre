@@ -49,7 +49,7 @@ RPCHelpMan getudppeerinfo()
 
     for (const UDPConnectionStats& stats : vstats) {
         UniValue obj(UniValue::VOBJ);
-        obj.pushKV("addr", stats.remote_addr.ToString());
+        obj.pushKV("addr", stats.remote_addr.ToStringAddrPort());
         obj.pushKV("group", stats.group);
         obj.pushKV("lastrecv", stats.lastRecvTime);
         obj.pushKV("ultimatetrust", stats.fUltimatelyTrusted);

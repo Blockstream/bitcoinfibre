@@ -592,7 +592,7 @@ static bool InitializeUDPMulticast(std::vector<int>& udp_socks,
                                                    mcast_info.logical_idx);
         if (mapMulticastNodes.count(mcast_map_key) > 0) {
             LogPrintf("UDP: error - multicast instance (%s, %s, %d) already exists\n",
-                      addr.ToString(), ifindex, mcast_info.logical_idx);
+                      addr.ToStringAddrPort(), ifindex, mcast_info.logical_idx);
             return false;
         }
         mapMulticastNodes[mcast_map_key] = mcast_info;
@@ -642,7 +642,7 @@ UniValue UdpMulticastRxInfoToJson()
         info.pushKV("port", node.second.port);
         info.pushKV("rcvd_bytes", stats.rcvd_bytes);
         info.pushKV("trusted", node.second.trusted);
-        ret.__pushKV(std::get<0>(node.first).ToString(), info);
+        ret.__pushKV(std::get<0>(node.first).ToStringAddrPort(), info);
     }
     return ret;
 }
@@ -895,7 +895,7 @@ static void read_socket_func(evutil_socket_t fd, short event, void* arg)
     if (it == mapUDPNodes.end())
         return;
     if (!CheckChecksum(it->second.connection.local_magic, msg, res)) {
-        LogPrintf("UDP: Checksum error on message from %s\n", it->first.ToString());
+        LogPrintf("UDP: Checksum error on message from %s\n", it->first.ToStringAddrPort());
         return;
     }
 
@@ -919,7 +919,7 @@ static void read_socket_func(evutil_socket_t fd, short event, void* arg)
             else
                 UpdateUdpMulticastRxBytes(mcast_info, res);
         } else
-            LogPrintf("UDP: Unexpected message from %s!\n", it->first.ToString());
+            LogPrintf("UDP: Unexpected message from %s!\n", it->first.ToStringAddrPort());
 
         return;
     }
@@ -927,14 +927,14 @@ static void read_socket_func(evutil_socket_t fd, short event, void* arg)
     state.lastRecvTime = GetTimeMillis();
     if (msg_type_masked == MSG_TYPE_SYN) {
         if (res != sizeof(UDPMessageHeader) + 8) {
-            LogPrintf("UDP: Got invalidly-sized SYN message from %s\n", it->first.ToString());
+            LogPrintf("UDP: Got invalidly-sized SYN message from %s\n", it->first.ToStringAddrPort());
             send_and_disconnect(it);
             return;
         }
 
         state.protocolVersion = le64toh(msg.payload.longint);
         if (PROTOCOL_VERSION_MIN(state.protocolVersion) > PROTOCOL_VERSION_CUR(UDP_PROTOCOL_VERSION)) {
-            LogPrintf("UDP: Got min protocol version we didnt understand (%u:%u) from %s\n", PROTOCOL_VERSION_MIN(state.protocolVersion), PROTOCOL_VERSION_CUR(state.protocolVersion), it->first.ToString());
+            LogPrintf("UDP: Got min protocol version we didnt understand (%u:%u) from %s\n", PROTOCOL_VERSION_MIN(state.protocolVersion), PROTOCOL_VERSION_CUR(state.protocolVersion), it->first.ToStringAddrPort());
             send_and_disconnect(it);
             return;
         }
@@ -943,18 +943,18 @@ static void read_socket_func(evutil_socket_t fd, short event, void* arg)
             state.state |= STATE_GOT_SYN;
     } else if (msg_type_masked == MSG_TYPE_KEEPALIVE) {
         if (res != sizeof(UDPMessageHeader)) {
-            LogPrintf("UDP: Got invalidly-sized KEEPALIVE message from %s\n", it->first.ToString());
+            LogPrintf("UDP: Got invalidly-sized KEEPALIVE message from %s\n", it->first.ToStringAddrPort());
             send_and_disconnect(it);
             return;
         }
         if ((state.state & STATE_INIT_COMPLETE) != STATE_INIT_COMPLETE)
-            LogPrint(BCLog::UDPNET, "UDP: Successfully connected to %s!\n", it->first.ToString());
+            LogPrint(BCLog::UDPNET, "UDP: Successfully connected to %s!\n", it->first.ToStringAddrPort());
 
         // If we get a SYNACK without a SYN, that probably means we were restarted, but the other side wasn't
         // ...this means the other side thinks we're fully connected, so just switch to that mode
         state.state |= STATE_GOT_SYN_ACK | STATE_GOT_SYN;
     } else if (msg_type_masked == MSG_TYPE_DISCONNECT) {
-        LogPrintf("UDP: Got disconnect message from %s\n", it->first.ToString());
+        LogPrintf("UDP: Got disconnect message from %s\n", it->first.ToStringAddrPort());
         silent_disconnect(it);
         return;
     }
@@ -968,13 +968,13 @@ static void read_socket_func(evutil_socket_t fd, short event, void* arg)
             return;
         }
     } else if (msg_type_masked == MSG_TYPE_TX_CONTENTS) {
-        LogPrintf("UDP: Got tx message over the wire from %s, this isn't supposed to happen!\n", it->first.ToString());
+        LogPrintf("UDP: Got tx message over the wire from %s, this isn't supposed to happen!\n", it->first.ToStringAddrPort());
         /* NOTE Only the multicast service sends tx messages. */
         send_and_disconnect(it);
         return;
     } else if (msg_type_masked == MSG_TYPE_PING) {
         if (res != sizeof(UDPMessageHeader) + 8) {
-            LogPrintf("UDP: Got invalidly-sized PING message from %s\n", it->first.ToString());
+            LogPrintf("UDP: Got invalidly-sized PING message from %s\n", it->first.ToStringAddrPort());
             send_and_disconnect(it);
             return;
         }
@@ -983,7 +983,7 @@ static void read_socket_func(evutil_socket_t fd, short event, void* arg)
         SendMessage(msg, sizeof(UDPMessageHeader) + 8, false, *it);
     } else if (msg_type_masked == MSG_TYPE_PONG) {
         if (res != sizeof(UDPMessageHeader) + 8) {
-            LogPrintf("UDP: Got invalidly-sized PONG message from %s\n", it->first.ToString());
+            LogPrintf("UDP: Got invalidly-sized PONG message from %s\n", it->first.ToStringAddrPort());
             send_and_disconnect(it);
             return;
         }
@@ -991,10 +991,10 @@ static void read_socket_func(evutil_socket_t fd, short event, void* arg)
         uint64_t nonce = le64toh(msg.payload.longint);
         std::map<uint64_t, int64_t>::iterator nonceit = state.ping_times.find(nonce);
         if (nonceit == state.ping_times.end()) // Possibly duplicated packet
-            LogPrintf("UDP: Got PONG message without PING from %s\n", it->first.ToString());
+            LogPrintf("UDP: Got PONG message without PING from %s\n", it->first.ToStringAddrPort());
         else {
             double rtt = (GetTimeMicros() - nonceit->second) / 1000.0;
-            LogPrintf("UDP: RTT to %s is %lf ms\n", it->first.ToString(), rtt);
+            LogPrintf("UDP: RTT to %s is %lf ms\n", it->first.ToStringAddrPort(), rtt);
             state.ping_times.erase(nonceit);
             state.last_pings[state.last_ping_location] = rtt;
             state.last_ping_location = (state.last_ping_location + 1) % (sizeof(state.last_pings) / sizeof(double));
@@ -1038,7 +1038,7 @@ static void timer_func(evutil_socket_t fd, short event, void* arg)
         int64_t origLastSendTime = state.lastSendTime;
 
         if (state.lastRecvTime < now - 1000 * 60 * 10) {
-            LogPrint(BCLog::UDPNET, "UDP: Peer %s timed out\n", it->first.ToString());
+            LogPrint(BCLog::UDPNET, "UDP: Peer %s timed out\n", it->first.ToStringAddrPort());
             it = send_and_disconnect(it); // Removes it from mapUDPNodes
             continue;
         }
@@ -2174,7 +2174,7 @@ static void OpenUDPConnectionTo(const CService& addr, const UDPConnectionInfo& i
     if (info.connection_type != UDP_CONNECTION_TYPE_INBOUND_ONLY)
         maybe_have_write_nodes = true;
 
-    LogPrint(BCLog::UDPNET, "UDP: Initializing connection to %s...\n", addr.ToString());
+    LogPrint(BCLog::UDPNET, "UDP: Initializing connection to %s...\n", addr.ToStringAddrPort());
 
     UDPConnectionState& state = res.first->second;
     state.connection = info;
