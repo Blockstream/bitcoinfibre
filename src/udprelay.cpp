@@ -274,7 +274,7 @@ static void RelayChunks(const uint256& blockhash, UDPMessageType type, const std
     uint64_t hash_prefix = blockhash.GetUint64(0);
     FillBlockMessageHeader(msg, hash_prefix, type, data.size(), (HAVE_BLOCK | TIP_BLOCK));
 
-    const bool fBench = LogAcceptCategory(BCLog::BENCH);
+    const bool fBench = LogAcceptCategory(BCLog::BENCH, BCLog::Level::Debug);
     std::chrono::steady_clock::time_point t_start, t_uncoded, t_coded;
     if (fBench)
         t_start = std::chrono::steady_clock::now();
@@ -359,7 +359,7 @@ const CService& GetTrustedPeer()
 void UDPRelayBlock(const CBlock& block, int nHeight)
 {
     std::chrono::steady_clock::time_point start;
-    const bool fBench = LogAcceptCategory(BCLog::BENCH);
+    const bool fBench = LogAcceptCategory(BCLog::BENCH, BCLog::Level::Debug);
     if (fBench)
         start = std::chrono::steady_clock::now();
 
@@ -783,7 +783,7 @@ static void ProcessBlockThread(ChainstateManager* chainman)
 
 void ProcessBlock(ChainstateManager* chainman, const std::pair<uint64_t, CService>& hash_peer_pair, PartialBlockData& block)
 {
-    const bool fBench = LogAcceptCategory(BCLog::BENCH);
+    const bool fBench = LogAcceptCategory(BCLog::BENCH, BCLog::Level::Debug);
     const CService& node = hash_peer_pair.second;
     bool more_work;
     std::unique_lock<std::mutex> lock(block.state_mutex);
@@ -1525,7 +1525,7 @@ static bool HandleTx(UDPMessage& msg, const CService& node, UDPConnectionState& 
 bool HandleBlockTxMessage(UDPMessage& msg, size_t length, const CService& node, UDPConnectionState& state, const std::chrono::steady_clock::time_point& packet_process_start, const node::NodeContext* const node_context)
 {
     // TODO: There are way too many damn tree lookups here...either cut them down or increase parallelism
-    const bool fBench = LogAcceptCategory(BCLog::BENCH);
+    const bool fBench = LogAcceptCategory(BCLog::BENCH, BCLog::Level::Debug);
     std::chrono::steady_clock::time_point start;
     if (fBench)
         start = std::chrono::steady_clock::now();

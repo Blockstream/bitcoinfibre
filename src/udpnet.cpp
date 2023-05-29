@@ -826,7 +826,7 @@ static void UpdateUdpMulticastRxBytes(const UDPMulticastInfo& mcast_info, const 
     stats.rcvd_bytes += rcvd_bytes;
 
     // Print the bit rate periodically if the required logging level is active
-    if (!LogAcceptCategory(BCLog::UDPMCAST))
+    if (!LogAcceptCategory(BCLog::UDPMCAST, BCLog::Level::Debug))
         return;
 
     auto t_now = std::chrono::steady_clock::now();

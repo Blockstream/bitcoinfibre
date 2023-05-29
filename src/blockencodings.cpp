@@ -49,7 +49,7 @@ uint64_t CBlockHeaderAndShortTxIDs::GetShortID(const uint256& txhash) const {
 
 
 ReadStatus PartiallyDownloadedBlock::InitData(const CBlockHeaderAndShortTxIDs& cmpctblock, const std::vector<std::pair<uint256, CTransactionRef>>& extra_txn) {
-    const bool fBench = LogAcceptCategory(BCLog::BENCH);
+    const bool fBench = LogAcceptCategory(BCLog::BENCH, BCLog::Level::Debug);
     std::chrono::steady_clock::time_point start;
     if (fBench)
         start = std::chrono::steady_clock::now();
