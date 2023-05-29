@@ -244,7 +244,6 @@ RPCHelpMan getchunkstats()
     if (request.params[0].isNull())
         return MaxMinBlkChunkStatsToJSON();
     else {
-        RPCTypeCheckArgument(request.params[0], UniValue::VNUM);
         const int target_height = request.params[0].getInt<int>();
         if (target_height == 0) {
             return AllBlkChunkStatsToJSON();
