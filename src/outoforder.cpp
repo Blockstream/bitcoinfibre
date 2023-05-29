@@ -49,7 +49,9 @@ static std::unique_ptr<CDBWrapper> ooob_db;
 static void AssertInitOoOBlockDB() EXCLUSIVE_LOCKS_REQUIRED(cs_ooob)
 {
     if (!ooob_db) {
-        ooob_db = std::make_unique<CDBWrapper>(gArgs.GetDataDirNet() / "future_blocks", /*cache size=*/1024);
+        ooob_db = std::make_unique<CDBWrapper>(DBParams{
+            .path = gArgs.GetDataDirNet() / "future_blocks",
+            .cache_bytes = 1024});
     }
 }
 

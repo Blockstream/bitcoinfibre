@@ -20,7 +20,9 @@ UdpMulticastTxDb::UdpMulticastTxDb(uint16_t physical_idx, uint16_t logical_idx)
 {
     LOCK(cs_mcasttxdb);
     if (!mcasttx_db) {
-        mcasttx_db = std::make_unique<CDBWrapper>(gArgs.GetDataDirNet() / "udp_multicast_tx", /*cache size=*/1024);
+        mcasttx_db = std::make_unique<CDBWrapper>(DBParams{
+            .path = gArgs.GetDataDirNet() / "udp_multicast_tx",
+            .cache_bytes = 1024});
     }
 }
 
