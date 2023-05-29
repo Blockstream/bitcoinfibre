@@ -86,7 +86,7 @@ RPCHelpMan addudpnode()
                            {"ultimately_trusted", RPCArg::Type::BOOL, RPCArg::Optional::NO, "Whether to trust this peer, and all of its trusted UDP peers, recursively"},
                            {"command", RPCArg::Type::STR, RPCArg::Optional::NO, "'add' to add a persistent connection or 'onetry' to try a connection to the node once"},
                            {"group", RPCArg::Type::NUM, RPCArg::Default{0}, "'add' to add a persistent connection or 'onetry' to try a connection to the node once"},
-                           {"type", RPCArg::Type::STR, RPCArg::Optional::OMITTED_NAMED_ARG, "May be one of 'bidirectional', 'inbound_only' or 'I_certify_remote_is_listening_and_not_a_DoS_target_outbound_only'."},
+                           {"type", RPCArg::Type::STR, RPCArg::Optional::OMITTED, "May be one of 'bidirectional', 'inbound_only' or 'I_certify_remote_is_listening_and_not_a_DoS_target_outbound_only'."},
                        },
                        RPCResults{},
                        RPCExamples{
