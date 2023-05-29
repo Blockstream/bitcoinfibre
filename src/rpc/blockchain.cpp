@@ -834,7 +834,7 @@ RPCHelpMan getblocksize()
     UniValue result(UniValue::VOBJ);
 
     if (!request.params[0].isNull()) {
-        int userint = request.params[0].get_int();
+        int userint = request.params[0].getInt<int>();
         if (userint % 10 == 0 && userint < interval) {
             interval = userint;
         } else {
@@ -944,7 +944,7 @@ RPCHelpMan getblockanalysis()
     finalmultisigstats.fill(0);
     int baseheight = 0;
     if (!request.params[0].isNull())
-        baseheight = request.params[0].get_int();
+        baseheight = request.params[0].getInt<int>();
 
     if (baseheight > tipheight)
         throw JSONRPCError(RPC_MISC_ERROR, "Block not yet seen by node.");
@@ -1034,10 +1034,10 @@ RPCHelpMan testcompression()
     int tipheight = chainman.ActiveHeight();
     int baseheight = 0;
     if (!request.params[0].isNull())
-        baseheight = request.params[0].get_int();
+        baseheight = request.params[0].getInt<int>();
 
     if (!request.params[1].isNull())
-        tipheight = request.params[1].get_int();
+        tipheight = request.params[1].getInt<int>();
 
     if (baseheight > tipheight)
         throw JSONRPCError(RPC_MISC_ERROR, "Block not yet seen by node.");

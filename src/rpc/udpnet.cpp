@@ -116,7 +116,7 @@ RPCHelpMan addudpnode()
 
     size_t group = 0;
     if (request.params.size() >= 6)
-        group = request.params[5].get_int64();
+        group = request.params[5].getInt<int64_t>();
     if (group > GetUDPInboundPorts().size())
         throw JSONRPCError(RPC_INVALID_PARAMS, "Error: Group out of range or UDP port not bound");
 
@@ -245,11 +245,11 @@ RPCHelpMan getchunkstats()
         return MaxMinBlkChunkStatsToJSON();
     else {
         RPCTypeCheckArgument(request.params[0], UniValue::VNUM);
-        const int target_height = request.params[0].get_int();
+        const int target_height = request.params[0].getInt<int>();
         if (target_height == 0) {
             return AllBlkChunkStatsToJSON();
         } else {
-            UniValue info = BlkChunkStatsToJSON(request.params[0].get_int());
+            UniValue info = BlkChunkStatsToJSON(request.params[0].getInt<int>());
             if (info.isNull())
                 throw JSONRPCError(RPC_INVALID_ADDRESS_OR_KEY, "Block height not in partial blocks");
             else
@@ -308,9 +308,9 @@ RPCHelpMan gettxwindowinfo()
                            "Both physical and logical indexes are required");
 
     const int phy_idx = request.params[0].isNull() ? -1 :
-                                                     request.params[0].get_int();
+                                                     request.params[0].getInt<int>();
     const int log_idx = request.params[1].isNull() ? -1 :
-                                                     request.params[1].get_int();
+                                                     request.params[1].getInt<int>();
 
     UniValue info = TxWindowInfoToJSON(phy_idx, log_idx);
     if (info.isNull())
@@ -440,14 +440,14 @@ RPCHelpMan txblock()
 {
     codec_version_t codec = codec_version_t::default_version;
     if (!request.params[1].isNull()) {
-        int codec_arg = request.params[1].get_int();
+        int codec_arg = request.params[1].getInt<int>();
         if (codec_arg < codec_version_t::none || codec_arg > codec_version_t::v1) {
             throw JSONRPCError(RPC_INVALID_PARAMS, "Invalid txn compression codec version");
         }
         codec = static_cast<codec_version_t>(codec_arg);
     }
 
-    MulticastTxBlock(request.params[0].get_int(), codec);
+    MulticastTxBlock(request.params[0].getInt<int>(), codec);
 
     return NullUniValue;
 },
