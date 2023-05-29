@@ -2,6 +2,7 @@
 #include <dbwrapper.h>
 #include <sync.h>
 #include <udpmulticasttxdb.h>
+#include <util/system.h>
 
 namespace {
 std::unique_ptr<CDBWrapper> mcasttx_db;

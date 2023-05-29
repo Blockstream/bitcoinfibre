@@ -13,6 +13,7 @@
 #include <net_processing.h>
 #include <outoforder.h>
 #include <streams.h>
+#include <util/system.h>
 #include <util/thread.h>
 #include <validation.h>
 #include <version.h>
@@ -1547,7 +1548,7 @@ bool HandleBlockTxMessage(UDPMessage& msg, size_t length, const CService& node, 
     const bool is_blk_header_chunk = IS_BLOCK_HEADER_AND_TXIDS_MSG(msg);
     const bool is_blk_content_chunk = IS_BLOCK_CONTENTS_MSG(msg);
     const bool they_have_block = msg.header.msg_type & HAVE_BLOCK;
-    const bool empty_block = IS_EMPTY_BLOCK(msg); // a block that comes entirely through the header
+    const bool empty_block = IS_EMPTY_BLOCK(msg);             // a block that comes entirely through the header
 
     const uint64_t hash_prefix = msg.payload.fec.hash_prefix; // Need a reference in a few places, but its packed, so we can't have one directly
     CService peer = state.connection.fTrusted ? TRUSTED_PEER_DUMMY : node;

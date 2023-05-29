@@ -10,6 +10,7 @@
 #include <primitives/block.h>
 #include <sync.h>
 #include <uint256.h>
+#include <util/system.h>
 
 #include <deque>
 #include <map>
