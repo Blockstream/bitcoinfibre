@@ -93,7 +93,7 @@ bool StoreOoOBlock(ChainstateManager& chainman, const CChainParams& chainparams,
     return true;
 }
 
-void ProcessSuccessorOoOBlocks(ChainstateManager& chainman, const CChainParams& chainparams, const uint256& prev_block_hash, const bool force)
+void ProcessSuccessorOoOBlocks(ChainstateManager& chainman, const Consensus::Params& consensusParams, const uint256& prev_block_hash, const bool force)
 {
     std::deque<uint256> queue;
     queue.push_back(prev_block_hash);
@@ -111,7 +111,7 @@ void ProcessSuccessorOoOBlocks(ChainstateManager& chainman, const CChainParams& 
         for (const auto& successor : successors) {
             std::shared_ptr<CBlock> pblock = std::make_shared<CBlock>();
             CBlock& block = *pblock;
-            if (!node::ReadBlockFromDisk(block, successor.second, chainparams.GetConsensus())) {
+            if (!node::ReadBlockFromDisk(block, successor.second, consensusParams)) {
                 continue;
             }
             LogPrintf("Accepting deferred block %s from out-of-order disk cache\n", block.GetHash().GetHex());
@@ -144,7 +144,7 @@ void CheckForOoOBlocks(ChainstateManager& chainman, const CChainParams& chainpar
     }
 
     for (const auto& prev_block_hash : to_process) {
-        ProcessSuccessorOoOBlocks(chainman, chainparams, prev_block_hash);
+        ProcessSuccessorOoOBlocks(chainman, chainparams.GetConsensus(), prev_block_hash);
     }
 }
 
