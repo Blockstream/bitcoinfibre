@@ -172,7 +172,7 @@ RPCHelpMan getudpmulticastinfo()
                "\nRetrieve information about the UDP multicast Rx instances.\n",
                {},
                RPCResult{
-                   RPCResult::Type::OBJ,
+                   RPCResult::Type::OBJ_DYN,
                    "",
                    "",
                    {
@@ -229,7 +229,7 @@ RPCHelpMan getchunkstats()
                    RPCResult{"for height > 0",
                              RPCResult::Type::OBJ, "", "Selected partial block", StatsDescriptionString()},
                    RPCResult{"for height = 0",
-                             RPCResult::Type::OBJ,
+                             RPCResult::Type::OBJ_DYN,
                              "",
                              "",
                              {
@@ -270,7 +270,7 @@ RPCHelpMan gettxwindowinfo()
         },
         {
             RPCResult{"when the physical and logical indexes are omitted",
-                      RPCResult::Type::OBJ,
+                      RPCResult::Type::OBJ_DYN,
                       "",
                       "",
                       {
@@ -286,7 +286,7 @@ RPCHelpMan gettxwindowinfo()
                            }},
                       }},
             RPCResult{"when the physical and logical indexes are specified",
-                      RPCResult::Type::OBJ,
+                      RPCResult::Type::OBJ_DYN,
                       "",
                       "",
                       {
@@ -327,7 +327,7 @@ RPCHelpMan gettxntxinfo()
         "\nGet information regarding multicast transmissions of mempool txns.\n",
         {},
         RPCResult{
-            RPCResult::Type::OBJ,
+            RPCResult::Type::OBJ_DYN,
             "",
             "",
             {
@@ -357,11 +357,11 @@ RPCHelpMan gettxqueueinfo()
         "\nGet information from the UDP Tx queues.\n",
         {},
         RPCResult{
-            RPCResult::Type::OBJ,
+            RPCResult::Type::OBJ_DYN,
             "",
             "",
             {
-                {RPCResult::Type::OBJ,
+                {RPCResult::Type::OBJ_DYN,
                  "group",
                  "Tx group",
                  {
@@ -401,7 +401,7 @@ RPCHelpMan getfechitratio()
         "composing the block.\n",
         {},
         RPCResult{
-            RPCResult::Type::OBJ,
+            RPCResult::Type::OBJ_DYN,
             "",
             "",
             {

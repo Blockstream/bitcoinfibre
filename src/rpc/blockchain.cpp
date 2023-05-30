@@ -3055,7 +3055,7 @@ static RPCHelpMan getoooblocks()
         {
             RPCResult{
                 "for verbose = true",
-                RPCResult::Type::OBJ,
+                RPCResult::Type::OBJ_DYN,
                 "",
                 "",
                 {
