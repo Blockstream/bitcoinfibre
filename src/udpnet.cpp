@@ -1965,7 +1965,7 @@ static bool ParseUDPMulticastTxInfo(const std::string& conf_file,
     info.tx = true;
 
     /* Read configuration from file */
-    std::ifstream stream(AbsPathForConfigVal(fs::PathFromString(conf_file)));
+    std::ifstream stream(AbsPathForConfigVal(gArgs, fs::PathFromString(conf_file)));
     if (!stream.good()) {
         LogPrintf("Failed to open -udpmulticasttx config file: %s\n", conf_file);
         return false;
