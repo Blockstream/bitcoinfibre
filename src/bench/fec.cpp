@@ -249,14 +249,13 @@ static void FECBlockRTTTest1555(benchmark::Bench& bench) { RealFECedBlockRoundTr
 
 static void FECHeaderRTTTest1550(benchmark::Bench& bench) { RealFECedBlockRoundTripTest(bench, 1550, false); }
 
-BENCHMARK(FECBlockRTTTest0);
-BENCHMARK(FECBlockRTTTest0500);
-BENCHMARK(FECBlockRTTTest1000);
-BENCHMARK(FECBlockRTTTest1500);
-BENCHMARK(FECBlockRTTTest1550);
-BENCHMARK(FECBlockRTTTest1555);
-
-BENCHMARK(FECHeaderRTTTest1550);
+BENCHMARK(FECBlockRTTTest0, benchmark::PriorityLevel::HIGH);
+BENCHMARK(FECBlockRTTTest0500, benchmark::PriorityLevel::HIGH);
+BENCHMARK(FECBlockRTTTest1000, benchmark::PriorityLevel::HIGH);
+BENCHMARK(FECBlockRTTTest1500, benchmark::PriorityLevel::HIGH);
+BENCHMARK(FECBlockRTTTest1550, benchmark::PriorityLevel::HIGH);
+BENCHMARK(FECBlockRTTTest1555, benchmark::PriorityLevel::HIGH);
+BENCHMARK(FECHeaderRTTTest1550, benchmark::PriorityLevel::HIGH);
 
 static void FECEncodeBenchmark(benchmark::Bench& bench, bool fAll)
 {
@@ -312,11 +311,11 @@ static void FECDecodeBenchmark3Mmap(benchmark::Bench& bench) { FECDecodeBenchmar
 static void FECDecodeBenchmark7Mmap(benchmark::Bench& bench) { FECDecodeBenchmark(bench, 0x7, MemoryUsageMode::USE_MMAP); }
 static void FECDecodeBenchmarkFMmap(benchmark::Bench& bench) { FECDecodeBenchmark(bench, 0xf, MemoryUsageMode::USE_MMAP); }
 
-BENCHMARK(FECEncodeAllBenchmark);
-BENCHMARK(FECEncodeOneBenchmark);
-BENCHMARK(FECDecodeBenchmark3Mem);
-BENCHMARK(FECDecodeBenchmark7Mem);
-BENCHMARK(FECDecodeBenchmarkFMem);
-BENCHMARK(FECDecodeBenchmark3Mmap);
-BENCHMARK(FECDecodeBenchmark7Mmap);
-BENCHMARK(FECDecodeBenchmarkFMmap);
+BENCHMARK(FECEncodeAllBenchmark, benchmark::PriorityLevel::HIGH);
+BENCHMARK(FECEncodeOneBenchmark, benchmark::PriorityLevel::HIGH);
+BENCHMARK(FECDecodeBenchmark3Mem, benchmark::PriorityLevel::HIGH);
+BENCHMARK(FECDecodeBenchmark7Mem, benchmark::PriorityLevel::HIGH);
+BENCHMARK(FECDecodeBenchmarkFMem, benchmark::PriorityLevel::HIGH);
+BENCHMARK(FECDecodeBenchmark3Mmap, benchmark::PriorityLevel::HIGH);
+BENCHMARK(FECDecodeBenchmark7Mmap, benchmark::PriorityLevel::HIGH);
+BENCHMARK(FECDecodeBenchmarkFMmap, benchmark::PriorityLevel::HIGH);
