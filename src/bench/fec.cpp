@@ -10,16 +10,18 @@
 #include "fec.h"
 #include "random.h"
 #include "streams.h"
-#include "txmempool.h"
 #include "util/time.h"
 #include "version.h"
 #include <chainparams.h>
+#include <test/util/setup_common.h>
+#include <test/util/txmempool.h>
 
 #include <random>
 
 std::vector<std::pair<uint256, CTransactionRef>> extra_txn;
 
 #define DIV_CEIL(a, b) (((a) + (b)-1) / (b))
+
 
 class Receiver
 {
@@ -206,6 +208,8 @@ void __attribute__((noinline)) DoRealFECedBlockRoundTripTest(benchmark::Bench& b
 
 static void RealFECedBlockRoundTripTest(benchmark::Bench& bench, int ntxn, bool fIncludeBlock = true)
 {
+    const auto testing_setup = MakeNoLogFileContext<const TestingSetup>();
+
     CBlock block;
 
     CDataStream stream(benchmark::data::block413567, SER_NETWORK, PROTOCOL_VERSION);
@@ -227,7 +231,7 @@ static void RealFECedBlockRoundTripTest(benchmark::Bench& bench, int ntxn, bool 
     txtmp.vout.resize(1);
     txtmp.vout[0].nValue = 10;
 
-    CTxMemPool pool;
+    CTxMemPool pool{MemPoolOptionsForTest(testing_setup->m_node)};
     LOCK2(cs_main, pool.cs);
     for (int i = 0; i < ntxn; i++) {
         pool.addUnchecked(CTxMemPoolEntry(vtx2[i], 0, 0, 0, false, 0, LockPoints()));
