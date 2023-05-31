@@ -5,6 +5,7 @@
 #include <chrono>
 #include <condition_variable>
 #include <mutex>
+#include <stdexcept>
 
 static const size_t MIN_BUFF_DEPTH = 8;
 static const size_t MAX_BUFF_DEPTH = 512;
