@@ -201,7 +201,7 @@ RPCHelpMan getudpmulticastinfo()
 static std::vector<RPCResult> StatsDescriptionString()
 {
     return {
-        RPCResult{RPCResult::Type::NUM, "height", "Block height (if already decoded)"},
+        RPCResult{RPCResult::Type::NUM, "height", /*optional=*/true, "Block height (if already decoded)"},
         RPCResult{RPCResult::Type::STR, "header_chunks", "Header FEC chunks received / expected"},
         RPCResult{RPCResult::Type::STR, "body_chunks", "Body FEC chunks received / expected"},
         RPCResult{RPCResult::Type::STR, "progress", "Percentage of chunks received"},
@@ -221,8 +221,8 @@ RPCHelpMan getchunkstats()
                              "",
                              "",
                              {
-                                 {RPCResult::Type::OBJ, "min_blk", "Partial block with lowest height", StatsDescriptionString()},
-                                 {RPCResult::Type::OBJ, "max_blk", "Partial block with highest height", StatsDescriptionString()},
+                                 {RPCResult::Type::OBJ, "min_blk", /*optional=*/true, "Partial block with lowest height", StatsDescriptionString()},
+                                 {RPCResult::Type::OBJ, "max_blk", /*optional=*/true, "Partial block with highest height", StatsDescriptionString()},
                                  {RPCResult::Type::NUM, "n_blks", "Total number of partial blocks currently under processing"},
                                  {RPCResult::Type::NUM, "n_chunks", "Total number of chunks within current partial blocks"},
                              }},
