@@ -9,7 +9,7 @@ builders:
   image: docker
   stage: .pre
   tags:
-    - k8s-docker
+    - cloud
   services:
     - docker:20.10.12-dind
   before_script:
