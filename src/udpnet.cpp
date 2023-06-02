@@ -1843,7 +1843,7 @@ static std::map<size_t, PerGroupMessageQueue> InitTxQueues(const std::vector<std
         assert(res.second);
         res.first->second.bw = group_list[group].second; // in Mbps
         res.first->second.multicast = false;
-        res.first->second.unlimited = false;             // rate-limit internally
+        res.first->second.unlimited = false; // rate-limit internally
         // Set the throttling rate in bytes per sec
         const double bytes_per_sec = static_cast<double>(group_list[group].second) * 1e6 / 8;
         res.first->second.ratelimiter.SetRate(bytes_per_sec);

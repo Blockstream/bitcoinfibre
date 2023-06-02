@@ -17,11 +17,11 @@
 #define FEC_CHUNK_COUNT_MAX ((1 << 24) - 1)
 #define CHUNK_ID_IS_NOT_SET(chunk_id) (chunk_id == FEC_CHUNK_COUNT_MAX + 1)
 
+#include "fec/cm256.h"
+#include "fec/wirehair.h"
 #include "mmapstorage.h"
 #include "open_hash_set.h"
 #include "random.h"
-#include "fec/cm256.h"
-#include "fec/wirehair.h"
 
 typedef std::aligned_storage<FEC_CHUNK_SIZE, 16>::type FECChunkType;
 static_assert(FEC_CHUNK_SIZE % 16 == 0, "Padding of FECChunkType may hurt performance, and really shouldn't be required");
