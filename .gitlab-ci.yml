@@ -59,7 +59,7 @@ builders:
     - mkdir build && cd build
     - if [ -z "$CI_COMMIT_TAG" ]; then export CONFIG_FLAGS="--disable-wallet --with-gui=no"; fi
     - ../configure $CONFIG_FLAGS
-    - make -j$(nproc)
+    - make
     - make check
 
 build:x86:ubuntu:
@@ -81,7 +81,7 @@ build:x86:clang:
     - ./autogen.sh
     - mkdir build && cd build
     - CC=clang CXX=clang++ ../configure --disable-wallet --with-gui=no
-    - make -j$(nproc)
+    - make
     - make check
 
 .build:cross:
@@ -92,7 +92,7 @@ build:x86:clang:
     - mkdir build && cd build
     - if [ -z "$CI_COMMIT_TAG" ]; then export CONFIG_FLAGS="--disable-wallet --with-gui=no"; fi
     - ../configure --prefix=/src/depends/$HOST --enable-glibc-back-compat --enable-reduce-exports $CONFIG_FLAGS
-    - make -j$(nproc)
+    - make
   artifacts:
     paths:
       - build/src/test/test_bitcoin
