@@ -34,3 +34,6 @@ RUN dnf install -y \
 	qt5-qttools-devel \
 	sqlite-devel \
 	zeromq-devel
+
+# CentOS comes with Py3.6. Update to Py3.9:
+RUN dnf install -y python39 && alternatives --set python3 /usr/bin/python3.9
