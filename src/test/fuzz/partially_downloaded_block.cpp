@@ -137,6 +137,7 @@ FUZZ_TARGET_INIT(partially_downloaded_block, initialize_pdb)
         assert(fail_check_block);
         break;
     case READ_STATUS_INVALID:
+    case READ_STATUS_UNSUPPORTED:
         break;
     }
 }
