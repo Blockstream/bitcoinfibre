@@ -186,9 +186,13 @@ public:
     template <typename Stream>
     void Serialize(Stream& s) const
     {
-        s << static_cast<std::uint8_t>(codec_version);
+        s << Using<CustomUintFormatter<1>>(codec_version);
         s << height;
-        s << *(CBlockHeaderAndShortTxIDs*)this;
+        s << ReadWriteAsHelper<CBlockHeaderAndShortTxIDs>(*this);
+        // NOTE: the lengths within the txlens vector are serialized directly
+        // instead of serializing the vector using the VectorFormatter wrapper.
+        // This is a minor optimization to avoid serializing the txlens vector
+        // size, which is the same as the shorttxids vector size.
         for (size_t i = 0; i < txlens.size(); i++)
             s << VARINT(txlens[i]);
     }
@@ -196,11 +200,9 @@ public:
     template <typename Stream>
     void Unserialize(Stream& s)
     {
-        uint8_t codec_version_u8;
-        s >> codec_version_u8;
-        codec_version = static_cast<codec_version_t>(codec_version_u8);
+        s >> Using<CustomUintFormatter<1>>(codec_version);
         s >> height;
-        s >> *static_cast<CBlockHeaderAndShortTxIDs*>(this);
+        s >> ReadWriteAsHelper<CBlockHeaderAndShortTxIDs>(*this);
         txlens.clear();
         txlens.reserve(shorttxids.size());
         for (size_t i = 0; i < shorttxids.size(); i++) {
