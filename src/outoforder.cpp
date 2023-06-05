@@ -111,10 +111,11 @@ void ProcessSuccessorOoOBlocks(ChainstateManager& chainman, const Consensus::Par
         for (const auto& successor : successors) {
             std::shared_ptr<CBlock> pblock = std::make_shared<CBlock>();
             CBlock& block = *pblock;
+            LogPrintf("Accepting deferred block %s from out-of-order disk cache\n", block.GetHash().GetHex());
             if (!node::ReadBlockFromDisk(block, successor.second, consensusParams)) {
+                LogPrintf("Failed while reading block %s from disk\n", block.GetHash().GetHex());
                 continue;
             }
-            LogPrintf("Accepting deferred block %s from out-of-order disk cache\n", block.GetHash().GetHex());
             chainman.ProcessNewBlock(pblock, force, /*min_pow_checked=*/true, /*is new block?=*/nullptr, &successor.second, /*do_ooob=*/false);
             queue.push_back(pblock->GetHash());
         }
