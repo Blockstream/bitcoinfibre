@@ -210,11 +210,8 @@ rpm-packages:
   parallel:
     matrix:
       - TARGET: [
-        "alma+epel-8-x86_64",
-        "fedora-34-x86_64",
-        "fedora-34-i386",
-        "fedora-35-x86_64",
-        "fedora-35-i386"
+          "fedora-37-x86_64",
+          "fedora-38-x86_64",
         ]
   script:
     - blocksat-build -p bitcoin-satellite $CI_COMMIT_TAG --mock --mock-target $TARGET
