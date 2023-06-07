@@ -1,8 +1,7 @@
 Bitcoin Satellite 0.2.4 Release Notes
 ====================
 
-Bitcoin Satellite version 0.2.4 is now available. This release updates the
-underlying Bitcoin Core version to 23.0.
+Bitcoin Satellite version 0.2.4 based on Bitcoin Core version 25.0 is now available.
 
 Please report bugs using the issue tracker:
 
@@ -16,12 +15,7 @@ Alternatively, contact us at:
 How to Upgrade
 ==============
 
-The easiest way to upgrade is by using
-[`blocksat-cli`](https://blockstream.github.io/satellite/doc/quick-reference.html),
-the Blockstream Satellite command-line interface (CLI). Assuming you already
-have it
-[installed](https://blockstream.github.io/satellite/doc/quick-reference.html#cli-installation-and-upgrade),
-run:
+The easiest way to upgrade is by using [`blocksat-cli`](https://blockstream.github.io/satellite/doc/quick-reference.html), the Blockstream Satellite command-line interface (CLI). Assuming you already have it [installed](https://blockstream.github.io/satellite/doc/quick-reference.html#cli-installation-and-upgrade), run the following:
 
 ```
 blocksat-cli deps update --btc
@@ -70,20 +64,17 @@ yum upgrade bitcoin-satellite
 Compatibility
 ==============
 
-Bitcoin Satellite 0.2.4 is supported and tested on the following Linux
-distributions:
+Bitcoin Satellite 0.2.4 is supported and tested on the following Linux distributions:
 
 - Ubuntu LTS (20.04 and 22.04).
-- Fedora (34 and 35).
+- Fedora (37 and 38).
 - Debian (10 and 11).
 - Raspberry Pi OS 11.
-- CentOS 8.
 
 Bitcoin Core Version
 ==============
 
-Bitcoin Satellite is a fork of Bitcoin Core. This specific release (version
-0.2.4) is based on Bitcoin Core 23.0.
+Bitcoin Satellite is a fork of Bitcoin Core. This release (version 0.2.4) is available under Bitcoin Core versions 25.0 and 23.0.
 
 0.2.4 Changelog
 =================
