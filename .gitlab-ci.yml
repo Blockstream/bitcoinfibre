@@ -96,6 +96,7 @@ build:x86:clang:
   artifacts:
     paths:
       - build/src/test/test_bitcoin
+      - build/src/bench/bench_bitcoin
     expire_in: 10 minutes
 
 build:aarch64:
@@ -127,6 +128,7 @@ test:aarch64:
     - build:aarch64
   script:
     - qemu-aarch64 -L /usr/aarch64-linux-gnu build/src/test/test_bitcoin
+    - qemu-aarch64 -L /usr/aarch64-linux-gnu build/src/bench/bench_bitcoin -sanity-check -priority-level=high
 
 test:armhf:
   extends: .test:cross
@@ -134,6 +136,7 @@ test:armhf:
     - build:armhf
   script:
     - qemu-arm -L /usr/arm-linux-gnueabihf build/src/test/test_bitcoin
+    - qemu-arm -L /usr/arm-linux-gnueabihf build/src/bench/bench_bitcoin -sanity-check -priority-level=high
 
 test:i686:
   extends: .test:cross
@@ -142,6 +145,7 @@ test:i686:
     - build:i686
   script:
     - build/src/test/test_bitcoin
+    - build/src/bench/bench_bitcoin -sanity-check -priority-level=high
 
 .pkg-build:
   stage: build
