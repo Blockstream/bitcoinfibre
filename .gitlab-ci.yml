@@ -288,7 +288,7 @@ launchpad:
   tags:
     - deb-packer
   script:
-    - blocksat-build -p bitcoin-satellite --upload $CI_COMMIT_TAG
+    - blocksat-build -p bitcoin-satellite --upload $CI_COMMIT_TAG --launchpad-target jammy focal
 
 copr:
   extends: .pkg-upload
@@ -296,4 +296,4 @@ copr:
     - rpm-packer
   script:
     - sed -i "/\"epel-7-x86_64\",/d" /src/blocksat-packages/config/build_info.json
-    - blocksat-build -p bitcoin-satellite --upload $CI_COMMIT_TAG
+    - blocksat-build -p bitcoin-satellite --upload $CI_COMMIT_TAG --mock-target fedora-38-x86_64 fedora-37-x86_64
