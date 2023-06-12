@@ -42,7 +42,7 @@ builders:
 .build:
   stage: build
   tags:
-    - k8s
+    - cloud
   variables:
     CCACHE_DIR: $CI_PROJECT_DIR/.ccache/
   cache:
@@ -120,7 +120,7 @@ build:i686:
   image: $ARM_BUILDER
   stage: test
   tags:
-    - k8s
+    - cloud
 
 test:aarch64:
   extends: .test:cross
